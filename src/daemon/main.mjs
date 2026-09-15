@@ -53,12 +53,29 @@ function pidAlive(pid) {
 }
 
 /**
+ * ps の command 文字列が、いま conductord を走らせているプロセスを指しているか。
+ * package.json の bin(`conductord` という名前の symlink)から起動すると、command は
+ * `/usr/bin/env node …/conductord` になり `conductord.mjs` を含まない(実測)。
+ * 空白で区切った語のどれかの basename が `conductord` か `conductord.mjs` であれば、そうとみなす。
+ * @param {string} command @returns {boolean}
+ */
+export function commandLooksLikeConductord(command) {
+  return command
+    .trim()
+    .split(/\s+/)
+    .some((word) => {
+      const base = word.split('/').pop() ?? word;
+      return base === 'conductord' || base === 'conductord.mjs';
+    });
+}
+
+/**
  * 持ち主の pid が、いま conductord として走っているか(pid の使い回しに備える。I1)。
  * @param {number} pid @returns {boolean}
  */
 function isConductordProcess(pid) {
   try {
-    return execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).includes('conductord.mjs');
+    return commandLooksLikeConductord(execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }));
   } catch {
     return false;
   }

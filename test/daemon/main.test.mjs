@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { acquireLock, capacityFrom, defaultReserve, lockCapsFrom } from '../../src/daemon/main.mjs';
+import { acquireLock, capacityFrom, commandLooksLikeConductord, defaultReserve, lockCapsFrom } from '../../src/daemon/main.mjs';
 import { tempHome } from '../../testkit/tmp.mjs';
 
 describe('daemon main', () => {
@@ -31,6 +31,13 @@ describe('daemon main', () => {
     assert.equal(acquireLock(file, 333, () => false, () => true), true);
     writeFileSync(file, 'garbage');
     assert.equal(acquireLock(file, 444, () => true, () => true), true);
+  });
+
+  it('command の語のどれかの basename が conductord/conductord.mjs なら conductord とみなす(R3)', () => {
+    assert.equal(commandLooksLikeConductord('node /x/bin/conductord.mjs'), true);
+    assert.equal(commandLooksLikeConductord('/usr/bin/env node /x/node_modules/.bin/conductord'), true);
+    assert.equal(commandLooksLikeConductord('node /x/other.mjs'), false);
+    assert.equal(commandLooksLikeConductord('vim notes-about-conductord.txt'), false);
   });
 
   it('持ち主の pid が生きていても conductord でなければ、使い回された pid として取り直せる(I1)', () => {
