@@ -200,6 +200,47 @@ const SUITES = {
       },
     ],
   },
+  hooks: {
+    tests: ['test/hooks/pretooluse.test.mjs'],
+    mutations: [
+      {
+        name: 'H1 既に背景でも書き換える',
+        file: 'src/hooks/pretooluse.mjs',
+        from: 'if (heavy && ti.run_in_background !== true) {',
+        to: 'if (heavy) {',
+      },
+      {
+        name: 'H2 背景への書き換えに allow を付ける(権限の確認を飛ばす)',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "return { hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { ...ti, run_in_background: true } } };",
+        to: "return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput: { ...ti, run_in_background: true } } };",
+      },
+      {
+        name: 'H3 shim を通らない形を拒否しない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: 'if (!SHIM_WORDS.includes(head)) unshimmed.push(seg);',
+        to: '',
+      },
+      {
+        name: 'H4 timeout の値を読み飛ばさない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "while (i < words.length && words[i].startsWith('-')) i += words[i] === '-s' || words[i] === '-k' ? 2 : 1;\n      i += 1;",
+        to: '',
+      },
+      {
+        name: 'H5 conductor run を含むコマンドも判定する',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "&& p.rest[0] === 'run')) return null;",
+        to: "&& p.rest[0] === 'never')) return null;",
+      },
+      {
+        name: 'H6 考える層の中でも判定する',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "if (env.CONDUCTOR_THINKER === '1') return null;",
+        to: '',
+      },
+    ],
+  },
   group: {
     tests: ['test/run/group.test.mjs'],
     mutations: [
