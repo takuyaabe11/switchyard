@@ -122,6 +122,38 @@ describe('daemon server', () => {
     assert.deepEqual(d.getState().unacked.sH?.map((u) => [u.jobId, u.kind]), [[acc.jobId, 'lost']]);
   });
 
+  it('長く待ったジョブは、grant の直後に started が tick をまたいで遅れても、心拍の途絶と判定されない(C1)', async () => {
+    const { d } = await daemon({ heartbeatTimeoutMs: 150, isAlive: () => false });
+    const a = await client(d.sock);
+    a.send({ t: 'request', job: jobRequest({ session: 'sA', locks: ['port:4173'] }) });
+    const accA = await a.next((m) => m.t === 'accepted');
+    await a.next((m) => m.t === 'grant');
+    a.send({ t: 'started', jobId: accA.jobId, pid: 1, pgid: null });
+    const b = await client(d.sock);
+    b.send({ t: 'request', job: jobRequest({ session: 'sB', locks: ['port:4173'] }) });
+    const accB = await b.next((m) => m.t === 'accepted');
+    await b.next((m) => m.t === 'queued');
+    // A は心拍を送り続けて自分のリースを保つ(待っている B は、実装どおり心拍を送らない)
+    const hb = setInterval(() => a.send({ t: 'hb', jobId: accA.jobId }), 30);
+    await new Promise((r) => setTimeout(r, 400));
+    clearInterval(hb);
+    a.send({ t: 'exit', jobId: accA.jobId, code: 0, killedByCaller: false, durationMs: 1 });
+    await a.next((m) => m.t === 'ok');
+    await b.next((m) => m.t === 'grant');
+    // 包みが子を起動して pgid を確かめる実際の遅れ(ps を同期に呼ぶ)を模す。tick(20ms)を複数またぐ
+    await new Promise((r) => setTimeout(r, 60));
+    b.send({ t: 'started', jobId: accB.jobId, pid: 2, pgid: null });
+    const c = await client(d.sock);
+    c.send({ t: 'request', job: jobRequest({ session: 'sC', locks: ['port:4173'] }) });
+    await c.next((m) => m.t === 'accepted');
+    await c.next((m) => m.t === 'queued');
+    // B は started の後は(このテストでは)心拍を送らないので、B 自身の自然な途絶(started から heartbeatTimeoutMs 後)より
+    // 十分短い窓で確かめる(長く待つと、この確認自体が別の理由で赤くなる)
+    await assert.rejects(c.next((m) => m.t === 'grant', 80), /来ない/);
+    assert.deepEqual(d.getState().leases.map((l) => l.job.id), [accB.jobId]);
+    assert.equal((d.getState().unacked.sB ?? []).some((u) => u.kind === 'lost'), false);
+  });
+
   it('再起動の後、戻ってきた包みはリースを取り戻し、戻らない包みの分は猶予の後に返す', async () => {
     const home = tempHome();
     const first = await startDaemon({ home, capacity: 4, tickMs: 20 });

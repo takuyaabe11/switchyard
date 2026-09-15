@@ -116,8 +116,12 @@ export async function startDaemon(opts) {
     }
     const conn = wrappers.get(a.jobId);
     if (conn === undefined) return;
-    if (a.type === 'grant') send(conn, { t: 'grant', jobId: a.jobId, cpus: a.cpus });
-    else send(conn, { t: 'queued', jobId: a.jobId, position: a.position, reason: a.reason, etaWall: a.etaAt === null ? null : wallNow() + (a.etaAt - monoNow()) });
+    if (a.type === 'grant') {
+      // grant を送った時点を心拍とみなす(声を聞いたのと同じ扱い)。
+      // 待っている包みは心拍を送らないので、更新しないと grant から started までの間に途絶の判定へ落ちる
+      lastHeard.set(a.jobId, monoNow());
+      send(conn, { t: 'grant', jobId: a.jobId, cpus: a.cpus });
+    } else send(conn, { t: 'queued', jobId: a.jobId, position: a.position, reason: a.reason, etaWall: a.etaAt === null ? null : wallNow() + (a.etaAt - monoNow()) });
   };
 
   /** @param {Event} e */
