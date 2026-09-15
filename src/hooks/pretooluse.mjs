@@ -1,26 +1,40 @@
 // @ts-check
 // PreToolUse(Bash)の判定(設計 §9.2)。hook の標準入力の JSON を受け、出力の JSON を返す(何もしないなら null)。
+//   - 背景への書き換え: PATH の shim か conductor run の包みが CPU を持つ走行(batch / measure)を起こす部分があれば、run_in_background だけを true にする。
+//     コマンドの文字列は変えないので権限の判定に影響しない。だから判定は広めに取る(bash -c の中・( … )・$( … )・conductor run の `--` の後ろも見る)
+//   - 拒否: shim を迂回して管理対象を起動する部分(パスで直に呼ぶ・shim の無い語で、当たった glob がその語で始まる)だけ。
+//     読むだけのコマンド(cat benchmarks/x・grep measure など)は、glob が語の途中に当たっても拒否しない
 import { basename } from 'node:path';
+import { parseArgs } from '../cli/args.mjs';
 import { repoRoot } from '../config/context.mjs';
-import { classify, loadProfiles, segments } from '../config/profiles.mjs';
+import { classify, globMatch, loadProfiles } from '../config/profiles.mjs';
 import { GIT_LOCK_SUBCOMMANDS } from '../shim/decide.mjs';
+import { simpleCommands } from './shell.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
+/** @typedef {import('../core/types.mjs').JobClass} JobClass */
+/** @typedef {import('../run/run.mjs').RunFlags} RunFlags */
 
 /** shim を置く語(設計 §9.1)。shims/ の実物と同じ 8 語 */
 export const SHIM_WORDS = ['npm', 'npx', 'node', 'cargo', 'pytest', 'go', 'make', 'git'];
 
+/** `-c 文字列` の文字列をコマンドとして走らせるシェル */
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
+/** 後ろにコマンドが続くシェルの予約語 */
+const RESERVED = new Set(['!', '{', 'if', 'then', 'elif', 'else', 'do', 'while', 'until']);
+/** env の、値の語を取るオプション(GNU と BSD) */
+const ENV_VALUE_OPTIONS = new Set(['-u', '--unset', '-C', '--chdir', '-P', '-S', '--split-string']);
+
 /**
- * 部分(§4.5 の区切りの 1 つ)の先頭の語と、それより後ろの語。
- * VAR=値 と、env / timeout N / nice [-n N] / time / nohup / command を読み飛ばす。
- * @param {string} segment @returns {{ head: string, rest: string[] }}
+ * 単純コマンドの語の列の、先頭の語とそれより後ろの語。
+ * VAR=値・予約語(if / then / do など)と、env [-u NAME などのオプション] / timeout [オプション] N / nice [-n N] / time / nohup / command を読み飛ばす。
+ * @param {string[]} words @returns {{ head: string, rest: string[] }}
  */
-export function headWord(segment) {
-  const words = segment.split(' ').filter((w) => w !== '');
+function headOf(words) {
   let i = 0;
   while (i < words.length) {
     const w = words[i];
-    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w)) {
+    if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) || RESERVED.has(w)) {
       i += 1;
     } else if (w === 'timeout') {
       // timeout [オプション] 時間 コマンド
@@ -31,7 +45,11 @@ export function headWord(segment) {
       i += 1;
       if (words[i] === '-n') i += 2;
       else if (/^-[0-9]+$/.test(words[i] ?? '')) i += 1;
-    } else if (w === 'env' || w === 'time' || w === 'nohup' || w === 'command') {
+    } else if (w === 'env') {
+      // env [オプション] [NAME=値]... コマンド。-u NAME などは値の語も飛ばす(NAME=値 は上の枝が飛ばす)
+      i += 1;
+      while (i < words.length && words[i].startsWith('-')) i += ENV_VALUE_OPTIONS.has(words[i]) ? 2 : 1;
+    } else if (w === 'time' || w === 'nohup' || w === 'command') {
       i += 1;
       while (i < words.length && words[i].startsWith('-')) i += 1;
     } else {
@@ -39,6 +57,65 @@ export function headWord(segment) {
     }
   }
   return { head: words[i] ?? '', rest: words.slice(i + 1) };
+}
+
+/**
+ * 空白で区切った部分の、先頭の語とそれより後ろの語(読み飛ばす語は headOf と同じ)。
+ * @param {string} segment @returns {{ head: string, rest: string[] }}
+ */
+export function headWord(segment) {
+  return headOf(segment.split(' ').filter((w) => w !== ''));
+}
+
+/** glob の先頭の字句(先頭の * を除いた最初の語の、ワイルドカードより前) @param {string} glob @returns {string} */
+function leadWord(glob) {
+  const first = glob.replace(/^\*+/, '').split(' ')[0];
+  const cut = first.search(/[*?]/);
+  return cut < 0 ? first : first.slice(0, cut);
+}
+
+/**
+ * sh / bash などの `-c 文字列` の文字列(`-lc` のようにまとめたオプションも見る)。スクリプトのファイルを走らせる形なら null。
+ * @param {string[]} rest @returns {string | null}
+ */
+function shellScript(rest) {
+  for (let i = 0; i < rest.length; i += 1) {
+    const w = rest[i];
+    if (/^-[A-Za-z]*c[A-Za-z]*$/.test(w)) return rest[i + 1] ?? null;
+    if (/^[-+][A-Za-z]*o$/.test(w)) i += 1;
+    else if (!/^[-+]/.test(w)) return null;
+  }
+  return null;
+}
+
+/**
+ * conductor run の部分なら、`run` より後ろの引数。`conductor` / `conductor.mjs` をどこから呼んでも、`node …/conductor.mjs run` でも同じ。
+ * @param {string} head @param {string[]} rest @returns {string[] | null}
+ */
+function conductorRunArgs(head, rest) {
+  const base = basename(head);
+  if ((base === 'conductor' || base === 'conductor.mjs') && rest[0] === 'run') return rest.slice(1);
+  if (base === 'node' && basename(rest[0] ?? '') === 'conductor.mjs' && rest[1] === 'run') return rest.slice(2);
+  return null;
+}
+
+/**
+ * conductor run の包みが要求する性格と、`--` の後ろの語。buildRequest と同じ順(--class → --profile → `--` の後ろの分類 → batch)で決める。
+ * 引数が読めなければ `--` の後ろだけを見る(背景への判定は広めでよい)。
+ * @param {string[]} args @param {NamedProfile[]} profiles @returns {{ jobClass: JobClass, argv: string[] }}
+ */
+function wrapperOf(args, profiles) {
+  /** @type {RunFlags} */
+  let flags = {};
+  let argv = args.includes('--') ? args.slice(args.indexOf('--') + 1) : [];
+  try {
+    const parsed = parseArgs(['run', ...args]);
+    if (parsed.cmd === 'run') ({ flags, argv } = parsed);
+  } catch {
+    // 使い方の誤りで包みは走らないが、`--` の後ろで判定しておく
+  }
+  const named = flags.profile !== undefined ? (profiles.find((p) => p.name === flags.profile) ?? null) : classify(argv.join(' '), profiles);
+  return { jobClass: flags.class ?? named?.profile.class ?? 'batch', argv };
 }
 
 /**
@@ -51,21 +128,57 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
   if (input.tool_name !== 'Bash') return null;
   const ti = /** @type {Record<string, unknown>} */ (typeof input.tool_input === 'object' && input.tool_input !== null ? input.tool_input : {});
   const command = typeof ti.command === 'string' ? ti.command : '';
-  const parts = segments(command).map((seg) => ({ seg, ...headWord(seg) }));
-  // 明示的に conductor run で包んだコマンドは、書いた人の意図どおりに通す
-  if (parts.some((p) => (basename(p.head) === 'conductor' || basename(p.head) === 'conductor.mjs') && p.rest[0] === 'run')) return null;
-
   const profiles = profilesFor(typeof input.cwd === 'string' ? input.cwd : process.cwd());
-  let heavy = false;
+  const found = { heavy: false };
   /** @type {string[]} */
   const unshimmed = [];
-  for (const { seg, head, rest } of parts) {
-    const gitLock = basename(head) === 'git' && GIT_LOCK_SUBCOMMANDS.has(rest[0] ?? '');
-    const hit = classify([head, ...rest].join(' '), profiles) ?? classify(seg, profiles);
-    if (hit === null && !gitLock) continue;
-    if (!SHIM_WORDS.includes(head)) unshimmed.push(seg);
-    if (hit !== null && hit.profile.class !== 'quick') heavy = true;
-  }
+
+  /**
+   * 単純コマンド 1 つを判定する。
+   * @param {string[]} words @param {boolean} wrapped conductor run で包んだ中(拒否の判定にかけない)
+   */
+  const visit = (words, wrapped) => {
+    const { head, rest } = headOf(words);
+    if (head === '') return;
+    const base = basename(head);
+    const text = [head, ...rest].join(' ');
+    // bash -c "…" / sh -c '…': 引用の中の npm なども PATH の shim を通るので、中を単純コマンドとして見る
+    if (SHELLS.has(base)) {
+      const script = shellScript(rest);
+      if (script !== null) {
+        for (const inner of simpleCommands(script)) visit(inner, wrapped);
+        return;
+      }
+    }
+    // conductor run で包んだ部分: 書いた人が包んだので拒否しない(包んだコマンドには普段どおり権限の確認が出る)。
+    // 背景への判定は、包みが要求する性格と、中で PATH の shim が包むもので行う
+    const run = conductorRunArgs(head, rest);
+    if (run !== null) {
+      const w = wrapperOf(run, profiles);
+      if (w.jobClass !== 'quick') found.heavy = true;
+      visit(w.argv, true);
+      return;
+    }
+    // git は profile で分類しない。shim と同じく、index を書き換えるサブコマンドだけが鍵だけのジョブになる(CPU を持たないので前景のまま)
+    if (base === 'git') {
+      if (head !== 'git' && !wrapped && GIT_LOCK_SUBCOMMANDS.has(rest[0] ?? '')) unshimmed.push(text);
+      return;
+    }
+    const pathHead = head.includes('/');
+    const hit = classify(text, profiles) ?? (pathHead ? classify([base, ...rest].join(' '), profiles) : null);
+    if (hit === null) return;
+    if (SHIM_WORDS.includes(head)) {
+      // PATH の shim が同じ文字列を分類して包む
+      if (hit.profile.class !== 'quick') found.heavy = true;
+      return;
+    }
+    // shim の無い語で当たった部分のうち、shim を迂回して管理対象を起動する形だけを拒否する: パスで直に呼ぶか、当たった glob がその語で始まる。
+    // cat benchmarks/x・grep measure のように glob が語の途中に当たっただけの部分は、管理対象を起動しない
+    const bypass = pathHead || profiles.some((np) => np.profile.match.some((g) => leadWord(g) === head && globMatch(g, text)));
+    if (bypass && !wrapped) unshimmed.push(text);
+  };
+
+  for (const words of simpleCommands(command)) visit(words, false);
 
   if (unshimmed.length > 0) {
     return {
@@ -73,12 +186,12 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
         hookEventName: 'PreToolUse',
         permissionDecision: 'deny',
         permissionDecisionReason:
-          `[conductor] 重いコマンドとして管理される部分が、shim(${SHIM_WORDS.join(' / ')})を通らない形になっている: ${unshimmed.join(' / ')}。` +
+          `[conductor] 管理対象のコマンドを、shim(${SHIM_WORDS.join(' / ')})を迂回して起動する部分がある(パスで直に呼ぶ形か、shim の無い語): ${unshimmed.join(' / ')}。` +
           'PATH から呼べる形(例: npx vitest run)に書き直すか、`conductor run -- <その部分>` で包んでから実行する(包んだコマンドには普段どおり権限の確認が出る)。',
       },
     };
   }
-  if (heavy && ti.run_in_background !== true) {
+  if (found.heavy && ti.run_in_background !== true) {
     // 決定(permissionDecision)は付けない。allow は権限の確認を飛ばすので使わない(設計 §12)
     return { hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { ...ti, run_in_background: true } } };
   }

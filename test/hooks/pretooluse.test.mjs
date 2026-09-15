@@ -24,6 +24,13 @@ describe('headWord', () => {
     assert.equal(headWord('env -i A=1 node x.mjs').head, 'node');
     assert.deepEqual(headWord('nohup ./node_modules/.bin/vitest run'), { head: './node_modules/.bin/vitest', rest: ['run'] });
   });
+
+  it('env の値つきのオプション(-u NAME・-C DIR など)は値の語も読み飛ばし、time / command のオプションも読み飛ばす', () => {
+    assert.deepEqual(headWord('env -u FOO npm test'), { head: 'npm', rest: ['test'] });
+    assert.equal(headWord('env -u FOO -C sub BAR=1 npm test').head, 'npm');
+    assert.equal(headWord('time -p npm test').head, 'npm');
+    assert.equal(headWord('command npm test').head, 'npm');
+  });
 });
 
 describe('preToolUse(設計 §9.2)', () => {
@@ -68,8 +75,10 @@ describe('preToolUse(設計 §9.2)', () => {
     assert.equal(/** @type {any} */ (preToolUse(bash('npm test && ./node_modules/.bin/vitest run'), opts)).hookSpecificOutput.permissionDecision, 'deny');
   });
 
-  it('conductor run を含むコマンドは素通しする', () => {
-    assert.equal(preToolUse(bash('conductor run -- ./node_modules/.bin/vitest run'), opts), null);
+  it('conductor run で包んだ部分は拒否しない。背景への判定は包みが要求する性格で行う', () => {
+    assert.equal(preToolUse(bash('conductor run --class quick -- ./node_modules/.bin/vitest run'), opts), null);
+    const out = /** @type {any} */ (preToolUse(bash('conductor run -- ./node_modules/.bin/vitest run'), opts));
+    assert.deepEqual(out.hookSpecificOutput, { hookEventName: 'PreToolUse', updatedInput: { command: 'conductor run -- ./node_modules/.bin/vitest run', run_in_background: true } });
   });
 
   it('CONDUCTOR_THINKER=1 と Bash 以外では何もしない', () => {
