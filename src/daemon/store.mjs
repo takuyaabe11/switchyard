@@ -1,0 +1,78 @@
+// @ts-check
+// state.json(規則層の状態の正本)と events.jsonl(追記のみの記録)。
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
+import { EstimateBook } from '../core/estimate.mjs';
+
+/** @typedef {import('../core/types.mjs').State} State */
+
+/** 一時ファイルに書いて rename で置き換える(書きかけの state.json を残さない) @param {string} file @param {unknown} value */
+export function writeJsonAtomic(file, value) {
+  mkdirSync(dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(value));
+  renameSync(tmp, file);
+}
+
+/** @param {string} file @returns {unknown} 無い・壊れているときは null */
+export function readJson(file) {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 形を確かめてから State として受け取る。合わなければ null(壊れた状態で動き出さない)。
+ * @param {unknown} v @returns {State | null}
+ */
+export function parseState(v) {
+  if (typeof v !== 'object' || v === null) return null;
+  const o = /** @type {Record<string, unknown>} */ (v);
+  const ok =
+    typeof o.capacity === 'number' &&
+    typeof o.lockCaps === 'object' && o.lockCaps !== null &&
+    Array.isArray(o.waiting) &&
+    Array.isArray(o.leases) &&
+    typeof o.favorNonMeasure === 'boolean' &&
+    typeof o.unacked === 'object' && o.unacked !== null &&
+    typeof o.notes === 'object' && o.notes !== null;
+  return ok ? /** @type {State} */ (v) : null;
+}
+
+/** @param {string} file @param {Record<string, unknown>} record */
+export function appendRecord(file, record) {
+  mkdirSync(dirname(file), { recursive: true });
+  appendFileSync(file, `${JSON.stringify(record)}\n`);
+}
+
+/** @param {string} file @returns {{ records: Record<string, unknown>[], bad: number }} */
+export function readRecords(file) {
+  if (!existsSync(file)) return { records: [], bad: 0 };
+  /** @type {Record<string, unknown>[]} */
+  const records = [];
+  let bad = 0;
+  for (const line of readFileSync(file, 'utf8').split('\n')) {
+    if (line.trim() === '') continue;
+    try {
+      const v = JSON.parse(line);
+      if (typeof v === 'object' && v !== null && !Array.isArray(v)) records.push(v);
+      else bad += 1;
+    } catch {
+      bad += 1;
+    }
+  }
+  return { records, bad };
+}
+
+/** 記録の history 行から所要時間の帳簿を作る @param {Record<string, unknown>[]} records @returns {EstimateBook} */
+export function loadEstimates(records) {
+  const book = new EstimateBook();
+  for (const r of records) {
+    if (r.kind !== 'history') continue;
+    if (typeof r.repo !== 'string' || typeof r.profile !== 'string' || typeof r.durationMs !== 'number') continue;
+    book.record(r.repo, r.profile, r.durationMs, typeof r.code === 'number' ? r.code : null);
+  }
+  return book;
+}
