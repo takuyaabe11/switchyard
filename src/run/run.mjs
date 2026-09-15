@@ -32,7 +32,8 @@ import { createEscapeTracker } from './watch.mjs';
  *   unmanagedAfterMs?: number,
  *   watchMs?: number,
  *   connect?: typeof connectDaemon,
- *   signals?: SignalSource
+ *   signals?: SignalSource,
+ *   verifyGroup?: typeof verifiedGroup
  * }} RunOptions
  */
 
@@ -116,6 +117,7 @@ export function runJob(opts) {
     watchMs = 2_000,
     connect = connectDaemon,
     signals = process,
+    verifyGroup = verifiedGroup,
   } = opts;
   const { job, profile, configError } = buildRequest({ argv, flags, env, cwd });
   if (configError !== null) out(`[conductor] ${configError}(既定表で続ける)`);
@@ -223,7 +225,7 @@ export function runJob(opts) {
         });
       });
       if (c.pid === undefined) return;
-      pgid = verifiedGroup(c.pid, ownPgid);
+      pgid = verifyGroup(c.pid, ownPgid);
       if (pgid === null) {
         out('[conductor] 子のプロセスグループを確かめられないので、グループへの信号は送らない(呼び出し元の終了だけを子に伝える)');
       } else {
