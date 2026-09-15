@@ -14,7 +14,7 @@
     "test": "node --test --test-reporter=spec",
     "typecheck": "tsc -p .",
     "check": "npm run typecheck && npm test",
-    "mutate:core": "node scripts/mutate-core.mjs"
+    "mutate:core": "node scripts/mutate.mjs core"
   },
   "devDependencies": {
     "@types/node": "^26.5.1",
