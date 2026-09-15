@@ -27,7 +27,16 @@ function project() {
   execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
   writeFileSync(
     join(dir, 'conductor.json'),
-    JSON.stringify({ profiles: { vitest: { match: ['*vitest run*'], class: 'batch' }, lint: { match: ['npx eslint*', 'eslint*'], class: 'quick' } } }),
+    JSON.stringify({
+      profiles: {
+        vitest: { match: ['*vitest run*'], class: 'batch' },
+        lint: { match: ['npx eslint*', 'eslint*'], class: 'quick' },
+        // 計測は既定表に無いので、プロジェクトの設定で宣言する(設計 §9.3)
+        bench: { match: ['node benchmarks/*', 'npm run bench*'], class: 'measure' },
+        // node -e のコードの中身で分類しないことを、包みの性格で確かめるための measure
+        suite: { match: ['*measure-suite*'], class: 'measure' },
+      },
+    }),
   );
   return dir;
 }
@@ -74,7 +83,7 @@ const ROWS = [
   { command: 'env -u FOO npm test', shims: [[['npm', 'test'], 'run default:batch']], hook: 'background' },
   { command: 'time npm test', shims: [[['npm', 'test'], 'run default:batch']], hook: 'background' },
   { command: 'command npm test', shims: [[['npm', 'test'], 'run default:batch']], hook: 'background' },
-  { command: 'timeout 600 node benchmarks/run.mjs', shims: [[['node', 'benchmarks/run.mjs'], 'run default:measure']], hook: 'background' },
+  { command: 'timeout 600 node benchmarks/run.mjs', shims: [[['node', 'benchmarks/run.mjs'], 'run bench']], hook: 'background' },
   { command: 'cd sub\nnpm test', shims: [[['npm', 'test'], 'run default:batch']], hook: 'background' },
   { command: 'if npm test; then echo ok; fi', shims: [[['npm', 'test'], 'run default:batch']], hook: 'background' },
   // quick と管理外は前景のまま
@@ -111,19 +120,32 @@ const ROWS = [
     run: [['--lock', 'port:4173', '--', 'npm', 'run', 'bench'], 'measure'],
     hook: 'background',
   },
-  // shim を迂回して管理対象を起動する形は拒否する(パスで直に呼ぶ・当たった glob がその語で始まる)
-  { command: './node_modules/.bin/vitest run', shims: [[['node', './node_modules/.bin/vitest', 'run'], 'run vitest']], hook: 'deny' },
-  { command: './node_modules/.bin/eslint src', shims: [[['node', './node_modules/.bin/eslint', 'src'], 'pass']], hook: 'deny' },
-  { command: 'eslint src', shims: [[['node', '/r/node_modules/.bin/eslint', 'src'], 'pass']], hook: 'deny' },
-  { command: 'scripts/probe-run.sh benchmark', shims: [], hook: 'deny' },
+  // 拒否するのは、shim の語の実行ファイルをパスで直に呼ぶ形だけ(本当に shim を迂回する)
   { command: '/usr/local/bin/npm test', shims: [[['node', '/usr/local/lib/node_modules/npm/bin/npm-cli.js', 'test'], 'pass']], hook: 'deny' },
+  // shim の語でないものをパスで呼ぶ形・shim の無い語は拒否しない(改善 2。IRC の記録で拒否 320 件がすべてこの形だった)。
+  // node_modules/.bin の実行ファイルは #!/usr/bin/env node で node の shim を通り、スクリプトの中の npm も PATH の shim を通る。重ければ背景に回すだけ
+  { command: './node_modules/.bin/vitest run', shims: [[['node', './node_modules/.bin/vitest', 'run'], 'run vitest']], hook: 'background' },
+  { command: './node_modules/.bin/eslint src', shims: [[['node', './node_modules/.bin/eslint', 'src'], 'pass']], hook: null },
+  { command: 'eslint src', shims: [[['node', '/r/node_modules/.bin/eslint', 'src'], 'pass']], hook: null },
+  { command: 'scripts/probe-run.sh benchmark', shims: [], hook: null },
+  { command: 'scripts/probe-run.sh gates npm run bench', shims: [[['npm', 'run', 'bench'], 'run bench']], hook: 'background' },
+  { command: './jc.sh https://example.com/cross-media-measurement', shims: [], hook: null },
   {
     command: 'npm test && ./node_modules/.bin/vitest run',
     shims: [
       [['npm', 'test'], 'run default:batch'],
       [['node', './node_modules/.bin/vitest', 'run'], 'run vitest'],
     ],
-    hook: 'deny',
+    hook: 'background',
+  },
+  // 計測はプロジェクトの設定だけが決める(既定表に measure は無い)。node -e のコードの中身では分類しない(改善 2)
+  { command: 'npm run bench', shims: [[['npm', 'run', 'bench'], 'run bench']], hook: 'background' },
+  { command: 'node -e \'console.log("vitest run")\'', shims: [[['node', '-e', 'console.log("vitest run")'], 'pass']], hook: null },
+  {
+    command: 'conductor run -- node -e \'console.log("measure-suite")\'',
+    shims: [[['node', CLI, 'run', '--', 'node', '-e', 'console.log("measure-suite")'], 'pass']],
+    run: [['--', 'node', '-e', 'console.log("measure-suite")'], 'batch'],
+    hook: 'background',
   },
 ];
 

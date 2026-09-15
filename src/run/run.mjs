@@ -6,7 +6,7 @@ import { UsageError } from '../cli/args.mjs';
 import { channel, connectDaemon, DaemonUnavailableError } from '../client/connect.mjs';
 import { sessionId } from '../client/session.mjs';
 import { heldLocks, repoRoot } from '../config/context.mjs';
-import { applyTemplate, classify, loadProfiles } from '../config/profiles.mjs';
+import { applyTemplate, classifiableCommand, classify, loadProfiles } from '../config/profiles.mjs';
 import { pathsOf } from '../daemon/paths.mjs';
 import { appendRecord } from '../daemon/store.mjs';
 import { readPgid, signalGroup, spawnInOwnGroup, verifiedGroup, waitGroupGone } from './group.mjs';
@@ -61,7 +61,7 @@ export function buildRequest({ argv, flags, env, cwd }) {
   const repo = repoRoot(cwd);
   const { profiles, error } = loadProfiles(repo);
   const cmd = argv.join(' ');
-  const named = flags.profile !== undefined ? profiles.find((p) => p.name === flags.profile) ?? null : classify(cmd, profiles);
+  const named = flags.profile !== undefined ? profiles.find((p) => p.name === flags.profile) ?? null : classify(classifiableCommand(argv), profiles);
   if (flags.profile !== undefined && named === null) throw new Error(`profile ${flags.profile} が見つからない`);
   const base = named === null ? null : named.profile;
   const held = heldLocks(env);

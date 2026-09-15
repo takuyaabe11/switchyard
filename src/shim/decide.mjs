@@ -9,7 +9,7 @@ import { realpathSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { heldLocks, repoRoot } from '../config/context.mjs';
-import { classify, loadProfiles } from '../config/profiles.mjs';
+import { classifiableCommand, classify, loadProfiles } from '../config/profiles.mjs';
 
 /** git の index を書き換えるサブコマンド(設計 §9.1) */
 export const GIT_LOCK_SUBCOMMANDS = new Set(['commit', 'merge', 'rebase', 'cherry-pick', 'stash', 'am']);
@@ -64,7 +64,7 @@ export function decideShim({ word, args, cwd, env, gitDir = absoluteGitDir, prof
     // 祖先が同じ鍵を持っていれば待たない(git commit の中の git stash)
     return heldLocks(env).has(lock) ? { kind: 'pass' } : { kind: 'lock', lock };
   }
-  const named = classify([word, ...args].join(' '), profilesFor(cwd));
+  const named = classify(classifiableCommand([word, ...args]), profilesFor(cwd));
   return named === null ? { kind: 'pass' } : { kind: 'run', profile: named.name };
 }
 

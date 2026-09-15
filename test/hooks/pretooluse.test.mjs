@@ -8,12 +8,21 @@ import { headWord, preToolUse } from '../../src/hooks/pretooluse.mjs';
 const PROFILES = [
   { name: 'vitest', profile: { match: ['*vitest run*'], class: 'batch' } },
   { name: 'lint', profile: { match: ['npx eslint*'], class: 'quick' } },
+  // 計測は既定表に無いので、プロジェクトの設定で宣言する(設計 §9.3)
+  { name: 'bench', profile: { match: ['node benchmarks/*', 'npm run bench*'], class: 'measure' } },
   ...DEFAULT_PROFILES,
 ];
 const opts = { env: {}, profilesFor: () => PROFILES };
 
 /** @param {string} command @param {Record<string, unknown>} [extra] */
 const bash = (command, extra = {}) => ({ session_id: 's', cwd: '/repo', hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command, ...extra } });
+
+/** @param {Record<string, unknown> | null} out @returns {'background' | 'deny' | null} */
+function outcome(out) {
+  if (out === null) return null;
+  const h = /** @type {Record<string, unknown>} */ (out.hookSpecificOutput);
+  return h.permissionDecision === 'deny' ? 'deny' : 'background';
+}
 
 describe('headWord', () => {
   it('VAR=値 と包みのコマンドを読み飛ばして先頭の語を取る', () => {
@@ -59,10 +68,16 @@ describe('preToolUse(設計 §9.2)', () => {
     assert.equal(out.hookSpecificOutput.updatedInput.run_in_background, true);
   });
 
-  it('管理対象なのに shim を通らない形は拒否し、直し方を示す', () => {
-    const out = /** @type {any} */ (preToolUse(bash('./node_modules/.bin/vitest run'), opts));
+  it('node -e のコードの中身では分類しない(読むだけのその場のスクリプトを背景に回さない)', () => {
+    assert.equal(preToolUse(bash('node -e \'console.log("vitest run")\''), opts), null);
+    assert.equal(preToolUse(bash('node --input-type=module -e \'import "./benchmarks/x.mjs"\''), opts), null);
+  });
+
+  it('shim の語の実行ファイルをパスで直に呼ぶ形は拒否し、直し方を示す', () => {
+    const out = /** @type {any} */ (preToolUse(bash('/usr/local/bin/npm test'), opts));
     assert.equal(out.hookSpecificOutput.permissionDecision, 'deny');
-    assert.match(out.hookSpecificOutput.permissionDecisionReason, /\.\/node_modules\/\.bin\/vitest run/);
+    assert.match(out.hookSpecificOutput.permissionDecisionReason, /\/usr\/local\/bin\/npm test/);
+    assert.match(out.hookSpecificOutput.permissionDecisionReason, /パスを付けずに名前で呼ぶ/);
     assert.match(out.hookSpecificOutput.permissionDecisionReason, /conductor run -- <その部分>/);
   });
 
@@ -71,18 +86,33 @@ describe('preToolUse(設計 §9.2)', () => {
     assert.equal(preToolUse(bash('git commit -m x'), opts), null);
   });
 
+  it('shim の語でないものをパスで呼ぶ形・shim の無い語は拒否しない。重ければ背景に回すだけ', () => {
+    // node_modules/.bin の実行ファイルは #!/usr/bin/env node で node の shim を通る
+    assert.equal(outcome(preToolUse(bash('./node_modules/.bin/vitest run'), opts)), 'background');
+    assert.equal(outcome(preToolUse(bash('vitest run'), opts)), 'background');
+    // 中で PATH の npm を呼ぶスクリプト: 引数の中の shim の語から後ろを見る
+    assert.equal(outcome(preToolUse(bash('scripts/probe-run.sh gates npm run bench'), opts)), 'background');
+    assert.equal(outcome(preToolUse(bash('scripts/probe-run.sh gates bash -c "npm test"'), opts)), 'background');
+    // 引数に measure などを含むだけのスクリプトは何もしない
+    assert.equal(preToolUse(bash('./jc.sh https://example.com/cross-media-measurement'), opts), null);
+    assert.equal(preToolUse(bash('scripts/probe-run.sh benchmark'), opts), null);
+    // パスで呼ぶのでなければ、引数の中の語は見ない
+    assert.equal(preToolUse(bash('echo npm test'), opts), null);
+  });
+
   it('拒否は背景への書き換えより先に効く', () => {
-    assert.equal(/** @type {any} */ (preToolUse(bash('npm test && ./node_modules/.bin/vitest run'), opts)).hookSpecificOutput.permissionDecision, 'deny');
+    assert.equal(outcome(preToolUse(bash('npm test && /usr/local/bin/npm run build'), opts)), 'deny');
   });
 
   it('conductor run で包んだ部分は拒否しない。背景への判定は包みが要求する性格で行う', () => {
     assert.equal(preToolUse(bash('conductor run --class quick -- ./node_modules/.bin/vitest run'), opts), null);
+    assert.equal(preToolUse(bash('conductor run --class quick -- /usr/local/bin/npm test'), opts), null);
     const out = /** @type {any} */ (preToolUse(bash('conductor run -- ./node_modules/.bin/vitest run'), opts));
     assert.deepEqual(out.hookSpecificOutput, { hookEventName: 'PreToolUse', updatedInput: { command: 'conductor run -- ./node_modules/.bin/vitest run', run_in_background: true } });
   });
 
   it('CONDUCTOR_THINKER=1 と Bash 以外では何もしない', () => {
-    assert.equal(preToolUse(bash('./node_modules/.bin/vitest run'), { ...opts, env: { CONDUCTOR_THINKER: '1' } }), null);
+    assert.equal(preToolUse(bash('/usr/local/bin/npm test'), { ...opts, env: { CONDUCTOR_THINKER: '1' } }), null);
     assert.equal(preToolUse({ ...bash('npm test'), tool_name: 'Read' }, opts), null);
   });
 });

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { applyTemplate, classify, DEFAULT_PROFILES, globMatch, loadProfiles, segments, validateProfile } from '../../src/config/profiles.mjs';
+import { applyTemplate, classifiableCommand, classify, DEFAULT_PROFILES, globMatch, loadProfiles, segments, validateProfile } from '../../src/config/profiles.mjs';
 
 describe('globMatch', () => {
   it('* は任意の文字列、? は 1 文字、全体一致', () => {
@@ -37,6 +37,7 @@ describe('classify', () => {
   const own = [
     { name: 'bench-quick', profile: { match: ['npm run bench:quick'], class: 'quick' } },
     { name: 'e2e', profile: { match: ['npm run e2e*'], class: 'batch', locks: ['port:4173'] } },
+    { name: 'bench', profile: { match: ['npm run benchmark*'], class: 'measure' } },
   ];
   const profiles = [...own, ...DEFAULT_PROFILES];
 
@@ -45,7 +46,7 @@ describe('classify', () => {
   });
 
   it('部分をまたいでは重い class を採る', () => {
-    assert.equal(classify('npm run e2e && npm run benchmark', profiles)?.name, 'default:measure');
+    assert.equal(classify('npm run e2e && npm run benchmark', profiles)?.name, 'bench');
   });
 
   it('どれにも当たらなければ null', () => {
@@ -54,6 +55,34 @@ describe('classify', () => {
 
   it('既定表: npm test は batch', () => {
     assert.equal(classify('npm test', DEFAULT_PROFILES)?.profile.class, 'batch');
+  });
+});
+
+describe('既定表(設計 §9.3)', () => {
+  it('measure を持たない。計測はプロジェクトの設定か --class measure だけが決める(マシンの独占を推測で当てない)', () => {
+    assert.deepEqual(
+      DEFAULT_PROFILES.map((p) => p.profile.class),
+      ['batch'],
+    );
+    assert.equal(classify('npm run benchmark', DEFAULT_PROFILES), null);
+    assert.equal(classify('node benchmarks/run.mjs', DEFAULT_PROFILES), null);
+    assert.equal(classify('cat benchmarks/standards.json', DEFAULT_PROFILES), null);
+  });
+});
+
+describe('classifiableCommand(分類に渡す文字列)', () => {
+  it('node の -e / --eval / -p / --print の値(インラインのコード)を除く', () => {
+    assert.equal(classifiableCommand(['node', '-e', 'require("./benchmarks/standards.json")']), 'node -e');
+    assert.equal(classifiableCommand(['node', '--input-type=module', '-e', 'import "vitest run"', 'arg']), 'node --input-type=module -e arg');
+    assert.equal(classifiableCommand(['node', '--eval=console.log("vitest run")']), 'node --eval');
+    assert.equal(classifiableCommand(['/usr/local/bin/node', '-p', '"measure"']), '/usr/local/bin/node -p');
+    assert.equal(classifiableCommand(['node', '--print', '1', 'x']), 'node --print x');
+  });
+
+  it('node 以外と、スクリプトを走らせる node はそのまま空白でつなぐ', () => {
+    assert.equal(classifiableCommand(['node', 'benchmarks/run.mjs', '-e', 'x']), 'node benchmarks/run.mjs -e x');
+    assert.equal(classifiableCommand(['npm', 'test', '-e', 'x']), 'npm test -e x');
+    assert.equal(classifiableCommand(['npx', 'vitest', 'run']), 'npx vitest run');
   });
 });
 

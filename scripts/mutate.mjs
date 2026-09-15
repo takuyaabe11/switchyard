@@ -251,10 +251,39 @@ const SUITES = {
         to: "return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput: { ...ti, run_in_background: true } } };",
       },
       {
-        name: 'H3 shim を迂回する形を拒否しない',
+        // 改善 2: 拒否するのは shim の語の実行ファイルをパスで直に呼ぶ形(/usr/local/bin/npm test)だけ
+        name: 'H3 shim の語をパスで直に呼ぶ形を拒否しない',
         file: 'src/hooks/pretooluse.mjs',
-        from: 'if (bypass && !wrapped) unshimmed.push(text);',
+        from: '} else if (!wrapped) {',
+        to: '} else if (false) {',
+      },
+      {
+        // 改善 2: 直す前の形。shim の語でないものをパスで呼ぶ形(scripts/probe-run.sh)と shim の無い語も拒否する
+        name: 'H10 shim の語でないものをパスで呼ぶ形・shim の無い語も拒否へ戻す',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "if (!wrapped && hit !== null && launches && hit.profile.class !== 'quick') found.heavy = true;",
+        to: 'if (!wrapped && hit !== null && launches) unshimmed.push(text);',
+      },
+      {
+        // 改善 2: scripts/probe-run.sh gates npm run bench の中の npm は PATH の shim が包むので、背景に回す
+        name: 'H17 パスで呼ぶスクリプトの引数の中の shim の語を見ない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: 'if (at >= 0) visit(rest.slice(at), true);',
         to: '',
+      },
+      {
+        // 改善 2: node -e のコードの中身(benchmarks・vitest run など)で分類する(直す前の形)
+        name: 'H18 node -e のコードの中身で分類する',
+        file: 'src/config/profiles.mjs',
+        from: "if (words.length === 0 || basename(words[0]) !== 'node') return words.join(' ');",
+        to: "return words.join(' ');",
+      },
+      {
+        // 改善 2: 既定表の measure(全文に当たる *bench* / *measure*)を戻す(直す前の形)
+        name: 'H19 既定表に *bench* / *measure* の measure を戻す',
+        file: 'src/config/profiles.mjs',
+        from: 'export const DEFAULT_PROFILES = [\n',
+        to: "export const DEFAULT_PROFILES = [\n  { name: 'default:measure', profile: { match: ['*bench*', '*measure*'], class: 'measure', cpus: { min: 1, max: 1000 } } },\n",
       },
       {
         name: 'H4 timeout の値を読み飛ばさない',
@@ -269,11 +298,11 @@ const SUITES = {
         to: 'visit(w.argv, false);',
       },
       {
-        // C1: 8 語で始まらない部分に分類が当たれば、読むだけのコマンドでも拒否する(直す前の形)
-        name: 'H10 拒否の条件を「shim の無い語で当たれば拒否」へ戻す',
+        // C1(改善 2 で拒否から背景へ移した後も同じ守り): glob が語の途中に当たっただけの読むだけのコマンド(grep -rn "vitest run" src)を重い走行と見なさない
+        name: 'H20 glob が語の途中に当たっただけの部分も背景に回す',
         file: 'src/hooks/pretooluse.mjs',
-        from: 'const bypass = pathHead || profiles.some((np) => np.profile.match.some((g) => leadWord(g) === head && globMatch(g, text)));',
-        to: 'const bypass = true;',
+        from: 'const launches = pathHead || profiles.some((np) => np.profile.match.some((g) => leadWord(g) === head && globMatch(g, ownText)));',
+        to: 'const launches = true;',
       },
       {
         // C1: shim は git を profile で分類しないのに、PreToolUse だけが分類する(直す前の形)

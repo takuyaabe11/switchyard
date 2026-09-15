@@ -1,7 +1,7 @@
 // @ts-check
 // コマンドの分類。プロジェクト設定 conductor.json と組み込みの既定表(設計 §4.5 / §9.2)。
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
 /** @typedef {import('../core/types.mjs').JobClass} JobClass */
 /** @typedef {import('../core/types.mjs').CpuRange} CpuRange */
@@ -22,10 +22,11 @@ import { join } from 'node:path';
 
 /**
  * 組み込みの既定表。プロジェクト設定の後ろに並ぶので、同じコマンドにはプロジェクト側が先に当たる。
+ * measure(他の CPU ジョブを全部待たせる計測)は持たない。計測はプロジェクトの設定か --class measure だけが決める(改善 2・設計 §9.3)。
+ * 以前の `*bench*` / `*measure*` はコマンドの全文に当たり、IRC の記録で measure の包み 1,383 件のうち本物の計測は約 160 件だった。
  * @type {NamedProfile[]}
  */
 export const DEFAULT_PROFILES = [
-  { name: 'default:measure', profile: { match: ['*bench*', '*measure*'], class: 'measure', cpus: { min: 1, max: 1000 } } },
   {
     name: 'default:batch',
     profile: {
@@ -35,6 +36,39 @@ export const DEFAULT_PROFILES = [
     },
   },
 ];
+
+/** node の、インラインのコードを値に取るオプション */
+const NODE_INLINE = new Set(['-e', '--eval', '-p', '--print']);
+
+/**
+ * 分類に渡す文字列。語を空白でつなぐが、node の -e / --eval / -p / --print の値(インラインのコード)は除く(改善 2)。
+ * コードの中身の単語(benchmarks・vitest run など)に glob が当たると、読むだけのその場のスクリプトが重い走行に分類されるため。
+ * 除くのはスクリプトの前のオプションだけ(スクリプトの後ろの -e はスクリプトの引数)。
+ * @param {string[]} words 先頭の語とその引数 @returns {string}
+ */
+export function classifiableCommand(words) {
+  if (words.length === 0 || basename(words[0]) !== 'node') return words.join(' ');
+  const out = [words[0]];
+  let script = false;
+  for (let i = 1; i < words.length; i += 1) {
+    const w = words[i];
+    if (!script) {
+      const eq = w.indexOf('=');
+      if (w.startsWith('--') && eq > 0 && NODE_INLINE.has(w.slice(0, eq))) {
+        out.push(w.slice(0, eq));
+        continue;
+      }
+      if (NODE_INLINE.has(w)) {
+        out.push(w);
+        i += 1;
+        continue;
+      }
+      if (!w.startsWith('-')) script = true;
+    }
+    out.push(w);
+  }
+  return out.join(' ');
+}
 
 const CLASSES = ['quick', 'batch', 'measure'];
 const PREEMPTS = ['pause', 'throttle', 'never'];
