@@ -3,7 +3,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { readPgid, signalGroup, spawnInOwnGroup, verifiedGroup, waitGroupGone } from '../../src/run/group.mjs';
-import { pidsInGroup } from '../../testkit/procs.mjs';
+import { killGroupLeftovers, pidsInGroup } from '../../testkit/procs.mjs';
 import { waitFor } from '../../testkit/wait.mjs';
 
 describe('別グループでの起動(V4)', () => {
@@ -27,25 +27,34 @@ describe('別グループでの起動(V4)', () => {
     child.stdout?.on('data', (b) => {
       dots += String(b).length;
     });
-    await waitFor(() => dots > 3);
-    assert.equal(signalGroup(pid, 'SIGSTOP'), true);
-    await new Promise((r) => setTimeout(r, 100));
-    const frozen = dots;
-    await new Promise((r) => setTimeout(r, 200));
-    assert.equal(dots, frozen);
-    signalGroup(pid, 'SIGCONT');
-    await waitFor(() => dots > frozen + 3);
-    const exited = new Promise((resolve) => child.once('exit', (code, sig) => resolve(sig)));
-    signalGroup(pid, 'SIGTERM');
-    assert.equal(await exited, 'SIGTERM');
+    try {
+      await waitFor(() => dots > 3);
+      assert.equal(signalGroup(pid, 'SIGSTOP'), true);
+      await new Promise((r) => setTimeout(r, 100));
+      const frozen = dots;
+      await new Promise((r) => setTimeout(r, 200));
+      assert.equal(dots, frozen);
+      signalGroup(pid, 'SIGCONT');
+      await waitFor(() => dots > frozen + 3);
+      const exited = new Promise((resolve) => child.once('exit', (code, sig) => resolve(sig)));
+      signalGroup(pid, 'SIGTERM');
+      assert.equal(await exited, 'SIGTERM');
+    } finally {
+      // 途中で落ちても、止めたままの子や走り続ける子を残さない
+      killGroupLeftovers(pid);
+    }
   });
 
   it('孫プロセスも同じグループに入り、グループへの SIGTERM で一緒に終わる', async () => {
     const child = spawnInOwnGroup(['sh', '-c', 'sleep 30 & sleep 30 & wait'], { stdio: 'ignore' });
     const pid = /** @type {number} */ (child.pid);
-    await waitFor(() => pidsInGroup(pid).length >= 3);
-    signalGroup(pid, 'SIGTERM');
-    await waitFor(() => pidsInGroup(pid).length === 0);
+    try {
+      await waitFor(() => pidsInGroup(pid).length >= 3);
+      signalGroup(pid, 'SIGTERM');
+      await waitFor(() => pidsInGroup(pid).length === 0);
+    } finally {
+      killGroupLeftovers(pid);
+    }
   });
 
   it('自分のグループ・1 以下・自分の pgid が読めないときは送らない', () => {
