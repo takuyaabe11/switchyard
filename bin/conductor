@@ -1,0 +1,3 @@
+#!/bin/sh
+# plugin の bin/ は Bash の PATH の末尾に入る(設計 §12)。Claude が conductor top などを名前で呼べるようにする入口
+exec node "${0%/*}/conductor.mjs" "$@"
