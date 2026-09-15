@@ -249,7 +249,13 @@ export function runJob(opts) {
         return;
       }
       if (phase !== 'running' || child === null) return;
-      if (killTimer !== null) clearTimeout(killTimer); // 信号を短時間に 2 回受けても、前のタイマーを残さない
+      if (killTimer !== null) {
+        // 既に猶予のタイマーが動いている: 送り直すのは SIGTERM だけで、タイマーは残す
+        // (設計 §4.3 の 5 = 猶予は最初の転送から killGraceMs。信号を受けるたびに始まり直さない)
+        if (pgid === null) child.kill('SIGTERM');
+        else signalGroup(pgid, 'SIGTERM', ownPgid);
+        return;
+      }
       if (pgid === null) {
         // グループを確かめられないので、呼び出し元の終了だけを子の pid へ伝える(グループへは送らない)。
         // 相手は自分で起動した子そのものなので、猶予の後に生きていれば SIGKILL へ格上げしてよい

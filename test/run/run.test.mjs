@@ -203,6 +203,40 @@ describe('runJob', () => {
     }
   });
 
+  it('信号を短時間に 2 回受けても、SIGKILL までの猶予は最初の転送から測る(R5)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cproj-'));
+    const script = join(dir, 'repeat-signal-timing.mjs');
+    const root = new URL('../../', import.meta.url);
+    const at = (/** @type {string} */ rel) => JSON.stringify(new URL(rel, root).href);
+    writeFileSync(
+      script,
+      [
+        `import { runJob } from ${at('src/run/run.mjs')};`,
+        `import { DaemonUnavailableError } from ${at('src/client/connect.mjs')};`,
+        "import { EventEmitter } from 'node:events';",
+        "import { mkdtempSync } from 'node:fs';",
+        "import { tmpdir } from 'node:os';",
+        "import { join } from 'node:path';",
+        "const signals = new EventEmitter();",
+        // デーモンは要らない(pgid を確かめられる経路の onSignal だけを見たい)。すぐ管理なしへ落ちる
+        "const connect = async () => { throw new DaemonUnavailableError('R5 テスト'); };",
+        "const cwd = mkdtempSync(join(tmpdir(), 'cproj-'));",
+        // 子は SIGTERM を捕まえて 300ms 後に終わる(猶予 3000ms より十分短い)
+        "const p = runJob({ argv: ['sh', '-c', 'trap \"sleep 0.3; exit 0\" TERM; sleep 30 & wait'], flags: {}, home: cwd, cwd, out: () => {}, connect, signals, killGraceMs: 3000 });",
+        "setTimeout(() => signals.emit('SIGTERM'), 150);",
+        "setTimeout(() => signals.emit('SIGTERM'), 200);", // 50ms space
+        "console.log('code=' + (await p));",
+      ].join('\n'),
+    );
+    const started = Date.now();
+    const out = await new Promise((resolve, reject) => {
+      execFile(process.execPath, [script], { timeout: 15_000 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+    });
+    const elapsed = Date.now() - started;
+    assert.match(String(out), /code=0/);
+    assert.ok(elapsed < 1_500, `スクリプトの終了までに ${elapsed}ms かかった(killGraceMs 3000ms に引きずられている): ${out}`);
+  });
+
   it('再接続を待っている間に子が終わったら、待ちのタイマーでプロセスの終了を遅らせない', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cproj-'));
     const script = join(dir, 'exit-timing.mjs');
