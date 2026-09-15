@@ -1,0 +1,24 @@
+{
+  "name": "conductor",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "conductor": "bin/conductor.mjs",
+    "conductord": "bin/conductord.mjs"
+  },
+  "scripts": {
+    "test": "node --test --test-reporter=spec",
+    "typecheck": "tsc -p .",
+    "check": "npm run typecheck && npm test",
+    "mutate:core": "node scripts/mutate-core.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^26.5.1",
+    "fast-check": "^4.10.0",
+    "typescript": "^7.0.2"
+  }
+}
