@@ -2,12 +2,13 @@
 // PreToolUse(Bash)の判定(設計 §9.2)。hook の標準入力の JSON を受け、出力の JSON を返す(何もしないなら null)。
 //   - 背景への書き換え: PATH の shim か conductor run の包みが CPU を持つ走行(batch / measure)を起こす部分があれば、run_in_background だけを true にする。
 //     コマンドの文字列は変えないので権限の判定に影響しない。だから判定は広めに取る(bash -c の中・( … )・$( … )・conductor run の `--` の後ろも見る)
-//   - 拒否: shim を迂回して管理対象を起動する部分(パスで直に呼ぶ・shim の無い語で、当たった glob がその語で始まる)だけ。
-//     読むだけのコマンド(cat benchmarks/x・grep measure など)は、glob が語の途中に当たっても拒否しない
+//   - 拒否: shim の語の実行ファイルをパスで直に呼ぶ部分(/usr/local/bin/npm test・/usr/bin/git commit)だけ。本当に shim を迂回する形はこれしか無い。
+//     shim の語でないものをパスで呼ぶ形(scripts/probe-run.sh・./node_modules/.bin/vitest)と shim の無い語は、重ければ背景に回すだけ(改善 2)
+//   - 分類に渡すのは classifiableCommand の文字列(node -e のコードの中身では分類しない)
 import { basename } from 'node:path';
 import { parseArgs } from '../cli/args.mjs';
 import { repoRoot } from '../config/context.mjs';
-import { classify, globMatch, loadProfiles } from '../config/profiles.mjs';
+import { classifiableCommand, classify, globMatch, loadProfiles } from '../config/profiles.mjs';
 import { GIT_LOCK_SUBCOMMANDS } from '../shim/decide.mjs';
 import { simpleCommands } from './shell.mjs';
 
@@ -114,7 +115,7 @@ function wrapperOf(args, profiles) {
   } catch {
     // 使い方の誤りで包みは走らないが、`--` の後ろで判定しておく
   }
-  const named = flags.profile !== undefined ? (profiles.find((p) => p.name === flags.profile) ?? null) : classify(argv.join(' '), profiles);
+  const named = flags.profile !== undefined ? (profiles.find((p) => p.name === flags.profile) ?? null) : classify(classifiableCommand(argv), profiles);
   return { jobClass: flags.class ?? named?.profile.class ?? 'batch', argv };
 }
 
@@ -165,17 +166,32 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
       return;
     }
     const pathHead = head.includes('/');
-    const hit = classify(text, profiles) ?? (pathHead ? classify([base, ...rest].join(' '), profiles) : null);
-    if (hit === null) return;
-    if (SHIM_WORDS.includes(head)) {
-      // PATH の shim が同じ文字列を分類して包む
-      if (hit.profile.class !== 'quick') found.heavy = true;
+    if (SHIM_WORDS.includes(base)) {
+      // shim の語: 名前で呼べば、PATH の shim が同じ文字列を分類して包む。パスで直に呼ぶ実行ファイル(/usr/local/bin/npm など)だけが shim を迂回する。
+      // 拒否はこの形だけに絞る(改善 2。IRC の記録で、shim の語でないものをパスで呼ぶ形への拒否 320 件がすべて誤りだった)
+      const hit = classify(classifiableCommand([base, ...rest]), profiles);
+      if (hit === null) return;
+      if (!pathHead) {
+        if (hit.profile.class !== 'quick') found.heavy = true;
+      } else if (!wrapped) {
+        unshimmed.push(text);
+      }
       return;
     }
-    // shim の無い語で当たった部分のうち、shim を迂回して管理対象を起動する形だけを拒否する: パスで直に呼ぶか、当たった glob がその語で始まる。
-    // cat benchmarks/x・grep measure のように glob が語の途中に当たっただけの部分は、管理対象を起動しない
-    const bypass = pathHead || profiles.some((np) => np.profile.match.some((g) => leadWord(g) === head && globMatch(g, text)));
-    if (bypass && !wrapped) unshimmed.push(text);
+    // shim の語でない部分は拒否しない。中で PATH の shim を通る(scripts/probe-run.sh の中の npm・#!/usr/bin/env node の node_modules/.bin)か、
+    // shim の無いツールで、どちらも拒否しても順番待ちには乗らない。管理対象を起動する形なら背景に回すだけ:
+    // パスで呼ぶか、当たった glob がその語で始まる(cat benchmarks/x・grep measure のように glob が語の途中に当たっただけの部分は起動しない)
+    const ownText = classifiableCommand([head, ...rest]);
+    const hit = classify(ownText, profiles) ?? (pathHead ? classify(classifiableCommand([base, ...rest]), profiles) : null);
+    const launches = pathHead || profiles.some((np) => np.profile.match.some((g) => leadWord(g) === head && globMatch(g, ownText)));
+    // conductor run で包んだ中では、子に入れ子の印が立ち node の shim も包まないので、重さは包みの性格だけで決まる(ここでは数えない)
+    if (!wrapped && hit !== null && launches && hit.profile.class !== 'quick') found.heavy = true;
+    // パスで呼ぶスクリプトの引数の中の shim の語・シェルから後ろ(scripts/probe-run.sh gates npm run bench など)は、中で PATH の shim が包みうる。
+    // 背景への判定だけに使う(拒否にはかけない)
+    if (pathHead) {
+      const at = rest.findIndex((w) => SHIM_WORDS.includes(w) || SHELLS.has(w));
+      if (at >= 0) visit(rest.slice(at), true);
+    }
   };
 
   for (const words of simpleCommands(command)) visit(words, false);
@@ -186,8 +202,8 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
         hookEventName: 'PreToolUse',
         permissionDecision: 'deny',
         permissionDecisionReason:
-          `[conductor] 管理対象のコマンドを、shim(${SHIM_WORDS.join(' / ')})を迂回して起動する部分がある(パスで直に呼ぶ形か、shim の無い語): ${unshimmed.join(' / ')}。` +
-          'PATH から呼べる形(例: npx vitest run)に書き直すか、`conductor run -- <その部分>` で包んでから実行する(包んだコマンドには普段どおり権限の確認が出る)。',
+          `[conductor] shim の語(${SHIM_WORDS.join(' / ')})の実行ファイルをパスで直に呼ぶと、shim を迂回して順番待ちを通らない: ${unshimmed.join(' / ')}。` +
+          'パスを付けずに名前で呼ぶ(例: npm test)か、`conductor run -- <その部分>` で包んでから実行する(包んだコマンドには普段どおり権限の確認が出る)。',
       },
     };
   }

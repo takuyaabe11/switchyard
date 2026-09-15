@@ -31,21 +31,30 @@ describe('decideShim(設計 §9.1)', () => {
     assert.deepEqual(decideShim({ word: 'npm', args: ['test'], cwd: plainDir(), env: { CONDUCTOR_IN_JOB: '1' } }), { kind: 'pass' });
   });
 
-  it('既定表に当たれば run とその profile 名', () => {
+  it('既定表に当たれば run とその profile 名。既定表は measure を持たない', () => {
     assert.deepEqual(decideShim({ word: 'npm', args: ['test'], cwd: plainDir(), env: {} }), { kind: 'run', profile: 'default:batch' });
-    assert.deepEqual(decideShim({ word: 'node', args: ['benchmarks/run.mjs'], cwd: plainDir(), env: {} }), { kind: 'run', profile: 'default:measure' });
+    assert.deepEqual(decideShim({ word: 'node', args: ['benchmarks/run.mjs'], cwd: plainDir(), env: {} }), { kind: 'pass' });
+  });
+
+  it('node -e のコードの中身では分類しない', () => {
+    const vitest = [{ name: 'vitest', profile: { match: ['*vitest run*'], class: /** @type {const} */ ('batch') } }];
+    const profilesFor = () => vitest;
+    assert.deepEqual(decideShim({ word: 'node', args: ['-e', 'console.log("vitest run")'], cwd: plainDir(), env: {}, profilesFor }), { kind: 'pass' });
+    assert.deepEqual(decideShim({ word: 'node', args: ['node_modules/.bin/vitest', 'run'], cwd: plainDir(), env: {}, profilesFor }), { kind: 'run', profile: 'vitest' });
   });
 
   it('node で呼んだこの plugin の conductor の CLI は、分類せずに pass(外側のジョブに包まない)', () => {
+    const bench = [{ name: 'bench', profile: { match: ['*npm run bench*'], class: /** @type {const} */ ('measure') } }];
+    const profilesFor = () => bench;
     const dir = plainDir();
     symlinkSync(CLI, join(dir, 'conductor.mjs'));
-    assert.deepEqual(decideShim({ word: 'node', args: [CLI, 'run', '--lock', 'port:4173', '--', 'npm', 'run', 'bench'], cwd: dir, env: {} }), { kind: 'pass' });
+    assert.deepEqual(decideShim({ word: 'node', args: [CLI, 'run', '--lock', 'port:4173', '--', 'npm', 'run', 'bench'], cwd: dir, env: {}, profilesFor }), { kind: 'pass' });
     // 相対パス・symlink でも実パスで見分ける
-    assert.deepEqual(decideShim({ word: 'node', args: ['conductor.mjs', 'run', '--', 'npx', 'vitest', 'run', 'bench'], cwd: dir, env: {} }), { kind: 'pass' });
+    assert.deepEqual(decideShim({ word: 'node', args: ['conductor.mjs', 'run', '--', 'npm', 'run', 'bench'], cwd: dir, env: {}, profilesFor }), { kind: 'pass' });
     // 同じ名前の別のファイルは、いつもどおり分類する
     const other = plainDir();
     writeFileSync(join(other, 'conductor.mjs'), '');
-    assert.deepEqual(decideShim({ word: 'node', args: ['conductor.mjs', 'run', '--', 'npm', 'run', 'bench'], cwd: other, env: {} }), { kind: 'run', profile: 'default:measure' });
+    assert.deepEqual(decideShim({ word: 'node', args: ['conductor.mjs', 'run', '--', 'npm', 'run', 'bench'], cwd: other, env: {}, profilesFor }), { kind: 'run', profile: 'bench' });
   });
 
   it('どれにも当たらなければ pass', () => {

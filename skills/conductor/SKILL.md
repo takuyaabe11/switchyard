@@ -9,8 +9,9 @@ conductor は、同じマシンで動く Claude Code のセッションが重い
 
 ## 何もしなくてよいこと
 
-- 重いコマンド(`npm test`・`npm run build`・`npx vitest run`・`npx playwright test`・`cargo build` / `cargo test`・`pytest`・`go test`・`make`・名前に `bench` か `measure` を含むもの。repo の `conductor.json` があればその分類)は、PATH の先頭に入った shim が自動で conductor に通す。コマンドを書き換える必要はない。
-- 前景で打っても、conductor が背景実行に切り替える。`bash -c "…"`・`( … )` の中や、`conductor run -- …` で包んだコマンドも、重ければ同じく背景に回る。背景タスクの終わりを待ってから結果を読む。
+- 重いコマンド(`npm test`・`npm run build`・`npx vitest run`・`npx playwright test`・`cargo build` / `cargo test`・`pytest`・`go test`・`make`。repo の `conductor.json` があればその分類)は、PATH の先頭に入った shim が自動で conductor に通す。コマンドを書き換える必要はない。計測(ベンチ)として単独で走らせるのは、`conductor.json` で宣言されたものだけ。
+- 前景で打っても、conductor が背景実行に切り替える。`bash -c "…"`・`( … )` の中、`conductor run -- …` で包んだコマンド、`scripts/probe-run.sh gates npm run lint` のようにスクリプトの引数に渡した重いコマンドも、同じく背景に回る。背景タスクの終わりを待ってから結果を読む。
+- `node -e '…'` のようなその場のスクリプトは、コードの中身の単語では重い走行と見なさない。
 - `git commit` / `merge` / `rebase` / `cherry-pick` / `stash` / `am` は、同じ作業ツリーの index を別のセッションと同時に書き換えないよう、順番に通る。
 
 ## 待っているとき
@@ -26,9 +27,9 @@ conductor は、同じマシンで動く Claude Code のセッションが重い
 
 ## 拒否されたとき
 
-- 「shim を迂回して起動する部分がある」と拒否されるのは、管理対象のコマンドをパスで直に呼んだ(`./node_modules/.bin/vitest run`・`/usr/bin/git commit`)か、shim の無い語で起動した(`scripts/probe-run.sh benchmark` など)ときだけ。
-- PATH から呼べる形(例: `npx vitest run`・`git commit`)に書き直す。書き直せないときだけ `conductor run -- <その部分>` で包む(包んだコマンドには普段どおり権限の確認が出る)。
-- `cat` / `grep` / `ls` / `cd` のような読むだけのコマンドは、引数に `bench` や `measure` があっても拒否されない。包まない(包むと重い走行として順番を待つ)。
+- 拒否されるのは、shim の語(`npm` / `npx` / `node` / `cargo` / `pytest` / `go` / `make` / `git`)の実行ファイルをパスで直に呼んだとき(`/usr/local/bin/npm test`・`/usr/bin/git commit`)だけ。
+- パスを付けずに名前で呼ぶ形(例: `npm test`・`git commit`)に書き直す。書き直せないときだけ `conductor run -- <その部分>` で包む(包んだコマンドには普段どおり権限の確認が出る)。
+- スクリプトをパスで呼ぶ形(`scripts/probe-run.sh …`・`./node_modules/.bin/vitest run`)は拒否されない。`cat` / `grep` / `ls` / `cd` のような読むだけのコマンドは、引数に `bench` や `measure` があっても何もされない。包まない(包むと重い走行として順番を待つ)。
 
 ## してはいけないこと
 
