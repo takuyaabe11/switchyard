@@ -163,16 +163,51 @@ const SUITES = {
         from: "} else if (m.t === 'error' && phase === 'waiting') {",
         to: '} else if (false) {',
       },
+      {
+        // I3: 生きているデーモンの横で書かれた控えを、次の起動まで取り込まない(直す前の形)
+        name: 'W9 tick で控えを取り込まない',
+        file: 'src/daemon/server.mjs',
+        from: '    try {\n      ingestUnmanaged();',
+        to: '    try {\n      void 0;',
+      },
+      {
+        // m4: rename と unlink の間で落ちて残った別名を拾わない
+        name: 'W10 残った別名(.taking)を拾わない',
+        file: 'src/daemon/store.mjs',
+        from: ".filter((name) => name.startsWith(prefix) && name.endsWith('.taking'))",
+        to: '.filter(() => false)',
+      },
     ],
   },
   shim: {
-    tests: ['test/shim/decide.test.mjs', 'test/shim/shims.test.mjs'],
+    tests: ['test/shim/decide.test.mjs', 'test/shim/shims.test.mjs', 'test/hooks/agreement.test.mjs'],
     mutations: [
       {
         name: 'D1 CPU を持つジョブの中でも分類する',
         file: 'src/shim/decide.mjs',
         from: "if (env.CONDUCTOR_IN_JOB === '1') return { kind: 'pass' };",
         to: '',
+      },
+      {
+        // I2: bin/conductor が PATH の node(node の shim)を通っても、conductor の CLI 自身を外側のジョブに包まない
+        name: 'D2 conductor の CLI 自身も分類して包む',
+        file: 'src/shim/decide.mjs',
+        from: "if (word === 'node' && isOwnCli(args[0], cwd)) return { kind: 'pass' };",
+        to: '',
+      },
+      {
+        // I4: 分類器が失敗したら本物へ行く(shim の失敗で作業を止めない)
+        name: 'S6 分類器が失敗したら作業を止める',
+        file: 'shims/_shim.sh',
+        from: '2>/dev/null) || exec "$real" "$@"',
+        to: '2>/dev/null) || exit 1',
+      },
+      {
+        // I4: 想定外の答えでも本物へ行く
+        name: 'S7 分類器の想定外の答えで作業を止める',
+        file: 'shims/_shim.sh',
+        from: '\n  *) exec "$real" "$@" ;;\nesac',
+        to: '\n  *) exit 1 ;;\nesac',
       },
       {
         name: 'S2 node が無いと作業を止める',
@@ -201,13 +236,13 @@ const SUITES = {
     ],
   },
   hooks: {
-    tests: ['test/hooks/pretooluse.test.mjs', 'test/hooks/session.test.mjs'],
+    tests: ['test/hooks/pretooluse.test.mjs', 'test/hooks/session.test.mjs', 'test/hooks/agreement.test.mjs', 'test/hooks/shell.test.mjs'],
     mutations: [
       {
         name: 'H1 既に背景でも書き換える',
         file: 'src/hooks/pretooluse.mjs',
-        from: 'if (heavy && ti.run_in_background !== true) {',
-        to: 'if (heavy) {',
+        from: 'if (found.heavy && ti.run_in_background !== true) {',
+        to: 'if (found.heavy) {',
       },
       {
         name: 'H2 背景への書き換えに allow を付ける(権限の確認を飛ばす)',
@@ -216,9 +251,9 @@ const SUITES = {
         to: "return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput: { ...ti, run_in_background: true } } };",
       },
       {
-        name: 'H3 shim を通らない形を拒否しない',
+        name: 'H3 shim を迂回する形を拒否しない',
         file: 'src/hooks/pretooluse.mjs',
-        from: 'if (!SHIM_WORDS.includes(head)) unshimmed.push(seg);',
+        from: 'if (bypass && !wrapped) unshimmed.push(text);',
         to: '',
       },
       {
@@ -228,10 +263,59 @@ const SUITES = {
         to: '',
       },
       {
-        name: 'H5 conductor run を含むコマンドも判定する',
+        name: 'H5 conductor run で包んだ中も拒否の判定にかける',
         file: 'src/hooks/pretooluse.mjs',
-        from: "&& p.rest[0] === 'run')) return null;",
-        to: "&& p.rest[0] === 'never')) return null;",
+        from: 'visit(w.argv, true);',
+        to: 'visit(w.argv, false);',
+      },
+      {
+        // C1: 8 語で始まらない部分に分類が当たれば、読むだけのコマンドでも拒否する(直す前の形)
+        name: 'H10 拒否の条件を「shim の無い語で当たれば拒否」へ戻す',
+        file: 'src/hooks/pretooluse.mjs',
+        from: 'const bypass = pathHead || profiles.some((np) => np.profile.match.some((g) => leadWord(g) === head && globMatch(g, text)));',
+        to: 'const bypass = true;',
+      },
+      {
+        // C1: shim は git を profile で分類しないのに、PreToolUse だけが分類する(直す前の形)
+        name: 'H11 git の部分も profile で分類する',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "if (base === 'git') {",
+        to: "if (base === 'never-git') {",
+      },
+      {
+        // I1: conductor run の `--` の後ろを見ない(直す前は conductor run を含むコマンドを丸ごと素通しした)
+        name: 'H12 conductor run の包みの性格と -- の後ろを見ない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "if (w.jobClass !== 'quick') found.heavy = true;\n      visit(w.argv, true);",
+        to: '',
+      },
+      {
+        // I1: bash -c "…" の中を見ない
+        name: 'H13 bash -c の引用の中を見ない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: 'for (const inner of simpleCommands(script)) visit(inner, wrapped);',
+        to: '',
+      },
+      {
+        // I1: env -u NAME の値を読み飛ばさない
+        name: 'H14 env の値つきオプションの値を読み飛ばさない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: 'i += ENV_VALUE_OPTIONS.has(words[i]) ? 2 : 1;',
+        to: 'i += 1;',
+      },
+      {
+        // C1: heredoc の本文をコマンドとして読む(本文の行の npm test や ; で判定が変わる)
+        name: 'H15 heredoc の本文を読み飛ばさない',
+        file: 'src/hooks/shell.mjs',
+        from: 'i = skipHeredocs(src, i + 1, heredocs);',
+        to: 'i += 1;',
+      },
+      {
+        // I1: ( … ) の中の単純コマンドを捨てる
+        name: 'H16 ( … ) の中を見ない',
+        file: 'src/hooks/shell.mjs',
+        from: "      endCommand();\n      i = parse(src, i + 1, ')', out);",
+        to: "      endCommand();\n      i = parse(src, i + 1, ')', []);",
       },
       {
         name: 'H6 考える層の中でも判定する',
