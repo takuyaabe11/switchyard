@@ -201,6 +201,25 @@ describe('daemon server', () => {
     await assert.rejects(b2.next((m) => m.t === 'grant', 200), /来ない/);
   });
 
+  it('resume の前から既にリースだった包みへ、grant を 1 通だけ送り直す(M1)', async () => {
+    const home = tempHome();
+    const first = await startDaemon({ home, capacity: 4, tickMs: 20 });
+    const a = await openClient(first.sock);
+    a.send({ t: 'request', job: jobRequest() });
+    const accA = await a.next((m) => m.t === 'accepted');
+    await a.next((m) => m.t === 'grant');
+    // started はまだ送っていない(grant を受けただけの状態で再起動をまたぐ)
+    await first.close();
+    await a.close();
+
+    const { d: second } = await daemon({ home });
+    const a2 = await client(second.sock);
+    a2.send({ t: 'resume', jobId: accA.jobId, phase: 'waiting', pid: null, pgid: null });
+    await a2.next((m) => m.t === 'accepted');
+    await a2.next((m) => m.t === 'grant');
+    await assert.rejects(a2.next((m) => m.t === 'grant', 200), /来ない/);
+  });
+
   it('知らないジョブの resume には unknown を返す', async () => {
     const { d } = await daemon();
     const c = await client(d.sock);
