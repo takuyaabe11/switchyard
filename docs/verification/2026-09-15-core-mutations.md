@@ -1,19 +1,19 @@
-# 規則層の門番の検出力(conductor 1a)
+# 規則層の門番の検出力(conductor 1a・1b)
 
 - 実行: `npm run mutate:core`(原本は触らず、一時ディレクトリの写しに 1 つずつ入れる)
-- 日時と環境: Tue Sep 15 11:52:02 JST 2026 / Darwin 25.6.0 / Node v24.16.0
+- 日時と環境: Tue Sep 15 17:54:20 JST 2026 / Darwin 25.6.0 / Node v24.16.0
 - 復元後の原本: `npm test` の `ℹ tests` / `ℹ pass` / `ℹ fail` の 3 行を貼る
 
 ```
-ℹ tests 79
-ℹ pass 79
+ℹ tests 186
+ℹ pass 186
 ℹ fail 0
 ```
 
 ## 変異ごとの結果
 
 ```
-== M1 鍵の空き判定を緩める | src/core/schedule.mjs | 赤 | tests 64 / fail 8 / pass 56
+== M1 鍵の空き判定を緩める | src/core/schedule.mjs | 赤 | tests 73 / fail 9 / pass 64
    壊した行: return locks.every((k) => holders(s, k).length <= capOf(s, k));
    赤: 子がまだ生きていれば孤児として資源を持たせたまま、未確認に積む
    赤: 孤児でないリースに orphanGone が来ても資源を返さない
@@ -23,14 +23,16 @@
    赤: 鍵が埋まっていれば待たせる
    赤: 入場を待つ間に、他の鍵を抱え込まない(一括取得)
    赤: 鍵の空く見込み時刻も数える
-== M2 計測の単独実行を外す | src/core/schedule.mjs | 赤 | tests 64 / fail 5 / pass 59
+   赤: 鍵が埋まっていれば待ち、理由に保持者を出す
+== M2 計測の単独実行を外す | src/core/schedule.mjs | 赤 | tests 73 / fail 6 / pass 67
    壊した行: if (head === null && locksFree(s, job.locks)) {
    赤: 計測が終わったら、計測以外を先に入れる
    赤: どんな到着の列でも I1〜I3・I6 を破らず、全ジョブが上限時刻までに終わる(I5)
    赤: 同じ入力なら入場の順番は毎回同じ(決定的)
+   赤: 計測の入場待ちの間も、鍵だけのジョブは入場する
    赤: 走行中のジョブがあれば計測は待ち、後ろのジョブも入場しない
    赤: 計測の直後は、一番長く待っている計測以外のジョブを先に入れる
-== M3 CPU の空き判定を 1 つ緩める | src/core/schedule.mjs | 赤 | tests 64 / fail 8 / pass 56
+== M3 CPU の空き判定を 1 つ緩める | src/core/schedule.mjs | 赤 | tests 73 / fail 10 / pass 63
    壊した行: const fits = free + 1 >= job.cpus.min && locksFree(s, job.locks);
    赤: どんな到着の列でも I1〜I3・I6 を破らず、全ジョブが上限時刻までに終わる(I5)
    赤: 同じ入力なら入場の順番は毎回同じ(決定的)
@@ -39,27 +41,41 @@
    赤: 先頭の見込み時刻を越えるジョブは入れない
    赤: 見込みの無いジョブは後ろ詰めしない
    赤: 先頭が必要な資源を持つジョブに見込みが無ければ、後ろ詰めしない
+   赤: 前に居て入場できないジョブが要る鍵は、鍵だけのジョブも追い越さない
+   赤: 鍵だけのジョブの入場では、計測の直後の優先の印を外さない
    赤: 先頭が入場できなければ、計測は後ろ詰めしない
-== M4 計測の直後の優先を外す | src/core/schedule.mjs | 赤 | tests 64 / fail 3 / pass 61
+== M4 計測の直後の優先を外す | src/core/schedule.mjs | 赤 | tests 73 / fail 3 / pass 70
    壊した行: if (false) {
    赤: 計測が終わったら、計測以外を先に入れる
    赤: 計測の直後は、一番長く待っている計測以外のジョブを先に入れる
    赤: 計測以外が待っていなければ、印を外して計測を入れる
-== M5 exit でリースを返さない | src/core/decide.mjs | 赤 | tests 64 / fail 4 / pass 60
+== M5 exit でリースを返さない | src/core/decide.mjs | 赤 | tests 73 / fail 4 / pass 69
    壊した行: extra.push(
    赤: exit 0 でリースを返し、所要を history に出し、空いた資源で次を入れる
    赤: 計測が終わったら、計測以外を先に入れる
    赤: どんな到着の列でも I1〜I3・I6 を破らず、全ジョブが上限時刻までに終わる(I5)
    赤: 同じ入力なら入場の順番は毎回同じ(決定的)
-== M6 後ろ詰めの時刻条件を外す | src/core/schedule.mjs | 赤 | tests 64 / fail 4 / pass 60
+== M6 後ろ詰めの時刻条件を外す | src/core/schedule.mjs | 赤 | tests 73 / fail 4 / pass 69
    壊した行: const endsBeforeHead = true;
    赤: 先頭の見込み時刻を越えるジョブは入れない
    赤: 見込みの無いジョブは後ろ詰めしない
    赤: 先頭が必要な資源を持つジョブに見込みが無ければ、後ろ詰めしない
    赤: 鍵の空く見込み時刻も数える
+== M7 CPU 0 のリースも計測の単独に数える | src/core/schedule.mjs | 赤 | tests 73 / fail 1 / pass 72
+   壊した行: if (head === null && s.leases.length === 0 && locksFree(s, job.locks)) {
+   赤: 鍵だけのリースが走っていても、計測は単独で入場する
+== M8 鍵だけのジョブも計測の走行中は止める | src/core/schedule.mjs | 赤 | tests 73 / fail 1 / pass 72
+   壊した行: if (isLockOnly(job) && gate === null) {
+   赤: 計測の走行中でも、鍵が空いていれば CPU 0 で入場する
+== M9 鍵だけのジョブが前で止まっている鍵を追い越す | src/core/schedule.mjs | 赤 | tests 73 / fail 1 / pass 72
+   壊した行: const ahead = undefined;
+   赤: 前に居て入場できないジョブが要る鍵は、鍵だけのジョブも追い越さない
 全部の変異が赤になった
 ```
 
 ## 性質テストが捕まえない変異
 
 - M4・M6: 到着が有限の模擬実行では飢えが起きないため。単体テストが捕まえる。
+- M7〜M9: 性質テストは鍵だけのジョブを混ぜても不変条件の破れしか見ないので、「鍵だけのジョブを計測の間に止める」(M8)や
+  「前の待ちを追い越す」(M9)は、不変条件を破らない限り捕まえない。M7 も同様に、CPU 0 のリースを計測の単独実行の
+  判定に含めてしまう誤りは不変条件を破らず、単体テストだけが捕まえる。

@@ -8,8 +8,9 @@ import { usedCpus } from '../core/schedule.mjs';
 import { sortWaiting } from '../core/score.mjs';
 import { numOrNull, parseEscape, parseJobRequest } from '../protocol/messages.mjs';
 import { createDecoder, encode } from '../protocol/ndjson.mjs';
+import { VERSION } from '../version.mjs';
 import { pathsOf, SOCKET_PATH_LIMIT } from './paths.mjs';
-import { appendRecord, loadEscapes, loadEstimates, parseState, readJson, readRecords, writeJsonAtomic } from './store.mjs';
+import { appendRecord, loadEscapes, loadEstimates, parseState, readJson, readRecords, takeUnmanaged, writeJsonAtomic } from './store.mjs';
 
 /** @typedef {import('../core/types.mjs').State} State */
 /** @typedef {import('../core/types.mjs').Event} Event */
@@ -133,6 +134,19 @@ export async function startDaemon(opts) {
     for (const a of r.actions) dispatch(a);
   };
 
+  /** 控えの通し番号(同じ時刻に終わった控えの id を分ける) */
+  let unmanagedSeq = 0;
+  // 管理なしで走ったジョブの控えを取り込む(設計 §4.2)。記録に写し、失敗は ack 待ちに積む。
+  // 起動時と tick ごとに呼ぶ(デーモンが生きている間に書かれた控えも、持ち主のセッションが続いているうちに Stop へ届くように)
+  const ingestUnmanaged = () => {
+    for (const u of takeUnmanaged(p.unmanaged)) {
+      const jobId = `u${u.at.toString(36)}${(unmanagedSeq++).toString(36)}`;
+      appendRecord(p.events, { kind: 'unmanaged', jobId, ...u });
+      if (u.code !== 0) apply({ type: 'unmanagedExit', now: monoNow(), session: u.session, jobId, code: u.code, cmd: u.cmd });
+    }
+  };
+  ingestUnmanaged();
+
   /** @returns {Snapshot} */
   const snapshot = () => {
     const now = monoNow();
@@ -157,6 +171,8 @@ export async function startDaemon(opts) {
       }),
       unacked: state.unacked,
       badRecords: journal.bad,
+      // 起動したときの版。plugin を更新した後も古いデーモンが走り続けるので、SessionStart が食い違いを知らせる(設計 §9.6)
+      version: VERSION,
     };
   };
 
@@ -304,6 +320,12 @@ export async function startDaemon(opts) {
       for (const l of [...state.leases]) {
         if (l.recovering) apply({ type: 'heartbeatLost', now, jobId: l.job.id, alive: l.pgid !== null && isAlive(l.pgid) });
       }
+    }
+    try {
+      ingestUnmanaged();
+    } catch (e) {
+      // 控えを読めなくても割り振りの tick は止めない(次の tick で試し直す)
+      process.stderr.write(`[conductord] 管理なしの走行の控えを取り込めない: ${e instanceof Error ? e.message : String(e)}\n`);
     }
     apply({ type: 'tick', now });
   }, tickMs);

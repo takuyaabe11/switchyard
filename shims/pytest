@@ -1,0 +1,3 @@
+#!/bin/sh
+name=pytest
+. "${0%/*}/_shim.sh"

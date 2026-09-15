@@ -1,10 +1,11 @@
 // @ts-check
 // state.json(規則層の状態の正本)と events.jsonl(追記のみの記録)。
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { EstimateBook } from '../core/estimate.mjs';
 
 /** @typedef {import('../core/types.mjs').State} State */
+/** @typedef {{ at: number, session: string, repo: string, profile: string, cmd: string, code: number | null, durationMs: number }} UnmanagedRun */
 
 /** 一時ファイルに書いて rename で置き換える(書きかけの state.json を残さない) @param {string} file @param {unknown} value */
 export function writeJsonAtomic(file, value) {
@@ -64,6 +65,53 @@ export function readRecords(file) {
     }
   }
   return { records, bad };
+}
+
+/**
+ * 管理なしで走ったジョブの控えを取り出す(設計 §4.2)。包みの書き込みとぶつからないよう、別名へ rename してから読み、
+ * 読み終えたら消す。無ければ空。形の合わない行は捨てる。
+ * rename と unlink の間で落ちたデーモンが残した別名(`<file>.<pid>.taking`)も拾う。取り込みは消した後にしか起きないので、
+ * 残っている別名はまだ取り込まれていない。消せなかった別名は読まなかったことにして、次の取り込みに回す(2 度は取り込まない)。
+ * @param {string} file @returns {UnmanagedRun[]}
+ */
+export function takeUnmanaged(file) {
+  const dir = dirname(file);
+  const prefix = `${basename(file)}.`;
+  /** @param {string} path @returns {Record<string, unknown>[]} */
+  const drain = (path) => {
+    const { records } = readRecords(path);
+    try {
+      unlinkSync(path);
+      return records;
+    } catch {
+      return [];
+    }
+  };
+  /** @type {Record<string, unknown>[]} */
+  const records = [];
+  // 先に残った別名を読んで消す(同じ pid の別名を、下の rename で上書きしない)
+  const leftovers = existsSync(dir) ? readdirSync(dir).filter((name) => name.startsWith(prefix) && name.endsWith('.taking')).sort() : [];
+  for (const name of leftovers) records.push(...drain(join(dir, name)));
+  if (existsSync(file)) {
+    const taken = `${file}.${process.pid}.taking`;
+    let renamed = true;
+    try {
+      renameSync(file, taken);
+    } catch {
+      // 読む前に他のデーモンが取った
+      renamed = false;
+    }
+    if (renamed) records.push(...drain(taken));
+  }
+  /** @type {UnmanagedRun[]} */
+  const out = [];
+  for (const r of records) {
+    const ok =
+      typeof r.at === 'number' && typeof r.session === 'string' && typeof r.repo === 'string' && typeof r.profile === 'string' &&
+      typeof r.cmd === 'string' && typeof r.durationMs === 'number' && (typeof r.code === 'number' || r.code === null);
+    if (ok) out.push({ at: Number(r.at), session: String(r.session), repo: String(r.repo), profile: String(r.profile), cmd: String(r.cmd), code: /** @type {number | null} */ (r.code), durationMs: Number(r.durationMs) });
+  }
+  return out;
 }
 
 /** 記録の history 行から所要時間の帳簿を作る @param {Record<string, unknown>[]} records @returns {EstimateBook} */

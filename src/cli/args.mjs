@@ -27,14 +27,15 @@ export const USAGE = [
 
 export class UsageError extends Error {}
 
-/** `4` は 4..4、`2..10` は 2..10 @param {string} v @returns {CpuRange} */
+/** `4` は 4..4、`2..10` は 2..10、`0` と `0..0` は鍵だけのジョブ(設計 §5.2) @param {string} v @returns {CpuRange} */
 export function parseCpus(v) {
+  if (v === '0' || v === '0..0') return { min: 0, max: 0 };
   const parts = v.split('..');
   const nums = parts.map((x) => (x === '' ? NaN : Number(x)));
   const ok = nums.every((n) => Number.isInteger(n) && n >= 1);
   if (ok && parts.length === 1) return { min: nums[0], max: nums[0] };
   if (ok && parts.length === 2 && nums[1] >= nums[0]) return { min: nums[0], max: nums[1] };
-  throw new UsageError(`--cpus は 4 か 2..10 の形: ${v}`);
+  throw new UsageError(`--cpus は 4 か 2..10 の形(鍵だけのジョブは 0..0): ${v}`);
 }
 
 /** @param {string[]} rest @returns {Command} */
@@ -82,6 +83,9 @@ function parseRun(rest) {
       default:
         throw new UsageError(`知らないオプション: ${name}`);
     }
+  }
+  if (flags.cpus?.max === 0 && (flags.locks ?? []).length === 0 && flags.profile === undefined) {
+    throw new UsageError('--cpus 0..0(鍵だけのジョブ)には --lock が 1 本以上要る');
   }
   return { cmd: 'run', flags, argv };
 }

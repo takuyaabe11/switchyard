@@ -17,6 +17,12 @@ describe('decide: request', () => {
     assert.deepEqual(grants(r.actions), [['a', 8]]);
   });
 
+  it('鍵だけのジョブ(0..0 と鍵)は CPU 0 のまま入場する', () => {
+    assert.deepEqual(clampJob(job({ cpus: { min: 0, max: 0 }, locks: ['g', 'g'] }), 8), job({ cpus: { min: 0, max: 0 }, locks: ['g'] }));
+    const r = decide(initialState({ capacity: 8 }), { type: 'request', now: 0, job: job({ id: 'g', class: 'quick', cpus: { min: 0, max: 0 }, locks: ['g'] }) });
+    assert.deepEqual(grants(r.actions), [['g', 0]]);
+  });
+
   it('鍵の重複を除く', () => {
     assert.deepEqual(clampJob(job({ locks: ['p', 'q', 'p'] }), 8).locks, ['p', 'q']);
     const r = decide(initialState({ capacity: 8 }), { type: 'request', now: 0, job: job({ id: 'a', locks: ['p', 'p'] }) });

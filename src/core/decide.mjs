@@ -17,12 +17,15 @@ export function initialState({ capacity, lockCaps = {} }) {
 /**
  * 要求を整える。cpus を 1..容量 に収める(min が容量を超えたまま待たせると永遠に入場しない)。
  * 鍵の重複も除く(表示と記録に同じ鍵を 2 度出さないため。入場の判断はリース単位で数えるので重複の有無で変わらない)。
+ * 鍵だけのジョブ(0..0 で鍵を 1 本以上持つ)は、CPU を 0 のまま保つ(設計 §5.2)。
  * @param {JobSpec} job @param {number} capacity @returns {JobSpec}
  */
 export function clampJob(job, capacity) {
+  const locks = [...new Set(job.locks)];
+  if (job.cpus.max === 0 && locks.length > 0) return { ...job, cpus: { min: 0, max: 0 }, locks };
   const min = Math.max(1, Math.min(job.cpus.min, capacity));
   const max = Math.max(min, Math.min(job.cpus.max, capacity));
-  return { ...job, cpus: { min, max }, locks: [...new Set(job.locks)] };
+  return { ...job, cpus: { min, max }, locks };
 }
 
 /** @param {State} s @param {string} id */
@@ -124,6 +127,14 @@ export function decide(input, e) {
       const rest = (s.unacked[e.session] ?? []).filter((u) => u.jobId !== e.jobId);
       const { [e.session]: _dropped, ...others } = s.unacked;
       s = { ...s, unacked: rest.length > 0 ? { ...others, [e.session]: rest } : others };
+      break;
+    }
+    case 'unmanagedExit': {
+      // 管理なしで走って失敗したジョブ(設計 §4.2)。リースは無いので、ack 待ちに積むだけ(同じ id は 2 度積まない)
+      const list = s.unacked[e.session] ?? [];
+      if (!list.some((u) => u.jobId === e.jobId)) {
+        s = { ...s, unacked: { ...s.unacked, [e.session]: [...list, { jobId: e.jobId, kind: 'failed', code: e.code, cmd: e.cmd }] } };
+      }
       break;
     }
     case 'tick':

@@ -2,7 +2,7 @@
 // @ts-check
 // 門番の検出力を測る(設計 §15)。原本は触らず、一時ディレクトリの写しに変異を 1 つずつ入れて、組ごとのテストを回す。
 // 使い方: node scripts/mutate.mjs <組の名前>   全部の変異が赤になれば終了コード 0、生き残った変異があれば 1。
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -21,6 +21,7 @@ const SUITES = {
       'test/core/recovery.test.mjs',
       'test/core/schedule.admission.test.mjs',
       'test/core/schedule.backfill.test.mjs',
+      'test/core/schedule.lockonly.test.mjs',
       'test/core/schedule.measure.test.mjs',
       'test/core/score.test.mjs',
     ],
@@ -34,7 +35,7 @@ const SUITES = {
       {
         name: 'M2 計測の単独実行を外す',
         file: 'src/core/schedule.mjs',
-        from: 'if (head === null && s.leases.length === 0 && locksFree(s, job.locks)) {',
+        from: 'if (head === null && cpuLeases(s).length === 0 && locksFree(s, job.locks)) {',
         to: 'if (head === null && locksFree(s, job.locks)) {',
       },
       {
@@ -60,6 +61,24 @@ const SUITES = {
         file: 'src/core/schedule.mjs',
         from: 'const endsBeforeHead = head.etaAt !== null && job.expectedMs !== null && now + job.expectedMs <= head.etaAt;',
         to: 'const endsBeforeHead = true;',
+      },
+      {
+        name: 'M7 CPU 0 のリースも計測の単独に数える',
+        file: 'src/core/schedule.mjs',
+        from: 'if (head === null && cpuLeases(s).length === 0 && locksFree(s, job.locks)) {',
+        to: 'if (head === null && s.leases.length === 0 && locksFree(s, job.locks)) {',
+      },
+      {
+        name: 'M8 鍵だけのジョブも計測の走行中は止める',
+        file: 'src/core/schedule.mjs',
+        from: 'if (isLockOnly(job)) {',
+        to: 'if (isLockOnly(job) && gate === null) {',
+      },
+      {
+        name: 'M9 鍵だけのジョブが前で止まっている鍵を追い越す',
+        file: 'src/core/schedule.mjs',
+        from: 'const ahead = job.locks.find((k) => blocked.has(k));',
+        to: 'const ahead = undefined;',
       },
     ],
   },
@@ -93,6 +112,237 @@ const SUITES = {
       },
     ],
   },
+  wrap: {
+    tests: ['test/run/nest.test.mjs', 'test/run/signals.test.mjs', 'test/daemon/unmanaged.test.mjs'],
+    mutations: [
+      {
+        name: 'W1 祖先が持つ鍵を外さない',
+        file: 'src/run/run.mjs',
+        from: '.filter((k) => !held.has(k)),',
+        to: ',',
+      },
+      {
+        name: 'W2 CPU を持つジョブの子に入れ子の印を立てない',
+        file: 'src/run/run.mjs',
+        from: "if (cpus > 0) childEnv.CONDUCTOR_IN_JOB = '1';",
+        to: '',
+      },
+      {
+        name: 'W3 入れ子で何も要らなくてもデーモンに要求する',
+        file: 'src/run/run.mjs',
+        from: 'if (job.cpus.max === 0 && job.locks.length === 0) {',
+        to: 'if (false) {',
+      },
+      {
+        name: 'W4 CPU を持つジョブの中でも CPU を要求する',
+        file: 'src/run/run.mjs',
+        from: "cpus: env.CONDUCTOR_IN_JOB === '1' ? { min: 0, max: 0 } : flags.cpus",
+        to: 'cpus: flags.cpus',
+      },
+      {
+        name: 'W5 グループの確かめ方を差し替えられない',
+        file: 'src/run/run.mjs',
+        from: 'pgid = verifyGroup(c.pid, ownPgid);',
+        to: 'pgid = verifiedGroup(c.pid, ownPgid);',
+      },
+      {
+        name: 'W6 デーモンが管理なしの失敗を ack 待ちに積まない',
+        file: 'src/daemon/server.mjs',
+        from: "if (u.code !== 0) apply({ type: 'unmanagedExit'",
+        to: "if (false) apply({ type: 'unmanagedExit'",
+      },
+      {
+        name: 'W7 管理なしで走っても控えない',
+        file: 'src/run/run.mjs',
+        from: 'if (unmanaged) {',
+        to: 'if (false) {',
+      },
+      {
+        name: 'W8 待っている間にデーモンが要求を拒んでも待ち続ける',
+        file: 'src/run/run.mjs',
+        from: "} else if (m.t === 'error' && phase === 'waiting') {",
+        to: '} else if (false) {',
+      },
+      {
+        // I3: 生きているデーモンの横で書かれた控えを、次の起動まで取り込まない(直す前の形)
+        name: 'W9 tick で控えを取り込まない',
+        file: 'src/daemon/server.mjs',
+        from: '    try {\n      ingestUnmanaged();',
+        to: '    try {\n      void 0;',
+      },
+      {
+        // m4: rename と unlink の間で落ちて残った別名を拾わない
+        name: 'W10 残った別名(.taking)を拾わない',
+        file: 'src/daemon/store.mjs',
+        from: ".filter((name) => name.startsWith(prefix) && name.endsWith('.taking'))",
+        to: '.filter(() => false)',
+      },
+    ],
+  },
+  shim: {
+    tests: ['test/shim/decide.test.mjs', 'test/shim/shims.test.mjs', 'test/hooks/agreement.test.mjs'],
+    mutations: [
+      {
+        name: 'D1 CPU を持つジョブの中でも分類する',
+        file: 'src/shim/decide.mjs',
+        from: "if (env.CONDUCTOR_IN_JOB === '1') return { kind: 'pass' };",
+        to: '',
+      },
+      {
+        // I2: bin/conductor が PATH の node(node の shim)を通っても、conductor の CLI 自身を外側のジョブに包まない
+        name: 'D2 conductor の CLI 自身も分類して包む',
+        file: 'src/shim/decide.mjs',
+        from: "if (word === 'node' && isOwnCli(args[0], cwd)) return { kind: 'pass' };",
+        to: '',
+      },
+      {
+        // I4: 分類器が失敗したら本物へ行く(shim の失敗で作業を止めない)
+        name: 'S6 分類器が失敗したら作業を止める',
+        file: 'shims/_shim.sh',
+        from: '2>/dev/null) || exec "$real" "$@"',
+        to: '2>/dev/null) || exit 1',
+      },
+      {
+        // I4: 想定外の答えでも本物へ行く
+        name: 'S7 分類器の想定外の答えで作業を止める',
+        file: 'shims/_shim.sh',
+        from: '\n  *) exec "$real" "$@" ;;\nesac',
+        to: '\n  *) exit 1 ;;\nesac',
+      },
+      {
+        name: 'S2 node が無いと作業を止める',
+        file: 'shims/_shim.sh',
+        from: '[ -n "$node" ] || exec "$real" "$@"',
+        to: '[ -n "$node" ] || exit 1',
+      },
+      {
+        name: 'S3 祖先が持つ git の鍵も取りに行く',
+        file: 'src/shim/decide.mjs',
+        from: "return heldLocks(env).has(lock) ? { kind: 'pass' } : { kind: 'lock', lock };",
+        to: "return { kind: 'lock', lock };",
+      },
+      {
+        name: 'S4 管理対象を包まない',
+        file: 'shims/_shim.sh',
+        from: '"run "*) exec',
+        to: '"never-run "*) exec',
+      },
+      {
+        name: 'S5 git の鍵だけのジョブを作らない',
+        file: 'shims/_shim.sh',
+        from: '"lock "*) exec',
+        to: '"never-lock "*) exec',
+      },
+    ],
+  },
+  hooks: {
+    tests: ['test/hooks/pretooluse.test.mjs', 'test/hooks/session.test.mjs', 'test/hooks/agreement.test.mjs', 'test/hooks/shell.test.mjs'],
+    mutations: [
+      {
+        name: 'H1 既に背景でも書き換える',
+        file: 'src/hooks/pretooluse.mjs',
+        from: 'if (found.heavy && ti.run_in_background !== true) {',
+        to: 'if (found.heavy) {',
+      },
+      {
+        name: 'H2 背景への書き換えに allow を付ける(権限の確認を飛ばす)',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "return { hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { ...ti, run_in_background: true } } };",
+        to: "return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput: { ...ti, run_in_background: true } } };",
+      },
+      {
+        name: 'H3 shim を迂回する形を拒否しない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: 'if (bypass && !wrapped) unshimmed.push(text);',
+        to: '',
+      },
+      {
+        name: 'H4 timeout の値を読み飛ばさない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "while (i < words.length && words[i].startsWith('-')) i += words[i] === '-s' || words[i] === '-k' ? 2 : 1;\n      i += 1;",
+        to: '',
+      },
+      {
+        name: 'H5 conductor run で包んだ中も拒否の判定にかける',
+        file: 'src/hooks/pretooluse.mjs',
+        from: 'visit(w.argv, true);',
+        to: 'visit(w.argv, false);',
+      },
+      {
+        // C1: 8 語で始まらない部分に分類が当たれば、読むだけのコマンドでも拒否する(直す前の形)
+        name: 'H10 拒否の条件を「shim の無い語で当たれば拒否」へ戻す',
+        file: 'src/hooks/pretooluse.mjs',
+        from: 'const bypass = pathHead || profiles.some((np) => np.profile.match.some((g) => leadWord(g) === head && globMatch(g, text)));',
+        to: 'const bypass = true;',
+      },
+      {
+        // C1: shim は git を profile で分類しないのに、PreToolUse だけが分類する(直す前の形)
+        name: 'H11 git の部分も profile で分類する',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "if (base === 'git') {",
+        to: "if (base === 'never-git') {",
+      },
+      {
+        // I1: conductor run の `--` の後ろを見ない(直す前は conductor run を含むコマンドを丸ごと素通しした)
+        name: 'H12 conductor run の包みの性格と -- の後ろを見ない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "if (w.jobClass !== 'quick') found.heavy = true;\n      visit(w.argv, true);",
+        to: '',
+      },
+      {
+        // I1: bash -c "…" の中を見ない
+        name: 'H13 bash -c の引用の中を見ない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: 'for (const inner of simpleCommands(script)) visit(inner, wrapped);',
+        to: '',
+      },
+      {
+        // I1: env -u NAME の値を読み飛ばさない
+        name: 'H14 env の値つきオプションの値を読み飛ばさない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: 'i += ENV_VALUE_OPTIONS.has(words[i]) ? 2 : 1;',
+        to: 'i += 1;',
+      },
+      {
+        // C1: heredoc の本文をコマンドとして読む(本文の行の npm test や ; で判定が変わる)
+        name: 'H15 heredoc の本文を読み飛ばさない',
+        file: 'src/hooks/shell.mjs',
+        from: 'i = skipHeredocs(src, i + 1, heredocs);',
+        to: 'i += 1;',
+      },
+      {
+        // I1: ( … ) の中の単純コマンドを捨てる
+        name: 'H16 ( … ) の中を見ない',
+        file: 'src/hooks/shell.mjs',
+        from: "      endCommand();\n      i = parse(src, i + 1, ')', out);",
+        to: "      endCommand();\n      i = parse(src, i + 1, ')', []);",
+      },
+      {
+        name: 'H6 考える層の中でも判定する',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "if (env.CONDUCTOR_THINKER === '1') return null;",
+        to: '',
+      },
+      {
+        name: 'H7 Stop が 2 度目の停止も差し戻す',
+        file: 'src/hooks/session.mjs',
+        from: "if (env.CONDUCTOR_THINKER === '1' || input.stop_hook_active === true) return null;",
+        to: "if (env.CONDUCTOR_THINKER === '1') return null;",
+      },
+      {
+        name: 'H8 SessionStart が同じ行を何度も足す',
+        file: 'src/hooks/session.mjs',
+        from: "if (!(existsSync(envFile) ? readFileSync(envFile, 'utf8') : '').split('\\n').includes(line)) appendFileSync(",
+        to: 'if (true) appendFileSync(',
+      },
+      {
+        name: 'H9 SessionStart が版の違いを知らせない',
+        file: 'src/hooks/session.mjs',
+        from: 'if (snap.version !== version) {',
+        to: 'if (false) {',
+      },
+    ],
+  },
   group: {
     tests: ['test/run/group.test.mjs'],
     mutations: [
@@ -112,6 +362,42 @@ const SUITES = {
   },
 };
 
+/** 変異で止まったテストに、走行ごと付き合わない上限 */
+const TEST_TIMEOUT_MS = 180_000;
+
+/**
+ * 写しでテストを走らせる。テストは自分のプロセスグループで起動し、時間切れにはそのグループごと SIGKILL する
+ * (親だけを殺すと、テストファイルのプロセスが孤児として残る)。時間切れは件数の行が出ないので「生き残り」に数える
+ * (外から殺された走行を赤に見せない)。
+ * @param {string} dir @param {string[]} tests
+ * @returns {Promise<{ stdout: string, stderr: string, timedOut: boolean }>}
+ */
+function runTests(dir, tests) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ['--test', '--test-reporter=spec', ...tests], { cwd: dir, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    child.stdout.setEncoding('utf8').on('data', (s) => (stdout += s));
+    child.stderr.setEncoding('utf8').on('data', (s) => (stderr += s));
+    const timer = setTimeout(() => {
+      timedOut = true;
+      // detached で起動したので、子の pgid は子の pid(このスクリプトのグループではない)
+      if (child.pid !== undefined) {
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          // 既に居ない
+        }
+      }
+    }, TEST_TIMEOUT_MS);
+    child.on('close', () => {
+      clearTimeout(timer);
+      resolve({ stdout, stderr, timedOut });
+    });
+  });
+}
+
 const suiteName = process.argv[2] ?? '';
 const suite = SUITES[suiteName];
 if (suite === undefined) {
@@ -123,7 +409,7 @@ let survived = 0;
 for (const m of suite.mutations) {
   const dir = mkdtempSync(join(tmpdir(), 'cmut-'));
   try {
-    for (const sub of ['bin', 'src', 'test', 'testkit']) {
+    for (const sub of ['bin', 'shims', 'src', 'test', 'testkit']) {
       if (existsSync(join(root, sub))) cpSync(join(root, sub), join(dir, sub), { recursive: true });
     }
     cpSync(join(root, 'package.json'), join(dir, 'package.json'));
@@ -133,8 +419,9 @@ for (const m of suite.mutations) {
     const count = src.split(m.from).length - 1;
     if (count !== 1) throw new Error(`${m.name}: 置き換え元が ${count} 箇所ある(1 箇所であるべき)`);
     writeFileSync(file, src.replace(m.from, m.to));
-    const r = spawnSync(process.execPath, ['--test', '--test-reporter=spec', ...suite.tests], { cwd: dir, encoding: 'utf8' });
+    const r = await runTests(dir, suite.tests);
     const out = `${r.stdout}${r.stderr}`;
+    if (r.timedOut) console.log(`   走行が ${TEST_TIMEOUT_MS}ms で終わらず、テストのプロセスグループごと止めた`);
     const num = (/** @type {string} */ k) => (out.match(new RegExp(`^ℹ ${k} (\\d+)`, 'm')) ?? [])[1] ?? '?';
     const section = out.includes('✖ failing tests:') ? out.split('✖ failing tests:')[1] : '';
     /** @type {string[]} */
@@ -143,9 +430,11 @@ for (const m of suite.mutations) {
       const hit = line.match(/^✖ (.+?) \(\d/);
       if (hit && !red.includes(hit[1])) red.push(hit[1]);
     }
-    const killed = num('fail') !== '0' && num('fail') !== '?';
+    // テストごとの時間の上限で打ち切られたテストは fail ではなく cancelled に数えられる。どちらも赤とする
+    const redCount = (/** @type {string} */ k) => num(k) !== '0' && num(k) !== '?';
+    const killed = redCount('fail') || redCount('cancelled');
     if (!killed) survived += 1;
-    console.log(`== ${m.name} | ${m.file} | ${killed ? '赤' : '生き残り'} | tests ${num('tests')} / fail ${num('fail')} / pass ${num('pass')}`);
+    console.log(`== ${m.name} | ${m.file} | ${killed ? '赤' : '生き残り'} | tests ${num('tests')} / fail ${num('fail')} / cancelled ${num('cancelled')} / pass ${num('pass')}`);
     console.log(`   壊した行: ${m.to.trim() === '' ? '(行を消した)' : m.to.trim()}`);
     for (const name of red) console.log(`   赤: ${name}`);
   } finally {

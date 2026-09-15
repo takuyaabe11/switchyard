@@ -42,7 +42,13 @@ export async function connectDaemon({ home, autoStart = true, timeoutMs = 2_000,
   }
   mkdirSync(home, { recursive: true });
   const log = openSync(p.log, 'a');
-  const child = spawn(process.execPath, [daemonEntry], { detached: true, stdio: ['ignore', log, log], env: { ...env, CONDUCTOR_HOME: home } });
+  // 常駐するデーモンに、最初に接続したクライアントの入れ子の印を残さない
+  /** @type {NodeJS.ProcessEnv} */
+  const daemonEnv = { ...env, CONDUCTOR_HOME: home };
+  delete daemonEnv.CONDUCTOR_IN_JOB;
+  delete daemonEnv.CONDUCTOR_HELD_LOCKS;
+  delete daemonEnv.CONDUCTOR_JOB_ID;
+  const child = spawn(process.execPath, [daemonEntry], { detached: true, stdio: ['ignore', log, log], env: daemonEnv });
   child.unref();
   closeSync(log);
   const until = Date.now() + timeoutMs;

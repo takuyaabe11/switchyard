@@ -6,6 +6,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { UsageError } from '../../src/cli/args.mjs';
 import { connectDaemon, DaemonUnavailableError } from '../../src/client/connect.mjs';
 import { pathsOf } from '../../src/daemon/paths.mjs';
 import { startDaemon } from '../../src/daemon/server.mjs';
@@ -52,6 +53,14 @@ describe('buildRequest', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'cproj-'));
     const r = buildRequest({ argv: ['git', 'status', '-s'], flags: {}, env: {}, cwd });
     assert.deepEqual([r.job.class, r.job.cpus, r.job.profile, r.profile], ['batch', { min: 1, max: 1 }, 'cmd:git status', null]);
+  });
+
+  it('--cpus 0..0 に鍵が 1 本も無ければ(profile の鍵を足しても)使い方の誤りとして投げる。入れ子で祖先の鍵を外して空になるのは誤りではない', () => {
+    const cwd = project({ nolock: { match: ['never'], class: 'quick' }, locked: { match: ['never'], class: 'quick', locks: ['p'] } });
+    const zero = { min: 0, max: 0 };
+    assert.throws(() => buildRequest({ argv: ['x'], flags: { cpus: zero, profile: 'nolock' }, env: {}, cwd }), (e) => e instanceof UsageError && /鍵が 1 本以上要る/.test(e.message));
+    assert.deepEqual(buildRequest({ argv: ['x'], flags: { cpus: zero, profile: 'locked' }, env: {}, cwd }).job.locks, ['p']);
+    assert.deepEqual(buildRequest({ argv: ['x'], flags: { cpus: zero, profile: 'locked' }, env: { CONDUCTOR_HELD_LOCKS: 'p' }, cwd }).job.locks, []);
   });
 
   it('無い profile を指定したら投げる', () => {

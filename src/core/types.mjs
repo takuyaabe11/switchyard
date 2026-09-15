@@ -64,6 +64,7 @@
  *   { type: 'orphanGone', now: number, jobId: string } |
  *   { type: 'resume', now: number, jobId: string, pid: number | null, pgid: number | null } |
  *   { type: 'ack', now: number, session: string, jobId: string } |
+ *   { type: 'unmanagedExit', now: number, session: string, jobId: string, code: number | null, cmd: string } |
  *   { type: 'tick', now: number }
  * )} Event
  */

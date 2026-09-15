@@ -1,0 +1,3 @@
+#!/bin/sh
+name=node
+. "${0%/*}/_shim.sh"

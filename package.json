@@ -1,6 +1,6 @@
 {
   "name": "conductor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "engines": {
@@ -11,12 +11,15 @@
     "conductord": "bin/conductord.mjs"
   },
   "scripts": {
-    "test": "node --test --test-reporter=spec",
+    "test": "env -u CONDUCTOR_IN_JOB -u CONDUCTOR_HELD_LOCKS -u CONDUCTOR_JOB_ID node --test --test-reporter=spec",
     "typecheck": "tsc -p .",
     "check": "npm run typecheck && npm test",
     "mutate:core": "node scripts/mutate.mjs core",
     "mutate:escape": "node scripts/mutate.mjs escape",
-    "mutate:group": "node scripts/mutate.mjs group"
+    "mutate:wrap": "node scripts/mutate.mjs wrap",
+    "mutate:group": "node scripts/mutate.mjs group",
+    "mutate:shim": "node scripts/mutate.mjs shim",
+    "mutate:hooks": "node scripts/mutate.mjs hooks"
   },
   "devDependencies": {
     "@types/node": "^26.5.1",

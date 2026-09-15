@@ -1,10 +1,14 @@
 // @ts-check
 // conductor run の本体(設計 §4.3)。割り振りを待ち、子を別グループで起動し、心拍と終了をデーモンへ返す。
-import { execFileSync } from 'node:child_process';
 import { constants as osConstants } from 'node:os';
+import { basename } from 'node:path';
+import { UsageError } from '../cli/args.mjs';
 import { channel, connectDaemon, DaemonUnavailableError } from '../client/connect.mjs';
 import { sessionId } from '../client/session.mjs';
+import { heldLocks, repoRoot } from '../config/context.mjs';
 import { applyTemplate, classify, loadProfiles } from '../config/profiles.mjs';
+import { pathsOf } from '../daemon/paths.mjs';
+import { appendRecord } from '../daemon/store.mjs';
 import { readPgid, signalGroup, spawnInOwnGroup, verifiedGroup, waitGroupGone } from './group.mjs';
 import { createEscapeTracker } from './watch.mjs';
 
@@ -31,20 +35,15 @@ import { createEscapeTracker } from './watch.mjs';
  *   unmanagedAfterMs?: number,
  *   watchMs?: number,
  *   connect?: typeof connectDaemon,
- *   signals?: SignalSource
+ *   signals?: SignalSource,
+ *   verifyGroup?: typeof verifiedGroup
  * }} RunOptions
  */
 
 const CALLER_SIGNALS = /** @type {const} */ (['SIGTERM', 'SIGINT', 'SIGHUP']);
 
-/** @param {string} cwd @returns {string} */
-export function repoRoot(cwd) {
-  try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  } catch {
-    return cwd;
-  }
-}
+// 既存の呼び出し元とテストのために、ここからも読めるようにしておく
+export { heldLocks, repoRoot };
 
 /** @param {NodeJS.Signals | null} sig @returns {number} */
 function signalCode(sig) {
@@ -53,6 +52,8 @@ function signalCode(sig) {
 
 /**
  * ジョブの宣言を組み立てる。--profile の指定 → コマンドの分類 → 既定、の順に性格を決め、引数で上書きする。鍵は足し合わせる。
+ * 入れ子(設計 §4.3 の 7): 祖先が持つ鍵は外す。CPU を持つジョブの中(CONDUCTOR_IN_JOB=1)では CPU を 0..0 にする
+ * (親が CPU を持っているので二重に数えない。数えると、容量いっぱいのときに親子が互いを待つ)。
  * @param {{ argv: string[], flags: RunFlags, env: NodeJS.ProcessEnv, cwd: string }} input
  * @returns {{ job: JobRequest, profile: Profile | null, configError: string | null }}
  */
@@ -63,15 +64,23 @@ export function buildRequest({ argv, flags, env, cwd }) {
   const named = flags.profile !== undefined ? profiles.find((p) => p.name === flags.profile) ?? null : classify(cmd, profiles);
   if (flags.profile !== undefined && named === null) throw new Error(`profile ${flags.profile} が見つからない`);
   const base = named === null ? null : named.profile;
+  const held = heldLocks(env);
+  const declaredLocks = [...new Set([...(base?.locks ?? []), ...(flags.locks ?? [])])];
+  // 鍵だけのジョブ(--cpus 0..0)に鍵が 1 本も無いのは使い方の誤り。--profile の鍵はここで初めて分かるので、CLI の検査の続きをここで行う。
+  // これで、デーモンに要求せずに走らせるのは、入れ子で祖先の鍵を外して何も残らなかったときだけになる(設計 §4.3 の 7)
+  if (flags.cpus?.max === 0 && declaredLocks.length === 0) {
+    throw new UsageError(`--cpus 0..0(鍵だけのジョブ)には鍵が 1 本以上要る(--lock も、profile ${flags.profile ?? '(指定なし)'} の locks も無い)`);
+  }
   return {
     job: {
       session: sessionId(env),
       repo,
-      profile: named === null ? `cmd:${argv.slice(0, 2).join(' ')}` : named.name,
+      // shim は本物のパスで起動するので、先頭の語は basename にする(パスごとに見込みが分かれないように。設計 §5.4)
+      profile: named === null ? `cmd:${[basename(argv[0]), ...argv.slice(1, 2)].join(' ')}` : named.name,
       cmd,
       class: flags.class ?? base?.class ?? 'batch',
-      cpus: flags.cpus ?? base?.cpus ?? { min: 1, max: 1 },
-      locks: [...new Set([...(base?.locks ?? []), ...(flags.locks ?? [])])],
+      cpus: env.CONDUCTOR_IN_JOB === '1' ? { min: 0, max: 0 } : flags.cpus ?? base?.cpus ?? { min: 1, max: 1 },
+      locks: declaredLocks.filter((k) => !held.has(k)),
       preempt: flags.preempt ?? base?.preempt ?? 'throttle',
       why: flags.why ?? null,
     },
@@ -117,6 +126,7 @@ export function runJob(opts) {
     watchMs = 2_000,
     connect = connectDaemon,
     signals = process,
+    verifyGroup = verifiedGroup,
   } = opts;
   const { job, profile, configError } = buildRequest({ argv, flags, env, cwd });
   if (configError !== null) out(`[conductor] ${configError}(既定表で続ける)`);
@@ -135,6 +145,8 @@ export function runJob(opts) {
     let pgid = null;
     let childStartedAt = 0;
     let killedByCaller = false;
+    /** デーモンの管理の外で走った(届かなかった・見失われた)。終わったら控える(設計 §4.3 の 8) */
+    let unmanaged = false;
     let lastNote = '';
     let finished = false;
     /** @type {NodeJS.Timeout | null} */
@@ -175,6 +187,14 @@ export function runJob(opts) {
       phase = 'done';
       if (killTimer !== null) clearTimeout(killTimer);
       if (escape !== null) for (const line of escapeLines(escape)) out(line);
+      if (unmanaged) {
+        // デーモンの次の起動で取り込まれ、失敗なら持ち主の Stop に出る(設計 §4.2)
+        try {
+          appendRecord(pathsOf(home).unmanaged, { at: Date.now(), session: job.session, repo: job.repo, profile: job.profile, cmd: job.cmd, code, durationMs: Date.now() - childStartedAt });
+        } catch (e) {
+          out(`[conductor] 管理なしの走行を控えられない: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
       const summary = escape === null ? null : { escaped: escape.escaped, survivors: escape.survivors };
       if (ch !== null && jobId !== null && !ch.isClosed()) {
         ch.onMessage((m) => {
@@ -196,6 +216,11 @@ export function runJob(opts) {
       /** @type {NodeJS.ProcessEnv} */
       const childEnv = { ...env, ...tpl.env, CONDUCTOR_CPUS: String(cpus) };
       if (jobId !== null) childEnv.CONDUCTOR_JOB_ID = jobId;
+      // デーモンに要求せずに走らせる子(入れ子で直接・管理なし)に、祖先のジョブの id を自分の id として渡さない
+      else delete childEnv.CONDUCTOR_JOB_ID;
+      // 入れ子の印(設計 §4.3 の 7): CPU を持つジョブの子だけに立てる(鍵だけのジョブの子は、中の重い走行を別に管理させる)
+      if (cpus > 0) childEnv.CONDUCTOR_IN_JOB = '1';
+      childEnv.CONDUCTOR_HELD_LOCKS = [...new Set([...heldLocks(env), ...job.locks])].join(',');
       const c = spawnInOwnGroup([...argv, ...tpl.args], { env: childEnv, cwd, stdio: 'inherit' });
       child = c;
       c.once('error', (e) => {
@@ -221,7 +246,7 @@ export function runJob(opts) {
         });
       });
       if (c.pid === undefined) return;
-      pgid = verifiedGroup(c.pid, ownPgid);
+      pgid = verifyGroup(c.pid, ownPgid);
       if (pgid === null) {
         out('[conductor] 子のプロセスグループを確かめられないので、グループへの信号は送らない(呼び出し元の終了だけを子に伝える)');
       } else {
@@ -292,10 +317,19 @@ export function runJob(opts) {
             c.send({ t: 'request', job });
           } else if (phase === 'running') {
             out('[conductor] デーモンがこのジョブを知らないので、管理なしで走り続ける');
+            unmanaged = true;
             if (hbTimer !== null) clearInterval(hbTimer);
             ch = null;
             c.close();
           }
+        } else if (m.t === 'error' && phase === 'waiting') {
+          // 待っている間のエラーは要求が受け付けられなかったということ。待ち続けると永遠に終わらないので、
+          // 作業を止めずに管理なしで実行し、控える(設計 §10・§4.3 の 8)
+          out(`[conductor] デーモンが要求を受け付けない(${String(m.message)})ので、管理なしで実行する`);
+          unmanaged = true;
+          ch = null;
+          c.close();
+          startChild(job.cpus.min, false);
         } else if (m.t === 'error') {
           out(`[conductor] デーモンのエラー: ${String(m.message)}`);
         }
@@ -335,6 +369,7 @@ export function runJob(opts) {
         } catch {
           if (phase === 'waiting' && Date.now() - lostAt > unmanagedAfterMs) {
             out(`[conductor] ${unmanagedAfterMs}ms つなげないので、管理なしで実行する(二重貸し防止などの保証なし)`);
+            unmanaged = true;
             startChild(job.cpus.min, false);
             return;
           }
@@ -346,6 +381,12 @@ export function runJob(opts) {
         }
       }
     };
+
+    if (job.cpus.max === 0 && job.locks.length === 0) {
+      // 入れ子で CPU も鍵も要らなくなった: デーモンに要求を出さず、そのまま走らせる(設計 §4.3 の 7)
+      startChild(0, false);
+      return;
+    }
 
     connect({ home, env })
       .then((conn) => {
@@ -360,6 +401,7 @@ export function runJob(opts) {
         if (over()) return;
         if (!(e instanceof DaemonUnavailableError)) throw e;
         out(`[conductor] デーモンに届かないので、管理なしで実行する(二重貸し防止などの保証なし・CPU は宣言の最小 ${job.cpus.min}): ${e.message}`);
+        unmanaged = true;
         startChild(job.cpus.min, false);
       });
   });

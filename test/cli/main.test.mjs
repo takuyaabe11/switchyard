@@ -40,6 +40,14 @@ describe('cli', () => {
     assert.match(bad.err, /知らないサブコマンド: fly[\s\S]*使い方:/);
   });
 
+  it('run --cpus 0 --profile <鍵の無い profile> は、走らせずに使い方の誤り(2)で終わり、デーモンも起動しない', async () => {
+    const home = tempHome();
+    const r = await capture(['run', '--cpus', '0', '--profile', 'default:batch', '--', process.execPath, '-e', 'process.exit(9)'], { CONDUCTOR_HOME: home });
+    assert.equal(r.code, 2, r.err);
+    assert.match(r.err, /鍵が 1 本以上要る[\s\S]*使い方:/);
+    assert.equal(existsSync(pathsOf(home).lock), false);
+  });
+
   it('デーモンが居なければ top はそう言い、デーモンを起動しない', async () => {
     const home = tempHome();
     const r = await capture(['top'], { CONDUCTOR_HOME: home });

@@ -16,6 +16,7 @@ const snap = {
   ],
   unacked: { s3: [{ jobId: 'jC', kind: 'failed', code: 1, cmd: 'npm run build' }] },
   badRecords: 0,
+  version: '0.2.0',
 };
 
 describe('render', () => {
