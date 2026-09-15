@@ -79,9 +79,10 @@ const SUITES = {
         to: 'watchTimer = null;',
       },
       {
-        name: 'E3 使い回された pid を同じ子とみなす',
+        // I2: 開始時刻(started)の照合をやめ、使い回された pid を同じ子とみなしてしまう変異
+        name: 'E3 使い回された pid を同じ子とみなす(開始時刻を照合しない)',
         file: 'src/run/watch.mjs',
-        from: 'const orphanedSame = known !== undefined && r.ppid === 1 && known.comm === comm;',
+        from: 'const orphanedSame = known !== undefined && r.ppid === 1 && known.started === r.started;',
         to: 'const orphanedSame = known !== undefined;',
       },
       {

@@ -3,30 +3,27 @@
 // どのコマンドにも同じように働く。ツールごとの表は持たない。
 import { execFileSync } from 'node:child_process';
 
-/** @typedef {{ pid: number, ppid: number, pgid: number, comm: string }} ProcRow */
+/** @typedef {{ pid: number, ppid: number, pgid: number, comm: string, started: string }} ProcRow */
 /** @typedef {{ comm: string, count: number }} EscapedCount */
 /** @typedef {{ pid: number, comm: string, inGroup: boolean }} Survivor */
 /** @typedef {{ seen: number, escaped: EscapedCount[], survivors: Survivor[] }} EscapeReport */
 
-/** @returns {ProcRow[]} */
+/**
+ * @returns {ProcRow[]}
+ */
 export function processTable() {
-  return execFileSync('ps', ['-A', '-o', 'pid=,ppid=,pgid=,comm='], { encoding: 'utf8' })
+  return execFileSync('ps', ['-A', '-o', 'pid=,ppid=,pgid=,lstart=,comm='], { encoding: 'utf8' })
     .trim()
     .split('\n')
     .map((line) => {
-      const [pid, ppid, pgid, ...comm] = line.trim().split(/\s+/);
-      return { pid: Number(pid), ppid: Number(ppid), pgid: Number(pgid), comm: comm.join(' ') };
+      // lstart は「曜日 月 日 時刻 年」の 5 語(先頭 pid/ppid/pgid の後、末尾の comm の前)。
+      // comm 自体は空白を含まない前提(パスに空白を含む実行ファイルは稀で、既存の実測でも 1 語だった)
+      const parts = line.trim().split(/\s+/);
+      const [pid, ppid, pgid] = parts;
+      const comm = parts[parts.length - 1] ?? '';
+      const started = parts.slice(3, parts.length - 1).join(' ');
+      return { pid: Number(pid), ppid: Number(ppid), pgid: Number(pgid), comm, started };
     });
-}
-
-/** @param {number} pid */
-function pidAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return /** @type {NodeJS.ErrnoException} */ (e).code === 'EPERM';
-  }
 }
 
 /**
@@ -41,12 +38,13 @@ const baseName = (comm) => {
 
 /**
  * 子孫の追跡器。sample() を定期的に呼び、終わったら report() で結果を得る。
- * 親子関係(ppid)で子孫をたどる。親が先に終わって親子関係が切れた子(ppid 1)も、名前が同じなら追い続ける。
+ * 親子関係(ppid)で子孫をたどる。親が先に終わって親子関係が切れた子(ppid 1)も、
+ * 前に見た開始時刻(lstart)と一致するときだけ追い続ける(名前の一致では使い回された pid を取り違える。I2)。
  * 限界: sample() の間隔より速く二重 fork して親を離れたプロセスは見逃しうる。
- * @param {{ rootPid: number, pgid: number, list?: () => ProcRow[], isAlive?: (pid: number) => boolean }} opts
+ * @param {{ rootPid: number, pgid: number, list?: () => ProcRow[] }} opts
  */
-export function createEscapeTracker({ rootPid, pgid, list = processTable, isAlive = pidAlive }) {
-  /** @type {Map<number, { pgid: number, comm: string }>} */
+export function createEscapeTracker({ rootPid, pgid, list = processTable }) {
+  /** @type {Map<number, { pgid: number, comm: string, started: string }>} */
   const seen = new Map();
 
   const sample = () => {
@@ -71,9 +69,9 @@ export function createEscapeTracker({ rootPid, pgid, list = processTable, isAliv
     for (const r of rows) {
       const comm = baseName(r.comm);
       const known = seen.get(r.pid);
-      // 親子関係が切れた子は、名前が同じときだけ同じプロセスとみなす(使い回された pid を取り違えない)
-      const orphanedSame = known !== undefined && r.ppid === 1 && known.comm === comm;
-      if (tree.has(r.pid) || orphanedSame) seen.set(r.pid, { pgid: r.pgid, comm });
+      // 親子関係が切れた子は、開始時刻が前に見たものと一致するときだけ同じプロセスとみなす(名前の一致はやめる。使い回された pid を取り違えない)
+      const orphanedSame = known !== undefined && r.ppid === 1 && known.started === r.started;
+      if (tree.has(r.pid) || orphanedSame) seen.set(r.pid, { pgid: r.pgid, comm, started: r.started });
     }
   };
 
@@ -83,10 +81,23 @@ export function createEscapeTracker({ rootPid, pgid, list = processTable, isAliv
     const counts = new Map();
     for (const [, v] of seen) if (v.pgid !== pgid) counts.set(v.comm, (counts.get(v.comm) ?? 0) + 1);
     const escaped = [...counts].map(([comm, count]) => ({ comm, count })).sort((a, b) => (a.comm < b.comm ? -1 : a.comm > b.comm ? 1 : 0));
-    const survivors = [...seen]
-      .filter(([pid]) => pid !== rootPid && isAlive(pid))
-      .map(([pid, v]) => ({ pid, comm: v.comm, inGroup: v.pgid === pgid }))
-      .sort((a, b) => a.pid - b.pid);
+    // 生き残りは、報告の時点でプロセス一覧を読み直し、同じ pid で開始時刻も一致するものだけにする(使い回された pid へ SIGKILL しない。I2)
+    /** @type {ProcRow[]} */
+    let fresh = [];
+    try {
+      fresh = list();
+    } catch {
+      fresh = []; // 読み直せなければ、確かめられない生き残りは報告しない(安全側に倒す)
+    }
+    const freshById = new Map(fresh.map((r) => [r.pid, r]));
+    /** @type {Survivor[]} */
+    const survivors = [];
+    for (const [pid, v] of seen) {
+      if (pid === rootPid) continue;
+      const now = freshById.get(pid);
+      if (now !== undefined && now.started === v.started) survivors.push({ pid, comm: v.comm, inGroup: v.pgid === pgid });
+    }
+    survivors.sort((a, b) => a.pid - b.pid);
     return { seen: seen.size, escaped, survivors };
   };
 
