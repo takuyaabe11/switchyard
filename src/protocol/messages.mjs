@@ -57,10 +57,12 @@ export function parseJobRequest(v) {
   const pre = o.preempt;
   if (typeof pre !== 'string' || !PREEMPTS.includes(pre)) throw new Error('job.preempt は pause / throttle / never');
   const c = /** @type {Record<string, unknown> | null} */ (typeof o.cpus === 'object' ? o.cpus : null);
-  if (c === null || !Number.isInteger(c.min) || !Number.isInteger(c.max) || Number(c.min) < 1 || Number(c.max) < Number(c.min)) {
-    throw new Error('job.cpus は { min: 1 以上の整数, max: min 以上の整数 }');
+  const lockOnly = c !== null && c.min === 0 && c.max === 0;
+  if (c === null || !Number.isInteger(c.min) || !Number.isInteger(c.max) || (!lockOnly && Number(c.min) < 1) || Number(c.max) < Number(c.min)) {
+    throw new Error('job.cpus は { min: 1 以上の整数, max: min 以上の整数 } か、鍵だけのジョブの { min: 0, max: 0 }');
   }
   if (!Array.isArray(o.locks) || !o.locks.every((x) => typeof x === 'string')) throw new Error('job.locks は文字列の配列');
+  if (lockOnly && o.locks.length === 0) throw new Error('job.cpus が 0..0 の鍵だけのジョブは、job.locks を 1 本以上持つ');
   if (o.why !== null && typeof o.why !== 'string') throw new Error('job.why は文字列か null');
   return {
     session: str('session'),

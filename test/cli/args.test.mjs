@@ -12,6 +12,13 @@ describe('parseArgs', () => {
     });
   });
 
+  it('--cpus 0..0(鍵だけのジョブ)は --lock と一緒なら受け付け、無ければ UsageError', () => {
+    assert.deepEqual(parseArgs(['run', '--cpus', '0..0', '--lock', 'g', '--', 'git', 'commit']), { cmd: 'run', flags: { cpus: { min: 0, max: 0 }, locks: ['g'] }, argv: ['git', 'commit'] });
+    assert.deepEqual(parseCpus('0'), { min: 0, max: 0 });
+    assert.throws(() => parseArgs(['run', '--cpus', '0..0', '--', 'git', 'commit']), /--lock が 1 本以上要る/);
+    assert.throws(() => parseCpus('0..2'), UsageError);
+  });
+
   it('-- の後ろはオプションとして読まない', () => {
     assert.deepEqual(parseArgs(['run', '--', 'node', '--test']), { cmd: 'run', flags: {}, argv: ['node', '--test'] });
   });
@@ -49,6 +56,6 @@ describe('parseCpus', () => {
   it('4 と 2..10 を受け、それ以外は拒む', () => {
     assert.deepEqual(parseCpus('4'), { min: 4, max: 4 });
     assert.deepEqual(parseCpus('2..10'), { min: 2, max: 10 });
-    for (const bad of ['0', '3..2', 'a', '2..', '..4', '1.5']) assert.throws(() => parseCpus(bad), UsageError, bad);
+    for (const bad of ['3..2', 'a', '2..', '..4', '1.5', '0..2']) assert.throws(() => parseCpus(bad), UsageError, bad);
   });
 });

@@ -23,6 +23,8 @@ const scenario = fc
         extra: fc.integer({ min: 0, max: 6 }),
         locks: fc.subarray(['p', 'q', 'p']),
         expectedMin: fc.option(fc.integer({ min: 1, max: 25 }), { nil: null }),
+        // 4 本に 1 本は鍵だけのジョブ(CPU 0..0・鍵 1 本以上。設計 §5.2)
+        lockOnly: fc.constantFrom(false, false, false, true),
       }),
       { minLength: 1, maxLength: 12 },
     ),
@@ -35,13 +37,21 @@ const scenario = fc
       arriveAt: j.arriveMin * MIN,
       runMs: j.runMin * MIN,
       code: j.code,
-      spec: {
-        class: j.cls,
-        cpus: { min: j.min, max: j.min + j.extra },
-        locks: j.locks,
-        expectedMs: j.expectedMin === null ? null : j.expectedMin * MIN,
-        cmd: `cmd ${i}`,
-      },
+      spec: j.lockOnly
+        ? {
+            class: /** @type {const} */ ('quick'),
+            cpus: { min: 0, max: 0 },
+            locks: j.locks.length > 0 ? j.locks : ['p'],
+            expectedMs: j.expectedMin === null ? null : j.expectedMin * MIN,
+            cmd: `lock ${i}`,
+          }
+        : {
+            class: j.cls,
+            cpus: { min: j.min, max: j.min + j.extra },
+            locks: j.locks,
+            expectedMs: j.expectedMin === null ? null : j.expectedMin * MIN,
+            cmd: `cmd ${i}`,
+          },
     })),
   }));
 
@@ -75,6 +85,11 @@ describe('検査器そのものの検出力', () => {
   });
   it('I3: 計測との同時走行を検出する', () => {
     assert.throws(() => checkInvariants(state({ leases: [lease({ id: 'm', class: 'measure' }), lease({ id: 'b' })] })), /I3/);
+  });
+  it('I3: 鍵だけのリース(cpus 0)は計測と並んでも投げない', () => {
+    assert.doesNotThrow(() =>
+      checkInvariants(state({ leases: [lease({ id: 'm', class: 'measure' }), lease({ id: 'g', class: 'quick', cpus: { min: 0, max: 0 }, locks: ['g'] }, { cpus: 0 })] })),
+    );
   });
   it('cpus の範囲外を検出する', () => {
     assert.throws(() => checkInvariants(state({ leases: [lease({ id: 'a', cpus: { min: 2, max: 4 } }, { cpus: 1 })] })), /範囲外/);

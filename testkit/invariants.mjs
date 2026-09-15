@@ -15,8 +15,10 @@ export function checkInvariants(s) {
     if (n > cap) throw new Error(`I2: 鍵 ${k} の保持者 ${n} が容量 ${cap} を超えた`);
   }
 
-  if (s.leases.some((l) => l.job.class === 'measure') && s.leases.length > 1) {
-    throw new Error(`I3: 計測と同時に他のリースがある(${s.leases.map((l) => l.job.id).join(', ')})`);
+  const measure = s.leases.find((l) => l.job.class === 'measure');
+  if (measure !== undefined && s.leases.some((l) => l !== measure && l.cpus > 0)) {
+    // 鍵だけのリース(cpus 0)は計測と並んでよい(設計 §6.6 の I3)
+    throw new Error(`I3: 計測と同時に CPU を持つ他のリースがある(${s.leases.map((l) => l.job.id).join(', ')})`);
   }
 
   for (const l of s.leases) {

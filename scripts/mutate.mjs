@@ -21,6 +21,7 @@ const SUITES = {
       'test/core/recovery.test.mjs',
       'test/core/schedule.admission.test.mjs',
       'test/core/schedule.backfill.test.mjs',
+      'test/core/schedule.lockonly.test.mjs',
       'test/core/schedule.measure.test.mjs',
       'test/core/score.test.mjs',
     ],
@@ -34,7 +35,7 @@ const SUITES = {
       {
         name: 'M2 計測の単独実行を外す',
         file: 'src/core/schedule.mjs',
-        from: 'if (head === null && s.leases.length === 0 && locksFree(s, job.locks)) {',
+        from: 'if (head === null && cpuLeases(s).length === 0 && locksFree(s, job.locks)) {',
         to: 'if (head === null && locksFree(s, job.locks)) {',
       },
       {
@@ -60,6 +61,24 @@ const SUITES = {
         file: 'src/core/schedule.mjs',
         from: 'const endsBeforeHead = head.etaAt !== null && job.expectedMs !== null && now + job.expectedMs <= head.etaAt;',
         to: 'const endsBeforeHead = true;',
+      },
+      {
+        name: 'M7 CPU 0 のリースも計測の単独に数える',
+        file: 'src/core/schedule.mjs',
+        from: 'if (head === null && cpuLeases(s).length === 0 && locksFree(s, job.locks)) {',
+        to: 'if (head === null && s.leases.length === 0 && locksFree(s, job.locks)) {',
+      },
+      {
+        name: 'M8 鍵だけのジョブも計測の走行中は止める',
+        file: 'src/core/schedule.mjs',
+        from: 'if (isLockOnly(job)) {',
+        to: 'if (isLockOnly(job) && gate === null) {',
+      },
+      {
+        name: 'M9 鍵だけのジョブが前で止まっている鍵を追い越す',
+        file: 'src/core/schedule.mjs',
+        from: 'const ahead = job.locks.find((k) => blocked.has(k));',
+        to: 'const ahead = undefined;',
       },
     ],
   },

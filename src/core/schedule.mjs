@@ -13,6 +13,16 @@ export function usedCpus(s) {
   return s.leases.reduce((n, l) => n + l.cpus, 0);
 }
 
+/** 鍵だけのジョブか(CPU を使わない。設計 §5.2) @param {JobSpec} job @returns {boolean} */
+export function isLockOnly(job) {
+  return job.cpus.max === 0;
+}
+
+/** CPU を持つリース(計測の単独実行はこれだけで数える。設計 §6.5) @param {State} s @returns {Lease[]} */
+function cpuLeases(s) {
+  return s.leases.filter((l) => l.cpus > 0);
+}
+
 /** @param {State} s @param {string} key @returns {number} */
 function capOf(s, key) {
   return s.lockCaps[key] ?? 1;
@@ -33,10 +43,10 @@ function endAt(l) {
   return l.job.expectedMs === null ? null : l.grantedAt + l.job.expectedMs;
 }
 
-/** 走行中の全リースが終わる見込み時刻。どれかに見込みが無ければ null。 @param {State} s @returns {number | null} */
+/** CPU を持つ走行中の全リースが終わる見込み時刻。どれかに見込みが無ければ null。 @param {State} s @returns {number | null} */
 function allEnd(s) {
   let at = -Infinity;
-  for (const l of s.leases) {
+  for (const l of cpuLeases(s)) {
     const e = endAt(l);
     if (e === null) return null;
     at = Math.max(at, e);
@@ -67,7 +77,7 @@ export function estimateStart(s, job, now) {
   }
   let free = s.capacity - usedCpus(s);
   if (free < job.cpus.min) {
-    const byEnd = s.leases
+    const byEnd = cpuLeases(s)
       .map((l) => ({ l, e: endAt(l) }))
       .sort((a, b) => (a.e ?? Number.MAX_VALUE) - (b.e ?? Number.MAX_VALUE));
     /** @type {number | null} */
@@ -106,7 +116,7 @@ export function schedule(input, now) {
 
   let ordered = sortWaiting(s.waiting.filter((w) => !w.recovering), now);
   if (s.favorNonMeasure) {
-    const others = ordered.filter((w) => w.job.class !== 'measure');
+    const others = ordered.filter((w) => w.job.class !== 'measure' && !isLockOnly(w.job));
     if (others.length === 0) {
       s.favorNonMeasure = false;
     } else {
@@ -130,6 +140,12 @@ export function schedule(input, now) {
   let gate = runningMeasure ? `計測 ${runningMeasure.job.id} の走行中は入場しない` : null;
   /** @type {{ id: string, etaAt: number | null } | null} 入場できなかった最初のジョブ */
   let head = null;
+  /** @type {Set<string>} 前に居て入場できなかったジョブが要る鍵(鍵だけのジョブはこれを追い越さない) */
+  const blocked = new Set();
+  /** @param {JobSpec} job */
+  const block = (job) => {
+    for (const k of job.locks) blocked.add(k);
+  };
 
   for (const [i, w] of ordered.entries()) {
     const job = w.job;
@@ -137,19 +153,33 @@ export function schedule(input, now) {
     const note = (reason, etaAt) => {
       s.notes[job.id] = { jobId: job.id, position: i + 1, reason, etaAt };
     };
+    if (isLockOnly(job)) {
+      // 鍵だけのジョブは CPU を使わないので、計測の走行中や入場待ちでも止めない(設計 §6.2・§6.5)
+      const ahead = job.locks.find((k) => blocked.has(k));
+      if (ahead === undefined && locksFree(s, job.locks)) {
+        admit(w, 0);
+      } else {
+        note(ahead !== undefined ? `鍵 ${ahead} を先に待つジョブがいる` : blockReason(s, job), null);
+        block(job);
+      }
+      continue;
+    }
     if (gate !== null) {
       note(gate, null);
+      block(job);
       continue;
     }
     const free = s.capacity - usedCpus(s);
     if (job.class === 'measure') {
-      if (head === null && s.leases.length === 0 && locksFree(s, job.locks)) {
+      if (head === null && cpuLeases(s).length === 0 && locksFree(s, job.locks)) {
         admit(w, Math.min(job.cpus.max, free));
         gate = `計測 ${job.id} の走行中は入場しない`;
       } else {
         if (head !== null) note(`先頭 ${head.id} の後ろ(計測は後ろ詰めしない)`, null);
-        else note(`走行中 ${s.leases.length} 本の終了を待つ(計測は単独で走る)`, allEnd(s));
+        else if (cpuLeases(s).length > 0) note(`走行中 ${cpuLeases(s).length} 本の終了を待つ(計測は単独で走る)`, allEnd(s));
+        else note(blockReason(s, job), null);
         gate = `計測 ${job.id} の入場待ちのため入場しない`;
+        block(job);
       }
       continue;
     }
@@ -161,6 +191,7 @@ export function schedule(input, now) {
       }
       head = { id: job.id, etaAt: estimateStart(s, job, now) };
       note(blockReason(s, job), head.etaAt);
+      block(job);
       continue;
     }
     // 後ろ詰め: 先頭が入場できる見込み時刻までに終わると見込めるときだけ
@@ -170,9 +201,11 @@ export function schedule(input, now) {
       continue;
     }
     note(endsBeforeHead ? `先頭 ${head.id} の後ろ(${blockReason(s, job)})` : `先頭 ${head.id} の後ろ(後ろ詰めの見込みなし)`, null);
+    block(job);
   }
 
-  if (granted.some((l) => l.job.class !== 'measure')) s.favorNonMeasure = false;
+  // 計測の直後の優先は、CPU を持つ計測以外のジョブが入場したときに外す(鍵だけのジョブでは外さない)
+  if (granted.some((l) => l.job.class !== 'measure' && l.cpus > 0)) s.favorNonMeasure = false;
 
   // 余った CPU を、この回に入場したジョブへ順に max まで配る(走行中のジョブは増やさない)
   let free = s.capacity - usedCpus(s);
