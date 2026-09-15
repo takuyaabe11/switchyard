@@ -1,0 +1,3 @@
+#!/bin/sh
+name=npm
+. "${0%/*}/_shim.sh"

@@ -1,0 +1,3 @@
+#!/bin/sh
+name=git
+. "${0%/*}/_shim.sh"

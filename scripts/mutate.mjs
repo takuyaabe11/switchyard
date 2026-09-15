@@ -165,6 +165,41 @@ const SUITES = {
       },
     ],
   },
+  shim: {
+    tests: ['test/shim/decide.test.mjs', 'test/shim/shims.test.mjs'],
+    mutations: [
+      {
+        name: 'D1 CPU を持つジョブの中でも分類する',
+        file: 'src/shim/decide.mjs',
+        from: "if (env.CONDUCTOR_IN_JOB === '1') return { kind: 'pass' };",
+        to: '',
+      },
+      {
+        name: 'S2 node が無いと作業を止める',
+        file: 'shims/_shim.sh',
+        from: '[ -n "$node" ] || exec "$real" "$@"',
+        to: '[ -n "$node" ] || exit 1',
+      },
+      {
+        name: 'S3 祖先が持つ git の鍵も取りに行く',
+        file: 'src/shim/decide.mjs',
+        from: "return heldLocks(env).has(lock) ? { kind: 'pass' } : { kind: 'lock', lock };",
+        to: "return { kind: 'lock', lock };",
+      },
+      {
+        name: 'S4 管理対象を包まない',
+        file: 'shims/_shim.sh',
+        from: '"run "*) exec',
+        to: '"never-run "*) exec',
+      },
+      {
+        name: 'S5 git の鍵だけのジョブを作らない',
+        file: 'shims/_shim.sh',
+        from: '"lock "*) exec',
+        to: '"never-lock "*) exec',
+      },
+    ],
+  },
   group: {
     tests: ['test/run/group.test.mjs'],
     mutations: [
@@ -231,7 +266,7 @@ let survived = 0;
 for (const m of suite.mutations) {
   const dir = mkdtempSync(join(tmpdir(), 'cmut-'));
   try {
-    for (const sub of ['bin', 'src', 'test', 'testkit']) {
+    for (const sub of ['bin', 'shims', 'src', 'test', 'testkit']) {
       if (existsSync(join(root, sub))) cpSync(join(root, sub), join(dir, sub), { recursive: true });
     }
     cpSync(join(root, 'package.json'), join(dir, 'package.json'));

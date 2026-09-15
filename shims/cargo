@@ -1,0 +1,3 @@
+#!/bin/sh
+name=cargo
+. "${0%/*}/_shim.sh"

@@ -1,0 +1,3 @@
+#!/bin/sh
+name=go
+. "${0%/*}/_shim.sh"
