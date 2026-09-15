@@ -93,6 +93,23 @@ const SUITES = {
       },
     ],
   },
+  group: {
+    tests: ['test/run/group.test.mjs'],
+    mutations: [
+      {
+        name: 'G1 孫(子の pgid ≠ 子の pid)の拒否を外す',
+        file: 'src/run/group.mjs',
+        from: 'if (pgid !== childPid || pgid === ownPgid) return null;',
+        to: 'if (pgid === ownPgid) return null;',
+      },
+      {
+        name: 'G2 自分のグループと同じ pgid の拒否を外す',
+        file: 'src/run/group.mjs',
+        from: 'if (pgid !== childPid || pgid === ownPgid) return null;',
+        to: 'if (pgid !== childPid) return null;',
+      },
+    ],
+  },
 };
 
 const suiteName = process.argv[2] ?? '';

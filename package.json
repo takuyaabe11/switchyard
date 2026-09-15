@@ -15,7 +15,8 @@
     "typecheck": "tsc -p .",
     "check": "npm run typecheck && npm test",
     "mutate:core": "node scripts/mutate.mjs core",
-    "mutate:escape": "node scripts/mutate.mjs escape"
+    "mutate:escape": "node scripts/mutate.mjs escape",
+    "mutate:group": "node scripts/mutate.mjs group"
   },
   "devDependencies": {
     "@types/node": "^26.5.1",

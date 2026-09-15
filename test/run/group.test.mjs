@@ -2,9 +2,20 @@
 // 設計 §13 の V4: spawn(detached) で子が自分のプロセスグループを持つか。
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { readPgid, signalGroup, spawnInOwnGroup, verifiedGroup, waitGroupGone } from '../../src/run/group.mjs';
 import { killGroupLeftovers, pidsInGroup } from '../../testkit/procs.mjs';
 import { waitFor } from '../../testkit/wait.mjs';
+
+/** ppid が一致する子の pid 一覧(孫プロセスを見つけるため) @param {number} ppid @returns {number[]} */
+function childrenOf(ppid) {
+  return execFileSync('ps', ['-A', '-o', 'pid=,ppid='], { encoding: 'utf8' })
+    .trim()
+    .split('\n')
+    .map((l) => l.trim().split(/\s+/).filter((x) => x !== '').map(Number))
+    .filter(([, pp]) => pp === ppid)
+    .map(([p]) => p);
+}
 
 describe('別グループでの起動(V4)', () => {
   it('子は自分の pid と同じ pgid を持ち、呼び出し元のグループと違う', async () => {
@@ -52,6 +63,31 @@ describe('別グループでの起動(V4)', () => {
       await waitFor(() => pidsInGroup(pid).length >= 3);
       signalGroup(pid, 'SIGTERM');
       await waitFor(() => pidsInGroup(pid).length === 0);
+    } finally {
+      killGroupLeftovers(pid);
+    }
+  });
+
+  it('子の pgid が自分の pgid と同じなら拒む(I3)', async () => {
+    const child = spawnInOwnGroup(['sleep', '5'], { stdio: 'ignore' });
+    const pid = /** @type {number} */ (child.pid);
+    try {
+      // child は自分のグループの長で pgid = pid。ownPgid にも同じ値を渡し、「子の pgid が自分の pgid と同じ」を模す
+      assert.equal(verifiedGroup(pid, pid), null);
+    } finally {
+      child.kill('SIGKILL');
+    }
+  });
+
+  it('孫の pid(自分のグループの長でない)を渡すと拒む(I3)', async () => {
+    const child = spawnInOwnGroup(['sh', '-c', 'sleep 5 & wait'], { stdio: 'ignore' });
+    const pid = /** @type {number} */ (child.pid);
+    try {
+      await waitFor(() => pidsInGroup(pid).length >= 2);
+      const grandchild = childrenOf(pid)[0];
+      assert.notEqual(grandchild, undefined);
+      // 孫(sleep)の pgid は長(sh)の pid のままで、孫自身の pid とは違う
+      assert.equal(verifiedGroup(grandchild), null);
     } finally {
       killGroupLeftovers(pid);
     }
