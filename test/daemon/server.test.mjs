@@ -143,15 +143,20 @@ describe('daemon server', () => {
     // 包みが子を起動して pgid を確かめる実際の遅れ(ps を同期に呼ぶ)を模す。tick(20ms)を複数またぐ
     await new Promise((r) => setTimeout(r, 60));
     b.send({ t: 'started', jobId: accB.jobId, pid: 2, pgid: null });
-    const c = await client(d.sock);
-    c.send({ t: 'request', job: jobRequest({ session: 'sC', locks: ['port:4173'] }) });
-    await c.next((m) => m.t === 'accepted');
-    await c.next((m) => m.t === 'queued');
-    // B は started の後は(このテストでは)心拍を送らないので、B 自身の自然な途絶(started から heartbeatTimeoutMs 後)より
-    // 十分短い窓で確かめる(長く待つと、この確認自体が別の理由で赤くなる)
-    await assert.rejects(c.next((m) => m.t === 'grant', 80), /来ない/);
-    assert.deepEqual(d.getState().leases.map((l) => l.job.id), [accB.jobId]);
-    assert.equal((d.getState().unacked.sB ?? []).some((u) => u.kind === 'lost'), false);
+    // B も started の後は心拍を送り続けて自分のリースを保つ。こうしないと、確認の所要が長い環境
+    // (node --test はファイルを並列に回す)で B 自身が自然に途絶し、確認自体が別の理由で赤くなりうる
+    const hbB = setInterval(() => b.send({ t: 'hb', jobId: accB.jobId }), 40);
+    try {
+      const c = await client(d.sock);
+      c.send({ t: 'request', job: jobRequest({ session: 'sC', locks: ['port:4173'] }) });
+      await c.next((m) => m.t === 'accepted');
+      await c.next((m) => m.t === 'queued');
+      await assert.rejects(c.next((m) => m.t === 'grant', 200), /来ない/);
+      assert.deepEqual(d.getState().leases.map((l) => l.job.id), [accB.jobId]);
+      assert.equal((d.getState().unacked.sB ?? []).some((u) => u.kind === 'lost'), false);
+    } finally {
+      clearInterval(hbB);
+    }
   });
 
   it('再起動の後、戻ってきた包みはリースを取り戻し、戻らない包みの分は猶予の後に返す', async () => {
