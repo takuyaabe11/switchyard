@@ -157,7 +157,14 @@ export function validateProfile(name, raw) {
  * @param {string} repoRoot @returns {{ profiles: NamedProfile[], error: string | null }}
  */
 export function loadProfiles(repoRoot) {
-  const file = join(repoRoot, 'conductor.json');
+  return loadProfilesFile(join(repoRoot, 'conductor.json'));
+}
+
+/**
+ * 設定ファイル 1 つを読む(conductor replay の --config は repo の外のファイルも渡せる)。無ければ既定表だけ。
+ * @param {string} file @returns {{ profiles: NamedProfile[], error: string | null }}
+ */
+export function loadProfilesFile(file) {
   if (!existsSync(file)) return { profiles: DEFAULT_PROFILES, error: null };
   try {
     const raw = JSON.parse(readFileSync(file, 'utf8'));

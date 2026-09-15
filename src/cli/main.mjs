@@ -1,14 +1,21 @@
 // @ts-check
 // サブコマンドの振り分け。
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { ask, connectDaemon, DaemonUnavailableError } from '../client/connect.mjs';
 import { isClaudeSession, sessionId } from '../client/session.mjs';
+import { repoRoot } from '../config/context.mjs';
+import { loadProfiles, loadProfilesFile } from '../config/profiles.mjs';
 import { conductorHome } from '../daemon/paths.mjs';
+import { formatReport, replay } from '../replay/replay.mjs';
 import { probe } from '../run/probe.mjs';
 import { runJob } from '../run/run.mjs';
 import { parseArgs, UsageError, USAGE } from './args.mjs';
 import { renderProbe, renderTop, renderWhy } from './render.mjs';
 
 /** @typedef {import('../protocol/messages.mjs').Snapshot} Snapshot */
+/** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
 
 /**
  * @typedef {{
@@ -99,6 +106,41 @@ export async function cli(args, opts = {}) {
         return 1;
       }
       stdout(`確認済みにした: ${command.jobId}(セッション ${session})\n`);
+      return 0;
+    }
+    case 'replay': {
+      // 過去のセッション記録を、PreToolUse と shim の分類器で空回しする。記録は読むだけで、デーモンは要らない
+      const dir = command.dir ?? join(env.HOME ?? homedir(), '.claude', 'projects');
+      if (!existsSync(dir)) {
+        stderr(`記録の置き場所が無い: ${dir}\n`);
+        return 1;
+      }
+      /** @type {(cwd: string) => NamedProfile[]} */
+      let profilesFor;
+      if (command.config !== null) {
+        const file = resolve(cwd, command.config);
+        const loaded = existsSync(file) ? loadProfilesFile(file) : { profiles: [], error: 'ファイルが無い' };
+        if (loaded.error !== null) {
+          stderr(`--config の設定を読めない: ${file}: ${loaded.error}\n`);
+          return 2;
+        }
+        profilesFor = () => loaded.profiles;
+      } else {
+        // 記録の cwd ごとに、その repo の conductor.json と既定表(git を叩くので cwd ごとに 1 回)
+        /** @type {Map<string, NamedProfile[]>} */
+        const byCwd = new Map();
+        profilesFor = (c) => {
+          let p = byCwd.get(c);
+          if (p === undefined) {
+            p = loadProfiles(repoRoot(c)).profiles;
+            byCwd.set(c, p);
+          }
+          return p;
+        };
+      }
+      const since = command.sinceDays === null ? null : now() - command.sinceDays * 86_400_000;
+      const report = await replay({ dir, cwdPrefix: command.cwdPrefix, since, profilesFor, examples: command.examples });
+      stdout(formatReport(report, { cwdPrefix: command.cwdPrefix, sinceDays: command.sinceDays, examples: command.examples }));
       return 0;
     }
     case 'probe': {
