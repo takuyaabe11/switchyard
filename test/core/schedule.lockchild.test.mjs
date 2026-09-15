@@ -23,8 +23,10 @@ describe('schedule: 鍵を持つ親の子(設計 §6.2・§6.3 の 4)', () => {
   });
 
   it('親の子は、先に待つ batch を追い越して入場する', () => {
+    // b(cpus.min 1)は、c が先に入場すれば空きを使い切られて待たされ、c が後回しなら先に入場できる。
+    // 入場の順が結果の並びに出る形(レビュー Minor 1: 2026-09-16 修正の報告 1)。
     const r = schedule(
-      state({ capacity: 2, leases: [parentLease(), lease({ id: 'x' }, { cpus: 1 })], waiting: [waiting({ id: 'b', cpus: { min: 2, max: 2 } }, 0), waiting(child('c'), 5 * MIN)] }),
+      state({ capacity: 2, leases: [parentLease(), lease({ id: 'x' }, { cpus: 1 })], waiting: [waiting({ id: 'b', cpus: { min: 1, max: 1 } }, 0), waiting(child('c'), 5 * MIN)] }),
       5 * MIN,
     );
     assert.deepEqual(grants(r.actions), [['c', 1]]);

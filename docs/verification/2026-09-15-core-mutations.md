@@ -1,7 +1,7 @@
 # 規則層の門番の検出力(conductor 1a・1b・改善 3)
 
 - 実行: `npm run mutate:core`(原本は触らず、一時ディレクトリの写しに 1 つずつ入れる)
-- 日時と環境: Wed Sep 16 07:57:04 JST 2026 / Darwin 25.6.0 / Node v24.16.0
+- 日時と環境: Wed Sep 16 08:15:59 JST 2026 / Darwin 25.6.0 / Node v24.16.0(修正の報告 1: M10 のテストを順序依存の形へ直した後の再走行)
 - 復元後の原本: `npm test` の `ℹ tests` / `ℹ pass` / `ℹ fail` の 3 行を貼る
 
 ```
@@ -34,7 +34,7 @@
    赤: 計測の入場待ちの間も、鍵だけのジョブは入場する
    赤: 走行中のジョブがあれば計測は待ち、後ろのジョブも入場しない
    赤: 計測の直後は、一番長く待っている計測以外のジョブを先に入れる
-== M3 CPU の空き判定を 1 つ緩める | src/core/schedule.mjs | 赤 | tests 84 / fail 11 / cancelled 0 / pass 73
+== M3 CPU の空き判定を 1 つ緩める | src/core/schedule.mjs | 赤 | tests 84 / fail 12 / cancelled 0 / pass 72
    壊した行: const fits = free + 1 >= job.cpus.min && locksFree(s, job.locks);
    赤: どんな到着の列でも I1〜I3・I6 を破らず、全ジョブが上限時刻までに終わる(I5)
    赤: 同じ入力なら入場の順番は毎回同じ(決定的)
@@ -43,6 +43,7 @@
    赤: 先頭の見込み時刻を越えるジョブは入れない
    赤: 見込みの無いジョブは後ろ詰めしない
    赤: 先頭が必要な資源を持つジョブに見込みが無ければ、後ろ詰めしない
+   赤: 親の子は、先に待つ batch を追い越して入場する
    赤: 親が居ない・親が鍵だけでない・別のセッションの親なら、普通の要求として並ぶ
    赤: 前に居て入場できないジョブが要る鍵は、鍵だけのジョブも追い越さない
    赤: 鍵だけのジョブの入場では、計測の直後の優先の印を外さない
@@ -73,8 +74,9 @@
 == M9 鍵だけのジョブが前で止まっている鍵を追い越す | src/core/schedule.mjs | 赤 | tests 84 / fail 1 / cancelled 0 / pass 83
    壊した行: const ahead = undefined;
    赤: 前に居て入場できないジョブが要る鍵は、鍵だけのジョブも追い越さない
-== M10 親の子を先頭に並べない | src/core/schedule.mjs | 赤 | tests 84 / fail 1 / cancelled 0 / pass 83
+== M10 親の子を先頭に並べない | src/core/schedule.mjs | 赤 | tests 84 / fail 2 / cancelled 0 / pass 82
    壊した行: (行を消した)
+   赤: 親の子は、先に待つ batch を追い越して入場する
    赤: 計測の入場待ち(先頭が measure)より前に入る
 == M11 親の子に容量を超えた借りを許さない | src/core/schedule.mjs | 赤 | tests 84 / fail 2 / cancelled 0 / pass 82
    壊した行: if (measuring === undefined && locksFree(s, job.locks) && s.capacity - usedCpus(s) >= job.cpus.min) {
@@ -82,7 +84,7 @@
    赤: 親の子の入場では、計測の直後の優先の印を外さない
 == M12 計測の走行中も親の子を入場させる | src/core/schedule.mjs | 赤 | tests 84 / fail 2 / cancelled 0 / pass 82
    壊した行: if (locksFree(s, job.locks)) {
-   赤: 同じ入力なら入場の順番は毎回同じ(決定的)
+   赤: どんな到着の列でも I1〜I3・I6 を破らず、全ジョブが上限時刻までに終わる(I5)
    赤: 計測の走行中は入場しない(計測を汚さない)
 == M13 別のセッションの親でも親の子として扱う | src/core/schedule.mjs | 赤 | tests 84 / fail 2 / cancelled 0 / pass 82
    壊した行: );
@@ -98,10 +100,12 @@
 
 - **M10 親の子を先頭に並べない**: `ordered = [...children, ...ordered.filter((w) => !children.includes(w))];` を削除し、
   親の子を点数の順(と計測の直後の優先)より前へ並べ替える処理そのものを外す。赤:
+  `親の子は、先に待つ batch を追い越して入場する`(レビュー Minor 1 を受け、待ちの `b` を `cpus.min: 1` に直し、
+  入場の順が `grants` の結果そのものに出る形へ強化した。並べ替えが無いと到着順 `[b, c]` で処理され、
+  `b`(空き 1・`cpus.min` 1)が先に入場し、その後 `c` が親の子として容量超えの借りで入場して
+  `grants` に `['b',1]` が混ざる。並べ替えがあれば `c` が先に容量いっぱいまで借り、`b` は入場できない)・
   `計測の入場待ち(先頭が measure)より前に入る`(この配置では、計測を先に処理すると `cpuLeases` の本数が
   子の入場前の値になり、`r.state.notes.m.reason` が `走行中 2 本の終了を待つ` ではなく `走行中 1 本の終了を待つ` になる)。
-  ★ brief の Expected はこの M10 に `親の子は、先に待つ batch を追い越して入場する` も列挙しているが、実測では
-  この 1 本は赤にならなかった(詳細は本タスクの報告ファイルの「brief の Expected との食い違い」節)。
 - **M11 親の子に容量を超えた借りを許さない**: 親の子の入場条件へ `s.capacity - usedCpus(s) >= job.cpus.min` を足し、
   空きが足りなければ親の子も待たせる(容量超えの借りを禁じる)。赤:
   `容量いっぱいでも、cpus.min で入場する(容量を超えて借りる)。借りたリースは I1 の合計から除く`・
