@@ -29,13 +29,27 @@ Per-component (rounded)
   conductor       ~100       ~920
 ```
 
+## 測り直し(最後の全体レビューの修正の後)
+
+- 測った日: 2026-09-15 22 時台(修正の波 fe904e6 の後。`skills/conductor/SKILL.md` を書き足した後)
+- `claude --version`: 2.1.251 (Claude Code)
+- 測り方: 上と同じ(API は呼ばず、plugin の導入もしない)。終了コード 0
+
+```
+Projected token cost
+  Always-on:   ~101 tok   added to every session
+
+Per-component (rounded)
+  component  always-on  on-invoke
+  conductor       ~100      ~1.1k
+```
+
 ## 要点
 
-| 項目 | token |
-|---|---|
-| Always-on(毎セッションに足される) | ~101 |
-| skill `conductor` の on-invoke(skill を読んだときに足される) | ~920 |
+| 項目 | Task 9 の走行 | 修正の後(いまの値) |
+|---|---|---|
+| Always-on(毎セッションに足される) | ~101 | ~101 |
+| skill `conductor` の on-invoke(skill を読んだときに足される) | ~920 | ~1.1k |
 
 - hooks 3 本は、出力のとおりモデルの文脈には入らない(`harness-only — no model context cost`)。
-- 測った後に、`skills/conductor/SKILL.md` の本文(「何もしなくてよいこと」と「拒否されたとき」の節)を書き足した(最後の全体レビューの C1・I1)。on-invoke の ~920 は書き足す前の値。frontmatter の `description` は変えていない。
-- 測り直しは、導入の前の試用で `claude plugin details` を走らせるときに行う(この計画では `claude` を呼ばない)。
+- on-invoke が増えたのは、`skills/conductor/SKILL.md` の本文(「何もしなくてよいこと」と「拒否されたとき」の節)を書き足したため(最後の全体レビューの C1・I1)。frontmatter の `description` は変えていないので、Always-on は変わらない。
