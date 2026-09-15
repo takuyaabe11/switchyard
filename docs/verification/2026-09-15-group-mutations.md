@@ -1,12 +1,12 @@
 # verifiedGroup の拒否枝の門番の検出力(conductor 1a・最終レビュー I3)
 
 - 実行: `npm run mutate:group`(原本は触らず、一時ディレクトリの写しに 1 つずつ入れる)
-- 日時と環境: Tue Sep 15 14:47:34 JST 2026 / Darwin 25.6.0 / Node v24.16.0
+- 日時と環境: Tue Sep 15 15:11:15 JST 2026 / Darwin 25.6.0 / Node v24.16.0(再レビューの残りの修正で再実行。group.mjs 自体は今回変更していない)
 - 復元後の原本: `npm test` の `ℹ tests` / `ℹ pass` / `ℹ fail` の 3 行を貼る
 
 ```
-ℹ tests 168
-ℹ pass 168
+ℹ tests 173
+ℹ pass 173
 ℹ fail 0
 ```
 

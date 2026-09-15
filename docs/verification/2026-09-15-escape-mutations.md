@@ -1,19 +1,19 @@
 # 子のプロセスグループ離脱の検出の門番の検出力(conductor 1a)
 
 - 実行: `npm run mutate:escape`(原本は触らず、一時ディレクトリの写しに 1 つずつ入れる)
-- 日時と環境: Tue Sep 15 14:47:34 JST 2026 / Darwin 25.6.0 / Node v24.16.0(最終レビューの修正で再実行)
+- 日時と環境: Tue Sep 15 15:11:15 JST 2026 / Darwin 25.6.0 / Node v24.16.0(最終レビューの再レビューの残りの修正で再実行)
 - 復元後の原本: `npm test` の `ℹ tests` / `ℹ pass` / `ℹ fail` の 3 行を貼る
 
 ```
-ℹ tests 168
-ℹ pass 168
+ℹ tests 173
+ℹ pass 173
 ℹ fail 0
 ```
 
 ## 変異ごとの結果
 
 ```
-== E1 グループの違いを見ない | src/run/watch.mjs | 赤 | tests 48 / fail 7 / pass 41
+== E1 グループの違いを見ない | src/run/watch.mjs | 赤 | tests 52 / fail 7 / pass 45
    壊した行: for (const [, v] of seen) if (v.pgid !== v.pgid) counts.set
    赤: probe はグループから抜ける子を報告する
    赤: setsid してグループから抜ける子を検出し、SIGTERM の後の生き残りとして出し、片付ける
@@ -22,17 +22,21 @@
    赤: 親が終わって親子関係が切れた後に抜けた子も、開始時刻が同じなら数える
    赤: 終わりかけの子を ps が (perl) のように括弧つきで出しても、同じ名前として数える
    赤: ps が失敗しても投げず、それまでに見たものを保つ
-== E2 走行中に子孫を見ない | src/run/run.mjs | 赤 | tests 48 / fail 1 / pass 47
+== E2 走行中に子孫を見ない | src/run/run.mjs | 赤 | tests 52 / fail 1 / pass 51
    壊した行: watchTimer = null;
    赤: 実行中にプロセスグループから抜けた子を検出し、表示してデーモンに記録させる
-== E3 使い回された pid を同じ子とみなす(開始時刻を照合しない) | src/run/watch.mjs | 赤 | tests 48 / fail 1 / pass 47
+== E3 使い回された pid を同じ子とみなす(開始時刻を照合しない) | src/run/watch.mjs | 赤 | tests 52 / fail 1 / pass 51
    壊した行: const orphanedSame = known !== undefined;
    赤: 使い回された pid(開始時刻が違う)を、前に見た子と取り違えない(I2)
-== E4 デーモンが抜けた子の名前を覚えない | src/daemon/server.mjs | 赤 | tests 48 / fail 1 / pass 47
+== E4 デーモンが抜けた子の名前を覚えない | src/daemon/server.mjs | 赤 | tests 52 / fail 1 / pass 51
    壊した行: (行を消した)
    赤: exit に付いた抜けた子を記録し、同じ repo と profile の後の要求に表示し、再起動しても覚えている
 全部の変異が赤になった
 ```
+
+## 2026-09-15(再レビューの残りの修正・R1)で分かったこと
+
+再レビューが、I2 の差分が持ち込んだ回帰を指摘した: `processTable()` の 1 行解析が `comm` を最後の 1 語だけにしていたため、実行ファイルのパスに空白を含むと(この機械の `ps -A` 521 行のうち 65 行が該当)名前が壊れていた。直し方は (1) `execFileSync` に `LC_ALL: 'C'` を渡して `lstart` を 5 語に固定する(ja ロケールでは 4 語になり、実測で確かめた) (2) 1 行の解析を `parsePsLine`(`ProcRow | null` を返す)として切り出し、`started = parts.slice(3, 8).join(' ')` / `comm = parts.slice(8).join(' ')` にする。E1〜E4 はどれも `parsePsLine` の外側のロジック(`createEscapeTracker` の `sample`/`report`)を対象にしているので、`from` の変更は不要だった(実際、E3 の `from` はこの回で変わっていない)。テスト数が 48 → 52 に増えたのは `test/run/watch.test.mjs` に `parsePsLine` の単体テスト 3 本を足したため。
 
 ## この Task の門番について(2026-09-15 の実測で分かったこと)
 
