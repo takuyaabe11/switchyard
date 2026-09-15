@@ -189,6 +189,7 @@ export function runJob(opts) {
 
     /** @param {number} cpus @param {boolean} managed */
     const startChild = (cpus, managed) => {
+      if (finished) return;
       phase = 'running';
       const tpl = profile === null ? { env: {}, args: [] } : applyTemplate(profile, cpus);
       childStartedAt = Date.now();
@@ -243,6 +244,7 @@ export function runJob(opts) {
       killedByCaller = true;
       if (phase === 'waiting') {
         out(`[conductor] ${sig} を受けたので待つのをやめる`);
+        phase = 'done';
         finish(signalCode(sig));
         return;
       }
@@ -334,10 +336,15 @@ export function runJob(opts) {
 
     connect({ home, env })
       .then((conn) => {
+        if (over()) {
+          conn.destroy();
+          return;
+        }
         attach(conn);
         ch?.send({ t: 'request', job });
       })
       .catch((e) => {
+        if (over()) return;
         if (!(e instanceof DaemonUnavailableError)) throw e;
         out(`[conductor] デーモンに届かないので、管理なしで実行する(二重貸し防止などの保証なし・CPU は宣言の最小 ${job.cpus.min}): ${e.message}`);
         startChild(job.cpus.min, false);

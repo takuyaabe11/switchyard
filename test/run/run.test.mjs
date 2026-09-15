@@ -3,7 +3,7 @@ import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { connectDaemon, DaemonUnavailableError } from '../../src/client/connect.mjs';
@@ -232,6 +232,71 @@ describe('runJob', () => {
     const elapsed = Date.now() - started;
     assert.match(String(out), /code=0/);
     assert.ok(elapsed < 3_000, `プロセスの終了までに ${elapsed}ms かかった(再接続の待ち 4000ms に引きずられている)`);
+  });
+
+  it('接続を待つ間に SIGTERM を受けて終わったら、子を起動せず、管理なしの表示も出さない(C2・catch の経路)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cproj-'));
+    const marker = join(dir, 'ran.marker');
+    const markerScript = join(dir, 'write-marker.mjs');
+    writeFileSync(markerScript, `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(marker)}, '');\n`);
+    const signals = new EventEmitter();
+    /** @type {typeof connectDaemon} */
+    const slowFail = () => new Promise((_resolve, reject) => setTimeout(() => reject(new DaemonUnavailableError('テスト')), 200));
+    /** @type {string[]} */
+    const lines = [];
+    setTimeout(() => signals.emit('SIGTERM'), 50);
+    const code = await runJob({ argv: [node, markerScript], flags: {}, home: tempHome(), cwd: dir, out: (l) => lines.push(l), connect: slowFail, signals });
+    assert.equal(code, 143);
+    // catch が届くのは接続の 200ms 後。そこから十分待っても、子が起動せず「管理なしで実行する」の表示も出ないことを確かめる
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(existsSync(marker), false, '止めたはずのジョブが子を起動した');
+    assert.ok(!lines.some((l) => l.includes('管理なしで実行する')), lines.join('\n'));
+  });
+
+  it('接続がつながった直後に SIGTERM で終わっていたら、子を起動せず、包みのプロセスも残らない(C2・then の経路)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cproj-'));
+    const marker = join(dir, 'ran.marker');
+    const markerScript = join(dir, 'write-marker.mjs');
+    writeFileSync(markerScript, `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(marker)}, '');\n`);
+    const driver = join(dir, 'signal-then-timing.mjs');
+    const root = new URL('../../', import.meta.url);
+    const at = (/** @type {string} */ rel) => JSON.stringify(new URL(rel, root).href);
+    writeFileSync(
+      driver,
+      [
+        `import { startDaemon } from ${at('src/daemon/server.mjs')};`,
+        `import { connectDaemon } from ${at('src/client/connect.mjs')};`,
+        `import { runJob } from ${at('src/run/run.mjs')};`,
+        "import { EventEmitter } from 'node:events';",
+        "import { mkdtempSync } from 'node:fs';",
+        "import { tmpdir } from 'node:os';",
+        "import { join } from 'node:path';",
+        "const home = mkdtempSync(join(tmpdir(), 'cd-'));",
+        'const d = await startDaemon({ home, capacity: 2, tickMs: 20 });',
+        'const signals = new EventEmitter();',
+        // 本物の接続はすぐ成立するが、runJob へ渡す解決は 200ms 遅らせる(SIGTERM が先に届く窓を作る)
+        'const delayed = (o) => new Promise((resolve, reject) => {',
+        '  connectDaemon({ ...o, autoStart: false }).then((c) => setTimeout(() => resolve(c), 200), (e) => setTimeout(() => reject(e), 200));',
+        '});',
+        "setTimeout(() => signals.emit('SIGTERM'), 50);",
+        `const p = runJob({ argv: [process.execPath, ${JSON.stringify(markerScript)}], flags: {}, home, cwd: home, out: () => {}, connect: delayed, signals });`,
+        "console.log('code=' + (await p));",
+        // 接続の解決(200ms 遅れ)が確実に届いた後まで待つ。届いた分の request がデーモンへ向かっていれば、waiting/leases に残っているはず
+        'await new Promise((r) => setTimeout(r, 400));',
+        "console.log('state=' + JSON.stringify([d.getState().leases.length, d.getState().waiting.length]));",
+        'await d.close();',
+      ].join('\n'),
+    );
+    const started = Date.now();
+    const out = await new Promise((resolve, reject) => {
+      execFile(process.execPath, [driver], { timeout: 15_000 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+    });
+    const elapsed = Date.now() - started;
+    assert.match(String(out), /code=143/);
+    assert.ok(elapsed < 3_000, `スクリプトの終了までに ${elapsed}ms かかった(${out})`);
+    assert.equal(existsSync(marker), false, '止めたはずのジョブが子を起動した');
+    // 既に終わったジョブの request が、遅れて届いた接続からデーモンへ紛れ込んでいないこと
+    assert.match(String(out), /state=\[0,0\]/, String(out));
   });
 
   it('デーモンに届かなければ、管理なしで実行し、そう表示する', async () => {
