@@ -1,7 +1,7 @@
 // @ts-check
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -12,6 +12,7 @@ import { startDaemon } from '../../src/daemon/server.mjs';
 import { takeUnmanaged } from '../../src/daemon/store.mjs';
 import { runJob } from '../../src/run/run.mjs';
 import { tempHome } from '../../testkit/tmp.mjs';
+import { waitFor } from '../../testkit/wait.mjs';
 
 /** @type {Array<() => Promise<unknown>>} */
 let cleanups = [];
@@ -43,6 +44,28 @@ describe('管理なしの走行の控え(設計 §4.2・§4.3 の 8)', () => {
 
   it('takeUnmanaged は控えが無ければ空', () => {
     assert.deepEqual(takeUnmanaged(pathsOf(tempHome()).unmanaged), []);
+  });
+
+  it('takeUnmanaged は rename と unlink の間で落ちて残った別名(.taking)も拾い、2 度は取り込まない', () => {
+    const file = pathsOf(tempHome()).unmanaged;
+    writeFileSync(`${file}.99999.taking`, `${JSON.stringify(run({ cmd: 'npm run left' }))}\n`);
+    // 落ちたデーモンと同じ pid の別名(取り込む前に上書きしない)
+    writeFileSync(`${file}.${process.pid}.taking`, `${JSON.stringify(run({ cmd: 'npm run same-pid' }))}\n`);
+    writeFileSync(file, `${JSON.stringify(run({ cmd: 'npm test' }))}\n`);
+    assert.deepEqual(takeUnmanaged(file).map((u) => u.cmd).sort(), ['npm run left', 'npm run same-pid', 'npm test']);
+    assert.deepEqual(readdirSync(dirname(file)), []);
+    assert.deepEqual(takeUnmanaged(file), []);
+  });
+
+  it('デーモンが起動した後に足された控えも、次の tick で取り込み、失敗を ack 待ちに積む', async () => {
+    const home = tempHome();
+    const p = pathsOf(home);
+    const d = await startDaemon({ home, capacity: 4, tickMs: 20 });
+    cleanups.push(() => d.close());
+    appendFileSync(p.unmanaged, `${JSON.stringify(run({ code: 2, cmd: 'npm run late' }))}\n`);
+    await waitFor(() => (d.getState().unacked.s1 ?? []).some((u) => u.cmd === 'npm run late'), 2_000);
+    assert.deepEqual(d.getState().unacked.s1.map((u) => [u.kind, u.code, u.cmd]), [['failed', 2, 'npm run late']]);
+    assert.equal(existsSync(p.unmanaged), false);
   });
 
   it('decide の unmanagedExit は ack 待ちに failed で積み、同じ id は 2 度積まない', () => {
