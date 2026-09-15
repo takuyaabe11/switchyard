@@ -58,6 +58,21 @@ describe('decideShim(設計 §9.1)', () => {
     assert.deepEqual(decideShim({ word: 'node', args: ['--test', 'a.test.mjs'], cwd: dir, env: {} }), { kind: 'run', profile: 'unit' });
   });
 
+  it('profilesFor を渡せば、repo の設定を読まずにその profile で分類する(conductor replay の --config)', () => {
+    const e2e = { name: 'e2e', profile: { match: ['npm run e2e*'], class: /** @type {const} */ ('batch'), locks: ['port:4173'] } };
+    /** @type {string[]} */
+    const asked = [];
+    const dir = plainDir();
+    const profilesFor = (/** @type {string} */ cwd) => {
+      asked.push(cwd);
+      return [e2e];
+    };
+    assert.deepEqual(decideShim({ word: 'npm', args: ['run', 'e2e'], cwd: dir, env: {}, profilesFor }), { kind: 'run', profile: 'e2e' });
+    assert.deepEqual(asked, [dir]);
+    // 渡さなければ repo(ここでは設定の無い一時ディレクトリ)の既定表で分類する
+    assert.deepEqual(decideShim({ word: 'npm', args: ['run', 'e2e'], cwd: dir, env: {} }), { kind: 'pass' });
+  });
+
   it('git commit は git-dir の実パスの鍵を持つ lock', () => {
     const dir = gitDir();
     assert.deepEqual(decideShim({ word: 'git', args: ['commit', '-m', 'x'], cwd: dir, env: {} }), { kind: 'lock', lock: `git-index:${realpathSync(join(dir, '.git'))}` });

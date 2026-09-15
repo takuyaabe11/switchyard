@@ -42,10 +42,15 @@ export function absoluteGitDir(cwd) {
 }
 
 /**
- * @param {{ word: string, args: string[], cwd: string, env: NodeJS.ProcessEnv, gitDir?: (cwd: string) => string | null }} input
+ * profilesFor は、cwd の repo の設定の代わりに使う profile の表(conductor replay の --config。省けば repo の conductor.json と既定表)。
+ * @param {{
+ *   word: string, args: string[], cwd: string, env: NodeJS.ProcessEnv,
+ *   gitDir?: (cwd: string) => string | null,
+ *   profilesFor?: (cwd: string) => import('../config/profiles.mjs').NamedProfile[]
+ * }} input
  * @returns {ShimAnswer}
  */
-export function decideShim({ word, args, cwd, env, gitDir = absoluteGitDir }) {
+export function decideShim({ word, args, cwd, env, gitDir = absoluteGitDir, profilesFor = (dir) => loadProfiles(repoRoot(dir)).profiles }) {
   // CPU を持つジョブの中なら、そのジョブの一部として走らせる(設計 §4.3 の 7)
   if (env.CONDUCTOR_IN_JOB === '1') return { kind: 'pass' };
   // conductor の CLI 自身は包まない(bin/conductor が PATH の node、つまり node の shim を通る)。包むと、外側のジョブが CPU と計測の quiet を
@@ -59,8 +64,7 @@ export function decideShim({ word, args, cwd, env, gitDir = absoluteGitDir }) {
     // 祖先が同じ鍵を持っていれば待たない(git commit の中の git stash)
     return heldLocks(env).has(lock) ? { kind: 'pass' } : { kind: 'lock', lock };
   }
-  const { profiles } = loadProfiles(repoRoot(cwd));
-  const named = classify([word, ...args].join(' '), profiles);
+  const named = classify([word, ...args].join(' '), profilesFor(cwd));
   return named === null ? { kind: 'pass' } : { kind: 'run', profile: named.name };
 }
 

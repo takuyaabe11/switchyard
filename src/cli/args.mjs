@@ -12,9 +12,11 @@
  *   { cmd: 'why', jobId: string } |
  *   { cmd: 'ack', jobId: string, session: string | null } |
  *   { cmd: 'probe', seconds: number, argv: string[] } |
+ *   ReplayCommand |
  *   { cmd: 'help' }
  * )} Command
  */
+/** @typedef {{ cmd: 'replay', cwdPrefix: string | null, sinceDays: number | null, config: string | null, examples: number, dir: string | null }} ReplayCommand */
 
 export const USAGE = [
   '使い方:',
@@ -23,6 +25,7 @@ export const USAGE = [
   '  conductor why <job>',
   '  conductor ack <job> [--session <id>]',
   '  conductor probe <秒> -- <コマンド...>',
+  '  conductor replay [--cwd 前方一致] [--since 日数d] [--config conductor.json] [--examples 件数] [--dir 記録の根]',
 ].join('\n');
 
 export class UsageError extends Error {}
@@ -90,6 +93,48 @@ function parseRun(rest) {
   return { cmd: 'run', flags, argv };
 }
 
+/** @param {string[]} rest @returns {ReplayCommand} */
+function parseReplay(rest) {
+  /** @type {ReplayCommand} */
+  const out = { cmd: 'replay', cwdPrefix: null, sinceDays: null, config: null, examples: 5, dir: null };
+  for (let i = 0; i < rest.length; i += 1) {
+    const name = rest[i];
+    const take = () => {
+      const value = rest[i + 1];
+      if (value === undefined) throw new UsageError(`${name} に値が無い`);
+      i += 1;
+      return value;
+    };
+    switch (name) {
+      case '--cwd':
+        out.cwdPrefix = take();
+        break;
+      case '--since': {
+        const v = take();
+        const m = /^([1-9][0-9]*)d$/.exec(v);
+        if (m === null) throw new UsageError(`--since は 14d の形(1 以上の日数): ${v}`);
+        out.sinceDays = Number(m[1]);
+        break;
+      }
+      case '--config':
+        out.config = take();
+        break;
+      case '--examples': {
+        const v = take();
+        if (!/^[0-9]+$/.test(v)) throw new UsageError(`--examples は 0 以上の整数: ${v}`);
+        out.examples = Number(v);
+        break;
+      }
+      case '--dir':
+        out.dir = take();
+        break;
+      default:
+        throw new UsageError(`知らないオプション: ${name}`);
+    }
+  }
+  return out;
+}
+
 /** @param {string[]} args @returns {Command} */
 export function parseArgs(args) {
   const [cmd, ...rest] = args;
@@ -101,6 +146,8 @@ export function parseArgs(args) {
       return { cmd: 'help' };
     case 'run':
       return parseRun(rest);
+    case 'replay':
+      return parseReplay(rest);
     case 'top':
       if (rest.length > 0) throw new UsageError('top は引数を取らない');
       return { cmd: 'top' };
