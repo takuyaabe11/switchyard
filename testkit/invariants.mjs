@@ -4,7 +4,8 @@
 
 /** @param {State} s */
 export function checkInvariants(s) {
-  const used = s.leases.reduce((n, l) => n + l.cpus, 0);
+  // 親の子として入場したリース(設計 §6.3 の 4)は容量を超えて借りてよいので、I1 の合計から除く
+  const used = s.leases.reduce((n, l) => n + (l.lockChild === true ? 0 : l.cpus), 0);
   if (used > s.capacity) throw new Error(`I1: CPU の割り振り ${used} が容量 ${s.capacity} を超えた`);
 
   /** @type {Map<string, number>} */

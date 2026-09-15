@@ -21,6 +21,7 @@ const SUITES = {
       'test/core/recovery.test.mjs',
       'test/core/schedule.admission.test.mjs',
       'test/core/schedule.backfill.test.mjs',
+      'test/core/schedule.lockchild.test.mjs',
       'test/core/schedule.lockonly.test.mjs',
       'test/core/schedule.measure.test.mjs',
       'test/core/score.test.mjs',
@@ -79,6 +80,41 @@ const SUITES = {
         file: 'src/core/schedule.mjs',
         from: 'const ahead = job.locks.find((k) => blocked.has(k));',
         to: 'const ahead = undefined;',
+      },
+      {
+        // 改善 3: 親の子を点数の順より前に並べない
+        name: 'M10 親の子を先頭に並べない',
+        file: 'src/core/schedule.mjs',
+        from: 'ordered = [...children, ...ordered.filter((w) => !children.includes(w))];',
+        to: '',
+      },
+      {
+        // 改善 3: 空きが cpus.min に足りなければ親の子も待たせる(借りを許さない)
+        name: 'M11 親の子に容量を超えた借りを許さない',
+        file: 'src/core/schedule.mjs',
+        from: 'if (measuring === undefined && locksFree(s, job.locks)) {',
+        to: 'if (measuring === undefined && locksFree(s, job.locks) && s.capacity - usedCpus(s) >= job.cpus.min) {',
+      },
+      {
+        // 改善 3: 計測の走行中も親の子を入場させる(I3 を破る)
+        name: 'M12 計測の走行中も親の子を入場させる',
+        file: 'src/core/schedule.mjs',
+        from: 'if (measuring === undefined && locksFree(s, job.locks)) {',
+        to: 'if (locksFree(s, job.locks)) {',
+      },
+      {
+        // 改善 3: 別のセッションの鍵だけのジョブを親として認める(自己申告で列を飛ばせる)
+        name: 'M13 別のセッションの親でも親の子として扱う',
+        file: 'src/core/schedule.mjs',
+        from: ' && l.job.session === job.session);',
+        to: ');',
+      },
+      {
+        // 改善 3: 親の子のリースにも余りを配る
+        name: 'M14 親の子のリースにも余りを配る',
+        file: 'src/core/schedule.mjs',
+        from: 'if (lease.lockChild === true) continue;',
+        to: '',
       },
     ],
   },

@@ -35,7 +35,8 @@
  *   phase: LeasePhase,
  *   pid: number | null,
  *   pgid: number | null,
- *   recovering: boolean
+ *   recovering: boolean,
+ *   lockChild?: boolean
  * }} Lease
  */
 
