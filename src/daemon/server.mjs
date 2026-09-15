@@ -204,9 +204,9 @@ export async function startDaemon(opts) {
           bind(id);
           send(conn, { t: 'accepted', jobId: id });
           apply({ type: 'resume', now: monoNow(), jobId: id, pid: numOrNull(m.pid), pgid: numOrNull(m.pgid) });
-          // 割り振りの後、受け取る前に切れていた包みには知らせ直す
-          const after = state.leases.find((l) => l.job.id === id);
-          if (after !== undefined && m.phase === 'waiting') send(conn, { t: 'grant', jobId: id, cpus: after.cpus });
+          // 割り振りの後、受け取る前に切れていた包みには知らせ直す。
+          // この resume で初めて入場したときは、apply の中の dispatch が既に grant を送っているので送らない
+          if (lease !== undefined && m.phase === 'waiting') send(conn, { t: 'grant', jobId: id, cpus: lease.cpus });
           return;
         }
         case 'started': {
