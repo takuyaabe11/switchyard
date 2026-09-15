@@ -2,7 +2,7 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -71,6 +71,19 @@ const history = (home) =>
 
 const plainDir = () => mkdtempSync(join(tmpdir(), 'cproj-'));
 
+/**
+ * shims の写しと、与えた中身の分類器(src/shim/decide.mjs)だけを持つ root を作り、その shims の実パスを返す
+ * @param {string} decideSource
+ */
+function shimsWithClassifier(decideSource) {
+  const root = mkdtempSync(join(tmpdir(), 'croot-'));
+  cpSync(SHIMS, join(root, 'shims'), { recursive: true });
+  for (const word of SHIM_WORDS) chmodSync(join(root, 'shims', word), 0o755);
+  mkdirSync(join(root, 'src', 'shim'), { recursive: true });
+  writeFileSync(join(root, 'src', 'shim', 'decide.mjs'), decideSource);
+  return realpathSync(join(root, 'shims'));
+}
+
 describe('shims(設計 §9.1)', () => {
   it('shims に 8 語がそろい、どれも実行できる', () => {
     for (const word of SHIM_WORDS) assert.ok((statSync(join(SHIMS, word)).mode & 0o111) !== 0, word);
@@ -98,14 +111,25 @@ describe('shims(設計 §9.1)', () => {
     assert.deepEqual(history(home), []);
   });
 
-  it('node が PATH に無ければ、本物をそのまま実行する(作業を止めない)', async (t) => {
-    if (existsSync('/usr/bin/node') || existsSync('/bin/node')) {
-      t.skip('/usr/bin か /bin に node がある');
-      return;
-    }
-    const { home } = await daemon();
+  it('node が PATH に無ければ、本物をそのまま実行する(作業を止めない)', async () => {
     const fake = fakeBin();
-    const r = await sh('npm test', { cwd: plainDir(), home, path: `${SHIMS}:${fake}:/usr/bin:/bin` });
+    // PATH を shims と偽のコマンドだけにする(/usr/bin に node がある機械でも node が見つからない形になる。shim は外部コマンドを使わない)
+    const r = await sh('npm test', { cwd: plainDir(), home: tempHome(), path: `${SHIMS}:${fake}` });
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stdout.trim(), 'fake-npm test job=none in=none held=none');
+  });
+
+  it('分類器が失敗したら(終了コード 0 以外)、答えを出していても本物をそのまま実行する', async () => {
+    const shims = shimsWithClassifier("process.stdout.write('run default:batch\\n');\nprocess.exit(3);\n");
+    const r = await sh('npm test', { cwd: plainDir(), home: tempHome(), path: `${shims}:${fakeBin()}:${BASE_PATH}` });
+    assert.equal(r.code, 0, r.stderr);
+    assert.equal(r.stdout.trim(), 'fake-npm test job=none in=none held=none');
+  });
+
+  it('分類器が想定外の答えを出したら、本物をそのまま実行する', async () => {
+    const shims = shimsWithClassifier("process.stdout.write('garbage\\n');\n");
+    const r = await sh('npm test', { cwd: plainDir(), home: tempHome(), path: `${shims}:${fakeBin()}:${BASE_PATH}` });
+    assert.equal(r.code, 0, r.stderr);
     assert.equal(r.stdout.trim(), 'fake-npm test job=none in=none held=none');
   });
 
