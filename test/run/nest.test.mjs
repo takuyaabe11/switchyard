@@ -103,6 +103,22 @@ describe('入れ子(設計 §4.3 の 7)', () => {
     assert.ok(!lines.some((l) => l.includes('管理なし')), lines.join('\n'));
   });
 
+  it('デーモンに要求せずに走らせる子(入れ子で直接・管理なし)には、祖先の CONDUCTOR_JOB_ID を渡さない', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'cproj-'));
+    /** @param {string} file */
+    const dumpJob = (file) => [node, '-e', `require('fs').writeFileSync(${JSON.stringify(file)}, JSON.stringify(process.env.CONDUCTOR_JOB_ID ?? null))`];
+    /** @type {typeof connectDaemon} */
+    const unavailable = async () => {
+      throw new DaemonUnavailableError('テスト');
+    };
+    const nested = join(cwd, 'nested.json');
+    const direct = await runJob({ argv: dumpJob(nested), flags: { locks: ['g'] }, home: tempHome(), cwd, env: cleanEnv({ CONDUCTOR_IN_JOB: '1', CONDUCTOR_HELD_LOCKS: 'g', CONDUCTOR_JOB_ID: 'jparent' }), out: () => {}, connect: unavailable });
+    const lone = join(cwd, 'unmanaged.json');
+    const unmanaged = await runJob({ argv: dumpJob(lone), flags: {}, home: tempHome(), cwd, env: cleanEnv({ CONDUCTOR_JOB_ID: 'jparent' }), out: () => {}, connect: unavailable });
+    assert.deepEqual([direct, unmanaged], [0, 0]);
+    assert.deepEqual([JSON.parse(readFileSync(nested, 'utf8')), JSON.parse(readFileSync(lone, 'utf8'))], [null, null]);
+  });
+
   it('祖先が持つ鍵は待たない(git commit の中の git stash が、親の鍵で止まらない)', async () => {
     const { d, home } = await daemon();
     const cwd = mkdtempSync(join(tmpdir(), 'cproj-'));

@@ -1,9 +1,12 @@
 // @ts-check
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { analyzeStream } from '../../scripts/live-claude.mjs';
+import { analyzeStream, stopDaemon } from '../../scripts/live-claude.mjs';
+import { pathsOf } from '../../src/daemon/paths.mjs';
+import { tempHome } from '../../testkit/tmp.mjs';
 
 const SCRIPT = fileURLToPath(new URL('../../scripts/live-claude.mjs', import.meta.url));
 
@@ -21,6 +24,14 @@ describe('live-claude(設計 §15)', () => {
 
   it('何も無ければすべて偽', () => {
     assert.deepEqual(analyzeStream(''), { background: false, blockedStop: false, result: '', costUsd: null });
+  });
+
+  it('後始末: daemon.lock の pid が既に居なければ、何もせずに終わる(投げない)', () => {
+    const home = tempHome();
+    // 走り終えたプロセスの pid(もう居ない)
+    const gone = spawnSync(process.execPath, ['-e', '']).pid;
+    writeFileSync(pathsOf(home).lock, String(gone));
+    assert.doesNotThrow(() => stopDaemon(home));
   });
 
   it('CONDUCTOR_LIVE_CLAUDE=1 でなければ、何もせずに終わる(費用を出さない)', () => {

@@ -2,6 +2,7 @@
 // conductor run の本体(設計 §4.3)。割り振りを待ち、子を別グループで起動し、心拍と終了をデーモンへ返す。
 import { constants as osConstants } from 'node:os';
 import { basename } from 'node:path';
+import { UsageError } from '../cli/args.mjs';
 import { channel, connectDaemon, DaemonUnavailableError } from '../client/connect.mjs';
 import { sessionId } from '../client/session.mjs';
 import { heldLocks, repoRoot } from '../config/context.mjs';
@@ -64,6 +65,12 @@ export function buildRequest({ argv, flags, env, cwd }) {
   if (flags.profile !== undefined && named === null) throw new Error(`profile ${flags.profile} が見つからない`);
   const base = named === null ? null : named.profile;
   const held = heldLocks(env);
+  const declaredLocks = [...new Set([...(base?.locks ?? []), ...(flags.locks ?? [])])];
+  // 鍵だけのジョブ(--cpus 0..0)に鍵が 1 本も無いのは使い方の誤り。--profile の鍵はここで初めて分かるので、CLI の検査の続きをここで行う。
+  // これで、デーモンに要求せずに走らせるのは、入れ子で祖先の鍵を外して何も残らなかったときだけになる(設計 §4.3 の 7)
+  if (flags.cpus?.max === 0 && declaredLocks.length === 0) {
+    throw new UsageError(`--cpus 0..0(鍵だけのジョブ)には鍵が 1 本以上要る(--lock も、profile ${flags.profile ?? '(指定なし)'} の locks も無い)`);
+  }
   return {
     job: {
       session: sessionId(env),
@@ -73,7 +80,7 @@ export function buildRequest({ argv, flags, env, cwd }) {
       cmd,
       class: flags.class ?? base?.class ?? 'batch',
       cpus: env.CONDUCTOR_IN_JOB === '1' ? { min: 0, max: 0 } : flags.cpus ?? base?.cpus ?? { min: 1, max: 1 },
-      locks: [...new Set([...(base?.locks ?? []), ...(flags.locks ?? [])])].filter((k) => !held.has(k)),
+      locks: declaredLocks.filter((k) => !held.has(k)),
       preempt: flags.preempt ?? base?.preempt ?? 'throttle',
       why: flags.why ?? null,
     },
@@ -209,6 +216,8 @@ export function runJob(opts) {
       /** @type {NodeJS.ProcessEnv} */
       const childEnv = { ...env, ...tpl.env, CONDUCTOR_CPUS: String(cpus) };
       if (jobId !== null) childEnv.CONDUCTOR_JOB_ID = jobId;
+      // デーモンに要求せずに走らせる子(入れ子で直接・管理なし)に、祖先のジョブの id を自分の id として渡さない
+      else delete childEnv.CONDUCTOR_JOB_ID;
       // 入れ子の印(設計 §4.3 の 7): CPU を持つジョブの子だけに立てる(鍵だけのジョブの子は、中の重い走行を別に管理させる)
       if (cpus > 0) childEnv.CONDUCTOR_IN_JOB = '1';
       childEnv.CONDUCTOR_HELD_LOCKS = [...new Set([...heldLocks(env), ...job.locks])].join(',');

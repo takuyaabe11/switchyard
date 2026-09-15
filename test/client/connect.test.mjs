@@ -1,7 +1,9 @@
 // @ts-check
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { ask, connectDaemon, DaemonUnavailableError } from '../../src/client/connect.mjs';
 import { isClaudeSession, sessionId } from '../../src/client/session.mjs';
 import { pathsOf } from '../../src/daemon/paths.mjs';
@@ -47,6 +49,28 @@ describe('connectDaemon', () => {
     assert.equal(mb.t, 'status');
     const pid = Number(readFileSync(pathsOf(home).lock, 'utf8'));
     assert.ok(Number.isInteger(pid) && pid > 0);
+  });
+
+  it('自動起動するデーモンには、呼び出し元の入れ子の印を渡さない', async () => {
+    const home = tempHome();
+    const dir = mkdtempSync(join(tmpdir(), 'cfaked-'));
+    const out = join(dir, 'env.json');
+    const entry = join(dir, 'fake-daemon.mjs');
+    // 受け取った環境を書いて終わるだけの、デーモンの代わり(接続は受けないので connectDaemon は時間切れで投げる)
+    writeFileSync(
+      entry,
+      [
+        "import { renameSync, writeFileSync } from 'node:fs';",
+        `const out = ${JSON.stringify(out)};`,
+        "const pick = (k) => process.env[k] ?? null;",
+        "writeFileSync(out + '.tmp', JSON.stringify({ inJob: pick('CONDUCTOR_IN_JOB'), held: pick('CONDUCTOR_HELD_LOCKS'), job: pick('CONDUCTOR_JOB_ID'), home: pick('CONDUCTOR_HOME') }));",
+        "renameSync(out + '.tmp', out);",
+      ].join('\n'),
+    );
+    const env = { ...process.env, CONDUCTOR_IN_JOB: '1', CONDUCTOR_HELD_LOCKS: 'a,b', CONDUCTOR_JOB_ID: 'jparent' };
+    await assert.rejects(connectDaemon({ home, env, timeoutMs: 300, daemonEntry: entry }), DaemonUnavailableError);
+    await waitFor(() => existsSync(out), 3_000);
+    assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')), { inJob: null, held: null, job: null, home });
   });
 
   it('ask は error の応答を投げる', async () => {

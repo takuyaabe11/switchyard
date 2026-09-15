@@ -47,15 +47,27 @@ export function analyzeStream(text) {
 }
 
 /** @param {string} home */
-function stopDaemon(home) {
+export function stopDaemon(home) {
   const lock = pathsOf(home).lock;
   if (!existsSync(lock)) return;
   const pid = Number(readFileSync(lock, 'utf8').trim());
   if (!Number.isInteger(pid) || pid <= 1) return;
   // この通しが mkdtemp で作った一時の HOME で自動起動したデーモンだけを止める。送るのは lock の pid 1 つだけ(グループには送らない)で、
   // pid の再利用に備えて、デーモンの二重起動防止(acquireLock)と同じ判定で持ち主が conductord であることを確かめる
-  const command = execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' });
-  if (commandLooksLikeConductord(command)) process.kill(pid, 'SIGTERM');
+  /** @type {string} */
+  let command;
+  try {
+    command = execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    // lock の pid が既に居ない(ps が終了コード 1 で終わる): 止めるものが無い。投げると走行の結果を上書きする
+    return;
+  }
+  if (!commandLooksLikeConductord(command)) return;
+  try {
+    process.kill(pid, 'SIGTERM');
+  } catch {
+    // 確かめた後に終わった
+  }
 }
 
 // 直接実行されたときだけ走る。import されたときは何もしない(argv[1] が実在しない起動でも投げない)

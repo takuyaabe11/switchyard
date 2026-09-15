@@ -3,10 +3,12 @@ import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { connectDaemon, DaemonUnavailableError } from '../../src/client/connect.mjs';
+import { pathsOf } from '../../src/daemon/paths.mjs';
 import { startDaemon } from '../../src/daemon/server.mjs';
 import { runHook } from '../../src/hooks/main.mjs';
 import { pathExportLine, sessionStart, stop } from '../../src/hooks/session.mjs';
@@ -93,6 +95,29 @@ describe('SessionStart(設計 §9.2)', () => {
     const { home } = await daemon();
     const lines = await sessionStart({}, { env: { CONDUCTOR_HOME: home, CLAUDE_ENV_FILE: envFileIn() }, connect: noAutoStart, version: '0.0.0-other' });
     assert.ok(lines.some((l) => l.includes('plugin の版 0.0.0-other')), lines.join('\n'));
+  });
+
+  it('版を名乗らない古いデーモン(1a)には、版を「0.1.0 以前」として知らせる(undefined と出さない)', async () => {
+    const home = tempHome();
+    /** @type {Set<import('node:net').Socket>} */
+    const sockets = new Set();
+    // snapshot に version の無い 1a のデーモンの代わり
+    const old = createServer((conn) => {
+      sockets.add(conn);
+      conn.on('close', () => sockets.delete(conn));
+      conn.on('data', () => conn.write(`${JSON.stringify({ t: 'status', snapshot: { capacity: 4, used: 0, leases: [], waiting: [], unacked: {}, badRecords: 0 } })}\n`));
+    });
+    await new Promise((resolve) => old.listen(pathsOf(home).sock, () => resolve(undefined)));
+    cleanups.push(
+      () =>
+        new Promise((resolve) => {
+          for (const s of sockets) s.destroy();
+          old.close(() => resolve(undefined));
+        }),
+    );
+    const lines = await sessionStart({}, { env: { CONDUCTOR_HOME: home, CLAUDE_ENV_FILE: envFileIn() }, connect: noAutoStart, version: '0.2.0' });
+    assert.ok(lines.some((l) => l.includes('版 0.1.0 以前') && l.includes('plugin の版 0.2.0')), lines.join('\n'));
+    assert.ok(!lines.some((l) => l.includes('undefined')), lines.join('\n'));
   });
 
   it('デーモンに届かなければ、管理なしで走ることを知らせる', async () => {

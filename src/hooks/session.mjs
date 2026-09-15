@@ -48,7 +48,8 @@ export async function sessionStart(_input, { env = process.env, connect = connec
     const measure = snap.leases.find((l) => l.class === 'measure');
     if (measure !== undefined) lines.push(`[conductor] 計測 ${measure.id}(${measure.cmd})が走っている。重い走行は計測が終わるまで待ちになる`);
     if (snap.version !== version) {
-      lines.push(`[conductor] 走っているデーモンの版 ${snap.version} と plugin の版 ${version} が違う。デーモン(~/.conductor/daemon.lock の pid)を止めると、次の要求で新しい版が起動する`);
+      // 版を snapshot に載せ始めたのは 0.2.0 なので、名乗らないデーモンは 0.1.0 以前
+      lines.push(`[conductor] 走っているデーモンの版 ${snap.version ?? '0.1.0 以前'} と plugin の版 ${version} が違う。デーモン(~/.conductor/daemon.lock の pid)を止めると、次の要求で新しい版が起動する`);
     }
   } catch (e) {
     lines.push(`[conductor] デーモンに届かない(${e instanceof Error ? e.message : String(e)})。このセッションの重い走行は管理なしで走る`);

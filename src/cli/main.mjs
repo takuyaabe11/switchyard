@@ -60,7 +60,14 @@ export async function cli(args, opts = {}) {
       stdout(`${USAGE}\n`);
       return 0;
     case 'run':
-      return runJob({ argv: command.argv, flags: command.flags, home, env, cwd, out: (l) => stderr(`${l}\n`), connect });
+      try {
+        return await runJob({ argv: command.argv, flags: command.flags, home, env, cwd, out: (l) => stderr(`${l}\n`), connect });
+      } catch (e) {
+        // profile を解決して初めて分かる使い方の誤り(鍵の無い鍵だけのジョブなど)
+        if (!(e instanceof UsageError)) throw e;
+        stderr(`${e.message}\n${USAGE}\n`);
+        return 2;
+      }
     case 'top': {
       const snap = await status();
       stdout(snap === null ? 'デーモンは動いていない(走行も待ちも無い)\n' : renderTop(snap, now()));
