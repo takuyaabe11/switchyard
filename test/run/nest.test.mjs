@@ -63,6 +63,16 @@ describe('入れ子(設計 §4.3 の 7)', () => {
     assert.equal(buildRequest({ argv: ['/opt/homebrew/bin/npm', 'install', 'x'], flags: {}, env: {}, cwd }).job.profile, 'cmd:npm install');
   });
 
+  it('buildRequest は、鍵だけのジョブの子(祖先の鍵があり CONDUCTOR_IN_JOB が無い)にだけ、親のジョブの id を parent として載せる(設計 §4.3 の 7)', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'cproj-'));
+    const parentOf = (/** @type {NodeJS.ProcessEnv} */ env) => buildRequest({ argv: ['npm', 'test'], flags: {}, env, cwd }).job.parent;
+    assert.equal(parentOf({ CONDUCTOR_HELD_LOCKS: 'git-index:/r/.git', CONDUCTOR_JOB_ID: 'j9' }), 'j9');
+    // CPU を持つジョブの中(入れ子の印あり)・祖先の鍵なし・親の id なしでは載せない
+    assert.equal(parentOf({ CONDUCTOR_HELD_LOCKS: 'git-index:/r/.git', CONDUCTOR_JOB_ID: 'j9', CONDUCTOR_IN_JOB: '1' }), undefined);
+    assert.equal(parentOf({ CONDUCTOR_JOB_ID: 'j9' }), undefined);
+    assert.equal(parentOf({ CONDUCTOR_HELD_LOCKS: 'git-index:/r/.git' }), undefined);
+  });
+
   it('CPU を持つジョブの子には CONDUCTOR_IN_JOB=1 と、持っている鍵を CONDUCTOR_HELD_LOCKS で渡す', async () => {
     const { home } = await daemon();
     const cwd = mkdtempSync(join(tmpdir(), 'cproj-'));

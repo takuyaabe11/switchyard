@@ -18,7 +18,8 @@
  *   locks: string[],
  *   preempt: Preempt,
  *   why: string | null,
- *   expectedMs: number | null
+ *   expectedMs: number | null,
+ *   parent?: string | null
  * }} JobSpec
  */
 

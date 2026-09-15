@@ -64,6 +64,7 @@ export function parseJobRequest(v) {
   if (!Array.isArray(o.locks) || !o.locks.every((x) => typeof x === 'string')) throw new Error('job.locks は文字列の配列');
   if (lockOnly && o.locks.length === 0) throw new Error('job.cpus が 0..0 の鍵だけのジョブは、job.locks を 1 本以上持つ');
   if (o.why !== null && typeof o.why !== 'string') throw new Error('job.why は文字列か null');
+  if (o.parent !== undefined && o.parent !== null && (typeof o.parent !== 'string' || o.parent === '')) throw new Error('job.parent は空でない文字列か null');
   return {
     session: str('session'),
     repo: str('repo'),
@@ -74,6 +75,8 @@ export function parseJobRequest(v) {
     locks: /** @type {string[]} */ (o.locks),
     preempt: /** @type {import('../core/types.mjs').Preempt} */ (pre),
     why: /** @type {string | null} */ (o.why),
+    // 鍵だけの親のジョブの id(設計 §4.3 の 7)。親の子でなければ項目を載せない
+    ...(typeof o.parent === 'string' ? { parent: o.parent } : {}),
   };
 }
 

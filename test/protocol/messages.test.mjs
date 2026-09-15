@@ -18,4 +18,15 @@ describe('parseJobRequest', () => {
     assert.throws(() => parseJobRequest(jobRequest({ cpus: { min: 0, max: 2 }, locks: ['a'] })), /job.cpus は/);
     assert.throws(() => parseJobRequest(jobRequest({ cpus: { min: 2, max: 1 } })), /job.cpus は/);
   });
+
+  it('parent(鍵だけの親のジョブの id)は、文字列ならそのまま載せ、省略・null なら載せない(設計 §4.3 の 7)', () => {
+    assert.equal(parseJobRequest(jobRequest({ parent: 'j7' })).parent, 'j7');
+    assert.equal('parent' in parseJobRequest(jobRequest()), false);
+    assert.equal('parent' in parseJobRequest({ ...jobRequest(), parent: null }), false);
+  });
+
+  it('parent が空の文字列や文字列以外なら投げる', () => {
+    assert.throws(() => parseJobRequest(jobRequest({ parent: '' })), /job.parent は空でない文字列か null/);
+    assert.throws(() => parseJobRequest({ ...jobRequest(), parent: 7 }), /job.parent は空でない文字列か null/);
+  });
 });

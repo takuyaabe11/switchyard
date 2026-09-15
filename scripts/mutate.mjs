@@ -177,6 +177,13 @@ const SUITES = {
         from: ".filter((name) => name.startsWith(prefix) && name.endsWith('.taking'))",
         to: '.filter(() => false)',
       },
+      {
+        // 改善 3: 鍵だけのジョブの子の要求に、親のジョブの id を載せない(規則層が親の子として先に入れられない)
+        name: 'W11 鍵だけのジョブの子の要求に parent を載せない',
+        file: 'src/run/run.mjs',
+        from: "const parent = held.size > 0 && env.CONDUCTOR_IN_JOB !== '1' && env.CONDUCTOR_JOB_ID ? env.CONDUCTOR_JOB_ID : null;",
+        to: 'const parent = null;',
+      },
     ],
   },
   shim: {
