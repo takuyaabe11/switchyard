@@ -249,8 +249,15 @@ export function runJob(opts) {
         return;
       }
       if (phase !== 'running' || child === null) return;
+      if (killTimer !== null) clearTimeout(killTimer); // 信号を短時間に 2 回受けても、前のタイマーを残さない
       if (pgid === null) {
-        child.kill('SIGTERM');
+        // グループを確かめられないので、呼び出し元の終了だけを子の pid へ伝える(グループへは送らない)。
+        // 相手は自分で起動した子そのものなので、猶予の後に生きていれば SIGKILL へ格上げしてよい
+        const c = child;
+        c.kill('SIGTERM');
+        killTimer = setTimeout(() => {
+          if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL');
+        }, killGraceMs);
         return;
       }
       signalGroup(pgid, 'SIGTERM', ownPgid);

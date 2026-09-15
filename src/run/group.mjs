@@ -23,7 +23,7 @@ export function spawnInOwnGroup(argv, opts = {}) {
 
 /**
  * 子が自分のプロセスグループを持ち、それが呼び出し元のグループと違うことを確かめる。
- * 確かめられなければ null を返す(呼び出し側は信号を送らないモードで走らせる)。
+ * 確かめられなければ null を返す(呼び出し側はグループへの信号を送らず、呼び出し元の終了だけを子の pid に伝える)。
  * @param {number} childPid @param {number | null} [ownPgid] @returns {number | null}
  */
 export function verifiedGroup(childPid, ownPgid = readPgid(process.pid)) {
