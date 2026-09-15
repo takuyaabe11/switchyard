@@ -2,13 +2,14 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { decideShim, formatAnswer } from '../../src/shim/decide.mjs';
 
 const DECIDE = fileURLToPath(new URL('../../src/shim/decide.mjs', import.meta.url));
+const CLI = fileURLToPath(new URL('../../bin/conductor.mjs', import.meta.url));
 
 /** git の外の一時ディレクトリ */
 const plainDir = () => mkdtempSync(join(tmpdir(), 'cproj-'));
@@ -33,6 +34,18 @@ describe('decideShim(設計 §9.1)', () => {
   it('既定表に当たれば run とその profile 名', () => {
     assert.deepEqual(decideShim({ word: 'npm', args: ['test'], cwd: plainDir(), env: {} }), { kind: 'run', profile: 'default:batch' });
     assert.deepEqual(decideShim({ word: 'node', args: ['benchmarks/run.mjs'], cwd: plainDir(), env: {} }), { kind: 'run', profile: 'default:measure' });
+  });
+
+  it('node で呼んだこの plugin の conductor の CLI は、分類せずに pass(外側のジョブに包まない)', () => {
+    const dir = plainDir();
+    symlinkSync(CLI, join(dir, 'conductor.mjs'));
+    assert.deepEqual(decideShim({ word: 'node', args: [CLI, 'run', '--lock', 'port:4173', '--', 'npm', 'run', 'bench'], cwd: dir, env: {} }), { kind: 'pass' });
+    // 相対パス・symlink でも実パスで見分ける
+    assert.deepEqual(decideShim({ word: 'node', args: ['conductor.mjs', 'run', '--', 'npx', 'vitest', 'run', 'bench'], cwd: dir, env: {} }), { kind: 'pass' });
+    // 同じ名前の別のファイルは、いつもどおり分類する
+    const other = plainDir();
+    writeFileSync(join(other, 'conductor.mjs'), '');
+    assert.deepEqual(decideShim({ word: 'node', args: ['conductor.mjs', 'run', '--', 'npm', 'run', 'bench'], cwd: other, env: {} }), { kind: 'run', profile: 'default:measure' });
   });
 
   it('どれにも当たらなければ pass', () => {
