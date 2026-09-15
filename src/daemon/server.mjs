@@ -8,6 +8,7 @@ import { usedCpus } from '../core/schedule.mjs';
 import { sortWaiting } from '../core/score.mjs';
 import { numOrNull, parseEscape, parseJobRequest } from '../protocol/messages.mjs';
 import { createDecoder, encode } from '../protocol/ndjson.mjs';
+import { VERSION } from '../version.mjs';
 import { pathsOf, SOCKET_PATH_LIMIT } from './paths.mjs';
 import { appendRecord, loadEscapes, loadEstimates, parseState, readJson, readRecords, takeUnmanaged, writeJsonAtomic } from './store.mjs';
 
@@ -164,6 +165,8 @@ export async function startDaemon(opts) {
       }),
       unacked: state.unacked,
       badRecords: journal.bad,
+      // 起動したときの版。plugin を更新した後も古いデーモンが走り続けるので、SessionStart が食い違いを知らせる(設計 §9.6)
+      version: VERSION,
     };
   };
 

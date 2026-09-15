@@ -201,7 +201,7 @@ const SUITES = {
     ],
   },
   hooks: {
-    tests: ['test/hooks/pretooluse.test.mjs'],
+    tests: ['test/hooks/pretooluse.test.mjs', 'test/hooks/session.test.mjs'],
     mutations: [
       {
         name: 'H1 既に背景でも書き換える',
@@ -238,6 +238,24 @@ const SUITES = {
         file: 'src/hooks/pretooluse.mjs',
         from: "if (env.CONDUCTOR_THINKER === '1') return null;",
         to: '',
+      },
+      {
+        name: 'H7 Stop が 2 度目の停止も差し戻す',
+        file: 'src/hooks/session.mjs',
+        from: "if (env.CONDUCTOR_THINKER === '1' || input.stop_hook_active === true) return null;",
+        to: "if (env.CONDUCTOR_THINKER === '1') return null;",
+      },
+      {
+        name: 'H8 SessionStart が同じ行を何度も足す',
+        file: 'src/hooks/session.mjs',
+        from: "if (!(existsSync(envFile) ? readFileSync(envFile, 'utf8') : '').split('\\n').includes(line)) appendFileSync(",
+        to: 'if (true) appendFileSync(',
+      },
+      {
+        name: 'H9 SessionStart が版の違いを知らせない',
+        file: 'src/hooks/session.mjs',
+        from: 'if (snap.version !== version) {',
+        to: 'if (false) {',
       },
     ],
   },

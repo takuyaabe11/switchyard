@@ -28,7 +28,7 @@
 /**
  * @typedef {{
  *   capacity: number, used: number, leases: LeaseView[], waiting: WaitingView[],
- *   unacked: Record<string, Unacked[]>, badRecords: number
+ *   unacked: Record<string, Unacked[]>, badRecords: number, version: string
  * }} Snapshot
  */
 
