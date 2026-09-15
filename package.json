@@ -11,7 +11,7 @@
     "conductord": "bin/conductord.mjs"
   },
   "scripts": {
-    "test": "node --test --test-reporter=spec",
+    "test": "env -u CONDUCTOR_IN_JOB -u CONDUCTOR_HELD_LOCKS -u CONDUCTOR_JOB_ID node --test --test-reporter=spec",
     "typecheck": "tsc -p .",
     "check": "npm run typecheck && npm test",
     "mutate:core": "node scripts/mutate.mjs core",

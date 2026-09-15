@@ -1,9 +1,10 @@
 // @ts-check
 // conductor run の本体(設計 §4.3)。割り振りを待ち、子を別グループで起動し、心拍と終了をデーモンへ返す。
-import { execFileSync } from 'node:child_process';
 import { constants as osConstants } from 'node:os';
+import { basename } from 'node:path';
 import { channel, connectDaemon, DaemonUnavailableError } from '../client/connect.mjs';
 import { sessionId } from '../client/session.mjs';
+import { heldLocks, repoRoot } from '../config/context.mjs';
 import { applyTemplate, classify, loadProfiles } from '../config/profiles.mjs';
 import { readPgid, signalGroup, spawnInOwnGroup, verifiedGroup, waitGroupGone } from './group.mjs';
 import { createEscapeTracker } from './watch.mjs';
@@ -37,14 +38,8 @@ import { createEscapeTracker } from './watch.mjs';
 
 const CALLER_SIGNALS = /** @type {const} */ (['SIGTERM', 'SIGINT', 'SIGHUP']);
 
-/** @param {string} cwd @returns {string} */
-export function repoRoot(cwd) {
-  try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-  } catch {
-    return cwd;
-  }
-}
+// 既存の呼び出し元とテストのために、ここからも読めるようにしておく
+export { heldLocks, repoRoot };
 
 /** @param {NodeJS.Signals | null} sig @returns {number} */
 function signalCode(sig) {
@@ -53,6 +48,8 @@ function signalCode(sig) {
 
 /**
  * ジョブの宣言を組み立てる。--profile の指定 → コマンドの分類 → 既定、の順に性格を決め、引数で上書きする。鍵は足し合わせる。
+ * 入れ子(設計 §4.3 の 7): 祖先が持つ鍵は外す。CPU を持つジョブの中(CONDUCTOR_IN_JOB=1)では CPU を 0..0 にする
+ * (親が CPU を持っているので二重に数えない。数えると、容量いっぱいのときに親子が互いを待つ)。
  * @param {{ argv: string[], flags: RunFlags, env: NodeJS.ProcessEnv, cwd: string }} input
  * @returns {{ job: JobRequest, profile: Profile | null, configError: string | null }}
  */
@@ -63,15 +60,17 @@ export function buildRequest({ argv, flags, env, cwd }) {
   const named = flags.profile !== undefined ? profiles.find((p) => p.name === flags.profile) ?? null : classify(cmd, profiles);
   if (flags.profile !== undefined && named === null) throw new Error(`profile ${flags.profile} が見つからない`);
   const base = named === null ? null : named.profile;
+  const held = heldLocks(env);
   return {
     job: {
       session: sessionId(env),
       repo,
-      profile: named === null ? `cmd:${argv.slice(0, 2).join(' ')}` : named.name,
+      // shim は本物のパスで起動するので、先頭の語は basename にする(パスごとに見込みが分かれないように。設計 §5.4)
+      profile: named === null ? `cmd:${[basename(argv[0]), ...argv.slice(1, 2)].join(' ')}` : named.name,
       cmd,
       class: flags.class ?? base?.class ?? 'batch',
-      cpus: flags.cpus ?? base?.cpus ?? { min: 1, max: 1 },
-      locks: [...new Set([...(base?.locks ?? []), ...(flags.locks ?? [])])],
+      cpus: env.CONDUCTOR_IN_JOB === '1' ? { min: 0, max: 0 } : flags.cpus ?? base?.cpus ?? { min: 1, max: 1 },
+      locks: [...new Set([...(base?.locks ?? []), ...(flags.locks ?? [])])].filter((k) => !held.has(k)),
       preempt: flags.preempt ?? base?.preempt ?? 'throttle',
       why: flags.why ?? null,
     },
@@ -196,6 +195,9 @@ export function runJob(opts) {
       /** @type {NodeJS.ProcessEnv} */
       const childEnv = { ...env, ...tpl.env, CONDUCTOR_CPUS: String(cpus) };
       if (jobId !== null) childEnv.CONDUCTOR_JOB_ID = jobId;
+      // 入れ子の印(設計 §4.3 の 7): CPU を持つジョブの子だけに立てる(鍵だけのジョブの子は、中の重い走行を別に管理させる)
+      if (cpus > 0) childEnv.CONDUCTOR_IN_JOB = '1';
+      childEnv.CONDUCTOR_HELD_LOCKS = [...new Set([...heldLocks(env), ...job.locks])].join(',');
       const c = spawnInOwnGroup([...argv, ...tpl.args], { env: childEnv, cwd, stdio: 'inherit' });
       child = c;
       c.once('error', (e) => {
@@ -346,6 +348,12 @@ export function runJob(opts) {
         }
       }
     };
+
+    if (job.cpus.max === 0 && job.locks.length === 0) {
+      // 入れ子で CPU も鍵も要らなくなった: デーモンに要求を出さず、そのまま走らせる(設計 §4.3 の 7)
+      startChild(0, false);
+      return;
+    }
 
     connect({ home, env })
       .then((conn) => {
