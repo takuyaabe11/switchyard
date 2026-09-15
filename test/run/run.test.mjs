@@ -1,6 +1,7 @@
 // @ts-check
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -190,6 +191,37 @@ describe('runJob', () => {
     assert.equal(await running, 0);
     await waitFor(() => second.getState().leases.length === 0);
     assert.ok(lines.some((l) => l.includes('つなぎ直した')), lines.join('\n'));
+  });
+
+  it('再接続を待っている間に子が終わったら、待ちのタイマーでプロセスの終了を遅らせない', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cproj-'));
+    const script = join(dir, 'exit-timing.mjs');
+    const root = new URL('../../', import.meta.url);
+    const at = (/** @type {string} */ rel) => JSON.stringify(new URL(rel, root).href);
+    writeFileSync(
+      script,
+      [
+        `import { startDaemon } from ${at('src/daemon/server.mjs')};`,
+        `import { connectDaemon } from ${at('src/client/connect.mjs')};`,
+        `import { runJob } from ${at('src/run/run.mjs')};`,
+        "import { mkdtempSync } from 'node:fs';",
+        "import { tmpdir } from 'node:os';",
+        "import { join } from 'node:path';",
+        "const home = mkdtempSync(join(tmpdir(), 'cd-'));",
+        'const d = await startDaemon({ home, capacity: 2, tickMs: 20 });',
+        "const p = runJob({ argv: [process.execPath, '-e', 'setTimeout(() => {}, 300)'], flags: {}, home, cwd: home, out: () => {}, connect: (o) => connectDaemon({ ...o, autoStart: false }), reconnectMs: 4000 });",
+        "while (d.getState().leases[0]?.phase !== 'running') await new Promise((r) => setTimeout(r, 10));",
+        'await d.close();',
+        "console.log('code=' + (await p));",
+      ].join('\n'),
+    );
+    const started = Date.now();
+    const out = await new Promise((resolve, reject) => {
+      execFile(process.execPath, [script], { timeout: 15_000 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+    });
+    const elapsed = Date.now() - started;
+    assert.match(String(out), /code=0/);
+    assert.ok(elapsed < 3_000, `プロセスの終了までに ${elapsed}ms かかった(再接続の待ち 4000ms に引きずられている)`);
   });
 
   it('入れ替わったデーモンがジョブを知らなければ、管理なしで走り続ける', async () => {

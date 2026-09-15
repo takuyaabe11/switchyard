@@ -121,6 +121,8 @@ export function runJob(opts) {
     let hbTimer = null;
     /** @type {NodeJS.Timeout | null} */
     let killTimer = null;
+    /** @type {NodeJS.Timeout | null} 再接続の待ち(終わったら消して、プロセスの終了を遅らせない) */
+    let backoffTimer = null;
     // await を挟んだ後の読み取りを型の絞り込みに巻き込まないよう、関数越しに読む
     const over = () => finished || phase === 'done';
 
@@ -136,6 +138,7 @@ export function runJob(opts) {
       finished = true;
       if (hbTimer !== null) clearInterval(hbTimer);
       if (killTimer !== null) clearTimeout(killTimer);
+      if (backoffTimer !== null) clearTimeout(backoffTimer);
       for (const [sig, h] of handlers) signals.off(sig, h);
       ch?.close();
       resolve(code);
@@ -188,7 +191,7 @@ export function runJob(opts) {
       });
       if (c.pid === undefined) return;
       pgid = verifiedGroup(c.pid, ownPgid);
-      if (pgid === null) out('[conductor] 子のプロセスグループを確かめられないので、信号を送らないモードで走らせる');
+      if (pgid === null) out('[conductor] 子のプロセスグループを確かめられないので、グループへの信号は送らない(呼び出し元の終了だけを子に伝える)');
       if (managed && ch !== null && jobId !== null) {
         ch.send({ t: 'started', jobId, pid: c.pid, pgid });
         hbTimer = setInterval(() => {
@@ -282,7 +285,10 @@ export function runJob(opts) {
             startChild(job.cpus.min, false);
             return;
           }
-          await new Promise((r) => setTimeout(r, wait));
+          await new Promise((r) => {
+            backoffTimer = setTimeout(r, wait);
+          });
+          backoffTimer = null;
           wait = Math.min(wait * 2, 30_000);
         }
       }
