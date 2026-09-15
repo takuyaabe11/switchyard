@@ -36,6 +36,15 @@ describe('parseArgs', () => {
   });
 });
 
+describe('parseArgs: probe', () => {
+  it('秒数とコマンドを分け、誤りは UsageError', () => {
+    assert.deepEqual(parseArgs(['probe', '0.5', '--', 'npx', 'vitest', 'run']), { cmd: 'probe', seconds: 0.5, argv: ['npx', 'vitest', 'run'] });
+    assert.throws(() => parseArgs(['probe', '--', 'x']), UsageError);
+    assert.throws(() => parseArgs(['probe', '0', '--', 'x']), /正の数/);
+    assert.throws(() => parseArgs(['probe', '5', '--']), /コマンドが無い/);
+  });
+});
+
 describe('parseCpus', () => {
   it('4 と 2..10 を受け、それ以外は拒む', () => {
     assert.deepEqual(parseCpus('4'), { min: 4, max: 4 });

@@ -1,7 +1,7 @@
 // @ts-check
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { duration, renderTop, renderWhy } from '../../src/cli/render.mjs';
+import { duration, renderProbe, renderTop, renderWhy } from '../../src/cli/render.mjs';
 
 /** @typedef {import('../../src/protocol/messages.mjs').Snapshot} Snapshot */
 const T = Date.UTC(2026, 8, 15, 5, 0, 0);
@@ -10,9 +10,9 @@ const T = Date.UTC(2026, 8, 15, 5, 0, 0);
 const snap = {
   capacity: 12,
   used: 3,
-  leases: [{ id: 'jA', session: 's1', class: 'batch', cmd: 'npm test', why: 'push 前', cpus: 3, locks: ['port:4173'], phase: 'running', recovering: false, sinceWall: T - 120_000, expectedMs: null }],
+  leases: [{ id: 'jA', session: 's1', class: 'batch', cmd: 'npm test', why: 'push 前', cpus: 3, locks: ['port:4173'], phase: 'running', recovering: false, sinceWall: T - 120_000, expectedMs: null, escapes: [] }],
   waiting: [
-    { id: 'jB', session: 's2', class: 'measure', cmd: 'npm run benchmark', why: null, cpus: { min: 1, max: 12 }, locks: [], recovering: false, sinceWall: T - 60_000, note: { jobId: 'jB', position: 1, reason: '走行中 1 本の終了を待つ(計測は単独で走る)', etaWall: null } },
+    { id: 'jB', session: 's2', class: 'measure', cmd: 'npm run benchmark', why: null, cpus: { min: 1, max: 12 }, locks: [], recovering: false, sinceWall: T - 60_000, note: { jobId: 'jB', position: 1, reason: '走行中 1 本の終了を待つ(計測は単独で走る)', etaWall: null }, escapes: [] },
   ],
   unacked: { s3: [{ jobId: 'jC', kind: 'failed', code: 1, cmd: 'npm run build' }] },
   badRecords: 0,
@@ -50,5 +50,24 @@ describe('render', () => {
     assert.deepEqual(renderWhy(snap, 'jB', T), { text: 'jB は待ち列の 1 番目(1分待ち)。理由: 走行中 1 本の終了を待つ(計測は単独で走る)。\n', found: true });
     assert.match(renderWhy(snap, 'jC', T).text, /jC は終わっている: failed\(終了コード 1\) npm run build/);
     assert.deepEqual(renderWhy(snap, 'jZ', T).found, false);
+  });
+
+  it('抜ける子の記録がある profile は、top と why でそう示す', () => {
+    const withEscapes = { ...snap, leases: [{ ...snap.leases[0], escapes: ['chrome'] }], waiting: [{ ...snap.waiting[0], escapes: ['node'] }] };
+    const top = renderTop(withEscapes, T);
+    assert.match(top, /jA \[重\] 走行 CPU 3 2分  npm test  \(目的: push 前 \/ 鍵: port:4173 \/ 抜ける子: chrome\)/);
+    assert.match(top, /理由: 走行中 1 本の終了を待つ\(計測は単独で走る\)  抜ける子: node/);
+    assert.equal(
+      renderWhy(withEscapes, 'jA', T).text,
+      'jA は走行中(CPU 3・2分)。\nこの profile では過去に子がプロセスグループから抜けた(chrome)。信号と使用率の照合が届かない。\n',
+    );
+  });
+
+  it('probe の結果を 4 行で示す', () => {
+    assert.equal(
+      renderProbe({ command: 'sh -c x', group: 77, seen: 3, escaped: [{ comm: 'perl', count: 1 }], survivors: [{ pid: 78, comm: 'perl', inGroup: false }] }),
+      'コマンド: sh -c x\n観察した子孫: 3(プロセスグループ 77)\nグループから抜けた子: perl ×1\nSIGTERM の後も生きていた子: perl(pid 78・グループ外)(SIGKILL で片付けた)\n',
+    );
+    assert.match(renderProbe({ command: 'c', group: 1, seen: 1, escaped: [], survivors: [] }), /グループから抜けた子: なし\nSIGTERM の後も生きていた子: なし/);
   });
 });

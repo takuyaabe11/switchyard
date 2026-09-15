@@ -159,6 +159,81 @@ describe('runJob', () => {
     }
   });
 
+  it('実行中にプロセスグループから抜けた子を検出し、表示してデーモンに記録させる', async () => {
+    const { home } = await daemon();
+    /** @type {string[]} */
+    const lines = [];
+    const code = await runJob({
+      // 抜けるのを 0.3 秒遅らせる。起動直後の 1 回の観察では捕まらず、走行中の観察でしか捕まらない入力にする
+      // (perl の sleep は整数の秒だけを受け付ける。0.5 は 0 になって即座に終わる)
+      argv: ['sh', '-c', 'sleep 0.3; perl -e "use POSIX; POSIX::setsid(); sleep 1" & wait'],
+      flags: {},
+      home,
+      cwd: mkdtempSync(join(tmpdir(), 'cproj-')),
+      out: (l) => lines.push(l),
+      connect: noAutoStart,
+      watchMs: 50,
+    });
+    assert.equal(code, 0);
+    assert.ok(lines.includes('[conductor] プロセスグループから抜けた子: perl ×1(信号と使用率の照合が届かない)'), lines.join('\n'));
+    await waitFor(() => readFileSync(pathsOf(home).events, 'utf8').includes('"kind":"escape"'));
+  });
+
+  it('普通に終わった後もグループに残る子を、終了後も生きている子として表示する', async () => {
+    const { d, home } = await daemon();
+    /** @type {string[]} */
+    const lines = [];
+    let pgid = 0;
+    const running = runJob({
+      argv: ['sh', '-c', 'sleep 30 & sleep 0.3'],
+      flags: {},
+      home,
+      cwd: mkdtempSync(join(tmpdir(), 'cproj-')),
+      out: (l) => lines.push(l),
+      connect: noAutoStart,
+      watchMs: 50,
+    });
+    await waitFor(() => d.getState().leases[0]?.phase === 'running');
+    pgid = /** @type {number} */ (d.getState().leases[0].pgid);
+    try {
+      assert.equal(await running, 0);
+      assert.ok(lines.some((l) => /^\[conductor\] 終了後も生きている子: sleep\(pid \d+・グループ内\)$/.test(l)), lines.join('\n'));
+    } finally {
+      killGroupLeftovers(pgid);
+    }
+  });
+
+  it('再接続を待っている間に子が終わったら、待ちのタイマーでプロセスの終了を遅らせない', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cproj-'));
+    const script = join(dir, 'exit-timing.mjs');
+    const root = new URL('../../', import.meta.url);
+    const at = (/** @type {string} */ rel) => JSON.stringify(new URL(rel, root).href);
+    writeFileSync(
+      script,
+      [
+        `import { startDaemon } from ${at('src/daemon/server.mjs')};`,
+        `import { connectDaemon } from ${at('src/client/connect.mjs')};`,
+        `import { runJob } from ${at('src/run/run.mjs')};`,
+        "import { mkdtempSync } from 'node:fs';",
+        "import { tmpdir } from 'node:os';",
+        "import { join } from 'node:path';",
+        "const home = mkdtempSync(join(tmpdir(), 'cd-'));",
+        'const d = await startDaemon({ home, capacity: 2, tickMs: 20 });',
+        "const p = runJob({ argv: [process.execPath, '-e', 'setTimeout(() => {}, 300)'], flags: {}, home, cwd: home, out: () => {}, connect: (o) => connectDaemon({ ...o, autoStart: false }), reconnectMs: 4000 });",
+        "while (d.getState().leases[0]?.phase !== 'running') await new Promise((r) => setTimeout(r, 10));",
+        'await d.close();',
+        "console.log('code=' + (await p));",
+      ].join('\n'),
+    );
+    const started = Date.now();
+    const out = await new Promise((resolve, reject) => {
+      execFile(process.execPath, [script], { timeout: 15_000 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+    });
+    const elapsed = Date.now() - started;
+    assert.match(String(out), /code=0/);
+    assert.ok(elapsed < 3_000, `プロセスの終了までに ${elapsed}ms かかった(再接続の待ち 4000ms に引きずられている)`);
+  });
+
   it('デーモンに届かなければ、管理なしで実行し、そう表示する', async () => {
     /** @type {string[]} */
     const lines = [];
@@ -191,37 +266,6 @@ describe('runJob', () => {
     assert.equal(await running, 0);
     await waitFor(() => second.getState().leases.length === 0);
     assert.ok(lines.some((l) => l.includes('つなぎ直した')), lines.join('\n'));
-  });
-
-  it('再接続を待っている間に子が終わったら、待ちのタイマーでプロセスの終了を遅らせない', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'cproj-'));
-    const script = join(dir, 'exit-timing.mjs');
-    const root = new URL('../../', import.meta.url);
-    const at = (/** @type {string} */ rel) => JSON.stringify(new URL(rel, root).href);
-    writeFileSync(
-      script,
-      [
-        `import { startDaemon } from ${at('src/daemon/server.mjs')};`,
-        `import { connectDaemon } from ${at('src/client/connect.mjs')};`,
-        `import { runJob } from ${at('src/run/run.mjs')};`,
-        "import { mkdtempSync } from 'node:fs';",
-        "import { tmpdir } from 'node:os';",
-        "import { join } from 'node:path';",
-        "const home = mkdtempSync(join(tmpdir(), 'cd-'));",
-        'const d = await startDaemon({ home, capacity: 2, tickMs: 20 });',
-        "const p = runJob({ argv: [process.execPath, '-e', 'setTimeout(() => {}, 300)'], flags: {}, home, cwd: home, out: () => {}, connect: (o) => connectDaemon({ ...o, autoStart: false }), reconnectMs: 4000 });",
-        "while (d.getState().leases[0]?.phase !== 'running') await new Promise((r) => setTimeout(r, 10));",
-        'await d.close();',
-        "console.log('code=' + (await p));",
-      ].join('\n'),
-    );
-    const started = Date.now();
-    const out = await new Promise((resolve, reject) => {
-      execFile(process.execPath, [script], { timeout: 15_000 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
-    });
-    const elapsed = Date.now() - started;
-    assert.match(String(out), /code=0/);
-    assert.ok(elapsed < 3_000, `プロセスの終了までに ${elapsed}ms かかった(再接続の待ち 4000ms に引きずられている)`);
   });
 
   it('入れ替わったデーモンがジョブを知らなければ、管理なしで走り続ける', async () => {

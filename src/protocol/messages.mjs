@@ -7,19 +7,22 @@
 /** @typedef {import('../core/types.mjs').LeasePhase} LeasePhase */
 /** @typedef {import('../core/types.mjs').Unacked} Unacked */
 /** @typedef {Omit<JobSpec, 'id' | 'expectedMs'>} JobRequest */
+/** @typedef {import('../run/watch.mjs').EscapedCount} EscapedCount */
+/** @typedef {import('../run/watch.mjs').Survivor} Survivor */
+/** @typedef {{ escaped: EscapedCount[], survivors: Survivor[] }} EscapeSummary */
 
 /** @typedef {{ jobId: string, position: number, reason: string, etaWall: number | null }} WallNote */
 /**
  * @typedef {{
  *   id: string, session: string, class: JobClass, cmd: string, why: string | null,
  *   cpus: number, locks: string[], phase: LeasePhase, recovering: boolean,
- *   sinceWall: number, expectedMs: number | null
+ *   sinceWall: number, expectedMs: number | null, escapes: string[]
  * }} LeaseView
  */
 /**
  * @typedef {{
  *   id: string, session: string, class: JobClass, cmd: string, why: string | null,
- *   cpus: CpuRange, locks: string[], recovering: boolean, sinceWall: number, note: WallNote | null
+ *   cpus: CpuRange, locks: string[], recovering: boolean, sinceWall: number, note: WallNote | null, escapes: string[]
  * }} WaitingView
  */
 /**
@@ -70,4 +73,28 @@ export function parseJobRequest(v) {
     preempt: /** @type {import('../core/types.mjs').Preempt} */ (pre),
     why: /** @type {string | null} */ (o.why),
   };
+}
+
+/**
+ * 包みが exit に付けて送る、グループから抜けた子と生き残りの要約を確かめる。
+ * 形が合わない要素は捨てる(終了の報告そのものは受け取る)。全体の形が違えば null。
+ * @param {unknown} v @returns {EscapeSummary | null}
+ */
+export function parseEscape(v) {
+  if (typeof v !== 'object' || v === null) return null;
+  const o = /** @type {Record<string, unknown>} */ (v);
+  if (!Array.isArray(o.escaped) || !Array.isArray(o.survivors)) return null;
+  /** @type {EscapedCount[]} */
+  const escaped = [];
+  for (const x of o.escaped) {
+    const e = /** @type {Record<string, unknown>} */ (typeof x === 'object' && x !== null ? x : {});
+    if (typeof e.comm === 'string' && Number.isInteger(e.count)) escaped.push({ comm: e.comm, count: Number(e.count) });
+  }
+  /** @type {Survivor[]} */
+  const survivors = [];
+  for (const x of o.survivors) {
+    const e = /** @type {Record<string, unknown>} */ (typeof x === 'object' && x !== null ? x : {});
+    if (Number.isInteger(e.pid) && typeof e.comm === 'string' && typeof e.inGroup === 'boolean') survivors.push({ pid: Number(e.pid), comm: e.comm, inGroup: e.inGroup });
+  }
+  return { escaped, survivors };
 }

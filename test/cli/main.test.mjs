@@ -82,6 +82,13 @@ describe('cli', () => {
     assert.equal(d.getState().unacked.other123, undefined);
   });
 
+  it('probe はグループから抜ける子を報告する', async () => {
+    const r = await capture(['probe', '0.5', '--', 'sh', '-c', 'perl -e "use POSIX; POSIX::setsid(); sleep 30" & sleep 30 & wait'], { CONDUCTOR_HOME: tempHome() });
+    assert.equal(r.code, 0, r.err);
+    assert.match(r.out, /グループから抜けた子: perl ×1/);
+    assert.match(r.out, /SIGTERM の後も生きていた子: perl\(pid \d+・グループ外\)\(SIGKILL で片付けた\)/);
+  });
+
   it('bin: run はデーモンを自動起動し、子の終了コードを返す', async () => {
     const home = tempHome();
     cleanups.push(async () => {

@@ -3,9 +3,10 @@
 import { ask, connectDaemon, DaemonUnavailableError } from '../client/connect.mjs';
 import { isClaudeSession, sessionId } from '../client/session.mjs';
 import { conductorHome } from '../daemon/paths.mjs';
+import { probe } from '../run/probe.mjs';
 import { runJob } from '../run/run.mjs';
 import { parseArgs, UsageError, USAGE } from './args.mjs';
-import { renderTop, renderWhy } from './render.mjs';
+import { renderProbe, renderTop, renderWhy } from './render.mjs';
 
 /** @typedef {import('../protocol/messages.mjs').Snapshot} Snapshot */
 
@@ -92,6 +93,15 @@ export async function cli(args, opts = {}) {
       }
       stdout(`確認済みにした: ${command.jobId}(セッション ${session})\n`);
       return 0;
+    }
+    case 'probe': {
+      try {
+        stdout(renderProbe(await probe({ argv: command.argv, seconds: command.seconds, cwd, env })));
+        return 0;
+      } catch (e) {
+        stderr(`[conductor] probe に失敗: ${e instanceof Error ? e.message : String(e)}\n`);
+        return 1;
+      }
     }
   }
 }

@@ -3,6 +3,7 @@
 /** @typedef {import('../protocol/messages.mjs').Snapshot} Snapshot */
 /** @typedef {import('../core/types.mjs').JobClass} JobClass */
 /** @typedef {import('../core/types.mjs').Unacked} Unacked */
+/** @typedef {import('../run/watch.mjs').EscapeReport} EscapeReport */
 
 /** @type {Record<JobClass, string>} */
 const CLASS_LABEL = { quick: '短', batch: '重', measure: '計測' };
@@ -32,7 +33,12 @@ export function renderTop(snap, nowWall) {
     lines.push('走行:');
     for (const l of snap.leases) {
       const phase = l.phase === 'orphan' ? '孤児' : l.phase === 'granted' ? '起動待ち' : '走行';
-      const extras = [l.recovering ? '再接続待ち' : '', l.why === null ? '' : `目的: ${l.why}`, l.locks.length === 0 ? '' : `鍵: ${l.locks.join(', ')}`].filter((x) => x !== '');
+      const extras = [
+        l.recovering ? '再接続待ち' : '',
+        l.why === null ? '' : `目的: ${l.why}`,
+        l.locks.length === 0 ? '' : `鍵: ${l.locks.join(', ')}`,
+        l.escapes.length === 0 ? '' : `抜ける子: ${l.escapes.join(', ')}`,
+      ].filter((x) => x !== '');
       lines.push(`  ${l.id} [${CLASS_LABEL[l.class]}] ${phase} CPU ${l.cpus} ${duration(nowWall - l.sinceWall)}  ${l.cmd}${extras.length === 0 ? '' : `  (${extras.join(' / ')})`}`);
     }
   }
@@ -41,7 +47,8 @@ export function renderTop(snap, nowWall) {
     snap.waiting.forEach((w, i) => {
       const reason = w.recovering ? '再起動したデーモンが包みの再接続を待っている' : w.note === null ? '判断待ち' : w.note.reason;
       const eta = w.note !== null && w.note.etaWall !== null ? `  見込み ${clock(w.note.etaWall)}` : '';
-      lines.push(`  ${i + 1}. ${w.id} [${CLASS_LABEL[w.class]}] ${w.cmd}  ${duration(nowWall - w.sinceWall)}待ち  理由: ${reason}${eta}`);
+      const esc = w.escapes.length === 0 ? '' : `  抜ける子: ${w.escapes.join(', ')}`;
+      lines.push(`  ${i + 1}. ${w.id} [${CLASS_LABEL[w.class]}] ${w.cmd}  ${duration(nowWall - w.sinceWall)}待ち  理由: ${reason}${eta}${esc}`);
     });
   }
   const sessions = Object.entries(snap.unacked).filter(([, list]) => list.length > 0);
@@ -58,6 +65,17 @@ export function renderTop(snap, nowWall) {
  * @returns {{ text: string, found: boolean }}
  */
 export function renderWhy(snap, jobId, nowWall) {
+  const r = whyText(snap, jobId, nowWall);
+  const view = snap.leases.find((x) => x.id === jobId) ?? snap.waiting.find((x) => x.id === jobId);
+  if (view === undefined || view.escapes.length === 0) return r;
+  return { text: `${r.text}この profile では過去に子がプロセスグループから抜けた(${view.escapes.join(', ')})。信号と使用率の照合が届かない。\n`, found: r.found };
+}
+
+/**
+ * @param {Snapshot} snap @param {string} jobId @param {number} nowWall
+ * @returns {{ text: string, found: boolean }}
+ */
+function whyText(snap, jobId, nowWall) {
   const l = snap.leases.find((x) => x.id === jobId);
   if (l !== undefined) {
     if (l.phase === 'orphan') return { text: `${jobId} は孤児: 包みを見失ったが、子はまだ生きている。子が終わると資源を返す。\n`, found: true };
@@ -77,4 +95,17 @@ export function renderWhy(snap, jobId, nowWall) {
     if (u !== undefined) return { text: `${jobId} は終わっている: ${unackedText(u)}(セッション ${session})。conductor ack ${jobId} で確認済みにする。\n`, found: true };
   }
   return { text: `${jobId} は見つからない(正常に終わったか、確認済みか、存在しない)。\n`, found: false };
+}
+
+/**
+ * conductor probe の結果の表示。
+ * @param {EscapeReport & { command: string, group: number }} r @returns {string}
+ */
+export function renderProbe(r) {
+  const escaped = r.escaped.length === 0 ? 'なし' : r.escaped.map((e) => `${e.comm} ×${e.count}`).join(', ');
+  const survivors =
+    r.survivors.length === 0
+      ? 'なし'
+      : `${r.survivors.map((x) => `${x.comm}(pid ${x.pid}・${x.inGroup ? 'グループ内' : 'グループ外'})`).join(', ')}(SIGKILL で片付けた)`;
+  return [`コマンド: ${r.command}`, `観察した子孫: ${r.seen}(プロセスグループ ${r.group})`, `グループから抜けた子: ${escaped}`, `SIGTERM の後も生きていた子: ${survivors}`, ''].join('\n');
 }

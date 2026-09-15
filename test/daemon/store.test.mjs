@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { conductorHome, pathsOf } from '../../src/daemon/paths.mjs';
-import { appendRecord, loadEstimates, parseState, readJson, readRecords, writeJsonAtomic } from '../../src/daemon/store.mjs';
+import { appendRecord, loadEscapes, loadEstimates, parseState, readJson, readRecords, writeJsonAtomic } from '../../src/daemon/store.mjs';
 import { state } from '../../testkit/fixtures.mjs';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'conductor-'));
@@ -50,6 +50,16 @@ describe('store', () => {
     assert.deepEqual(r.records, [{ kind: 'event', n: 1 }, { kind: 'event', n: 2 }]);
     assert.equal(r.bad, 2);
     assert.equal(existsSync(file), true);
+  });
+
+  it('loadEscapes は escape 行から repo × profile ごとに抜けた子の名前を集める', () => {
+    const m = loadEscapes([
+      { kind: 'escape', repo: '/r', profile: 'e2e', escaped: [{ comm: 'chrome', count: 3 }], survivors: [] },
+      { kind: 'escape', repo: '/r', profile: 'e2e', escaped: [{ comm: 'node', count: 1 }, { bad: true }], survivors: [] },
+      { kind: 'history', repo: '/r', profile: 'e2e' },
+    ]);
+    assert.deepEqual([...m.keys()], [JSON.stringify(['/r', 'e2e'])]);
+    assert.deepEqual([...(m.get(JSON.stringify(['/r', 'e2e'])) ?? [])].sort(), ['chrome', 'node']);
   });
 
   it('loadEstimates は history 行から見込みを作る', () => {

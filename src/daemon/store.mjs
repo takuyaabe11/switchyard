@@ -76,3 +76,23 @@ export function loadEstimates(records) {
   }
   return book;
 }
+
+/**
+ * 記録の escape 行から、repo × profile ごとにプロセスグループから抜けた子の名前を集める(設計 §13 V6)。
+ * @param {Record<string, unknown>[]} records @returns {Map<string, Set<string>>} キーは JSON.stringify([repo, profile])
+ */
+export function loadEscapes(records) {
+  /** @type {Map<string, Set<string>>} */
+  const map = new Map();
+  for (const r of records) {
+    if (r.kind !== 'escape' || typeof r.repo !== 'string' || typeof r.profile !== 'string' || !Array.isArray(r.escaped)) continue;
+    const key = JSON.stringify([r.repo, r.profile]);
+    const names = map.get(key) ?? new Set();
+    for (const x of r.escaped) {
+      const e = /** @type {Record<string, unknown>} */ (typeof x === 'object' && x !== null ? x : {});
+      if (typeof e.comm === 'string') names.add(e.comm);
+    }
+    map.set(key, names);
+  }
+  return map;
+}

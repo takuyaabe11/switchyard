@@ -6,12 +6,14 @@ import { channel, connectDaemon, DaemonUnavailableError } from '../client/connec
 import { sessionId } from '../client/session.mjs';
 import { applyTemplate, classify, loadProfiles } from '../config/profiles.mjs';
 import { readPgid, signalGroup, spawnInOwnGroup, verifiedGroup, waitGroupGone } from './group.mjs';
+import { createEscapeTracker } from './watch.mjs';
 
 /** @typedef {import('../core/types.mjs').JobClass} JobClass */
 /** @typedef {import('../core/types.mjs').CpuRange} CpuRange */
 /** @typedef {import('../core/types.mjs').Preempt} Preempt */
 /** @typedef {import('../protocol/messages.mjs').JobRequest} JobRequest */
 /** @typedef {import('../config/profiles.mjs').Profile} Profile */
+/** @typedef {import('./watch.mjs').EscapeReport} EscapeReport */
 /** @typedef {{ profile?: string, why?: string, class?: JobClass, cpus?: CpuRange, locks?: string[], preempt?: Preempt }} RunFlags */
 /** @typedef {{ on: (sig: NodeJS.Signals, h: () => void) => unknown, off: (sig: NodeJS.Signals, h: () => void) => unknown }} SignalSource */
 
@@ -27,6 +29,7 @@ import { readPgid, signalGroup, spawnInOwnGroup, verifiedGroup, waitGroupGone } 
  *   killGraceMs?: number,
  *   reconnectMs?: number,
  *   unmanagedAfterMs?: number,
+ *   watchMs?: number,
  *   connect?: typeof connectDaemon,
  *   signals?: SignalSource
  * }} RunOptions
@@ -77,6 +80,22 @@ export function buildRequest({ argv, flags, env, cwd }) {
   };
 }
 
+/**
+ * グループから抜けた子と、終了後も生きている子を 1 行ずつ表示する文言。どちらも無ければ空。
+ * @param {EscapeReport} r @returns {string[]}
+ */
+export function escapeLines(r) {
+  /** @type {string[]} */
+  const lines = [];
+  if (r.escaped.length > 0) {
+    lines.push(`[conductor] プロセスグループから抜けた子: ${r.escaped.map((e) => `${e.comm} ×${e.count}`).join(', ')}(信号と使用率の照合が届かない)`);
+  }
+  if (r.survivors.length > 0) {
+    lines.push(`[conductor] 終了後も生きている子: ${r.survivors.map((x) => `${x.comm}(pid ${x.pid}・${x.inGroup ? 'グループ内' : 'グループ外'})`).join(', ')}`);
+  }
+  return lines;
+}
+
 /** @param {number} wall */
 const clock = (wall) => new Date(wall).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
 
@@ -95,6 +114,7 @@ export function runJob(opts) {
     killGraceMs = 5_000,
     reconnectMs = 1_000,
     unmanagedAfterMs = 30_000,
+    watchMs = 2_000,
     connect = connectDaemon,
     signals = process,
   } = opts;
@@ -123,6 +143,10 @@ export function runJob(opts) {
     let killTimer = null;
     /** @type {NodeJS.Timeout | null} 再接続の待ち(終わったら消して、プロセスの終了を遅らせない) */
     let backoffTimer = null;
+    /** @type {ReturnType<typeof createEscapeTracker> | null} */
+    let tracker = null;
+    /** @type {NodeJS.Timeout | null} */
+    let watchTimer = null;
     // await を挟んだ後の読み取りを型の絞り込みに巻き込まないよう、関数越しに読む
     const over = () => finished || phase === 'done';
 
@@ -139,21 +163,24 @@ export function runJob(opts) {
       if (hbTimer !== null) clearInterval(hbTimer);
       if (killTimer !== null) clearTimeout(killTimer);
       if (backoffTimer !== null) clearTimeout(backoffTimer);
+      if (watchTimer !== null) clearInterval(watchTimer);
       for (const [sig, h] of handlers) signals.off(sig, h);
       ch?.close();
       resolve(code);
     };
 
-    /** @param {number} code */
-    const report = (code) => {
+    /** @param {number} code @param {EscapeReport | null} escape */
+    const report = (code, escape) => {
       if (phase === 'done') return;
       phase = 'done';
       if (killTimer !== null) clearTimeout(killTimer);
+      if (escape !== null) for (const line of escapeLines(escape)) out(line);
+      const summary = escape === null ? null : { escaped: escape.escaped, survivors: escape.survivors };
       if (ch !== null && jobId !== null && !ch.isClosed()) {
         ch.onMessage((m) => {
           if (m.t === 'ok') finish(code);
         });
-        ch.send({ t: 'exit', jobId, code, killedByCaller, durationMs: Date.now() - childStartedAt });
+        ch.send({ t: 'exit', jobId, code, killedByCaller, durationMs: Date.now() - childStartedAt, escape: summary });
         setTimeout(() => finish(code), 1_000).unref();
       } else {
         finish(code);
@@ -163,21 +190,24 @@ export function runJob(opts) {
     /** @param {number} cpus @param {boolean} managed */
     const startChild = (cpus, managed) => {
       phase = 'running';
-      const t = profile === null ? { env: {}, args: [] } : applyTemplate(profile, cpus);
+      const tpl = profile === null ? { env: {}, args: [] } : applyTemplate(profile, cpus);
       childStartedAt = Date.now();
       /** @type {NodeJS.ProcessEnv} */
-      const childEnv = { ...env, ...t.env, CONDUCTOR_CPUS: String(cpus) };
+      const childEnv = { ...env, ...tpl.env, CONDUCTOR_CPUS: String(cpus) };
       if (jobId !== null) childEnv.CONDUCTOR_JOB_ID = jobId;
-      const c = spawnInOwnGroup([...argv, ...t.args], { env: childEnv, cwd, stdio: 'inherit' });
+      const c = spawnInOwnGroup([...argv, ...tpl.args], { env: childEnv, cwd, stdio: 'inherit' });
       child = c;
       c.once('error', (e) => {
         out(`[conductor] 起動できない: ${e.message}`);
-        report(127);
+        report(127, null);
       });
       c.once('exit', (code, sig) => {
         const result = code ?? signalCode(sig);
+        if (watchTimer !== null) clearInterval(watchTimer);
+        tracker?.sample();
+        const done = () => report(result, tracker === null ? null : tracker.report());
         if (!killedByCaller || pgid === null) {
-          report(result);
+          done();
           return;
         }
         // 呼び出し元の信号を転送した後に生まれた子には SIGTERM が届いていない。
@@ -186,12 +216,20 @@ export function runJob(opts) {
         signalGroup(target, 'SIGTERM', ownPgid);
         void waitGroupGone(target, killGraceMs).then((gone) => {
           if (!gone) signalGroup(target, 'SIGKILL', ownPgid);
-          report(result);
+          done();
         });
       });
       if (c.pid === undefined) return;
       pgid = verifiedGroup(c.pid, ownPgid);
-      if (pgid === null) out('[conductor] 子のプロセスグループを確かめられないので、グループへの信号は送らない(呼び出し元の終了だけを子に伝える)');
+      if (pgid === null) {
+        out('[conductor] 子のプロセスグループを確かめられないので、グループへの信号は送らない(呼び出し元の終了だけを子に伝える)');
+      } else {
+        // どのコマンドでも、子孫がグループから抜けるかを実行中に見る(設計 §13 V6)
+        const tr = createEscapeTracker({ rootPid: c.pid, pgid });
+        tracker = tr;
+        tr.sample();
+        watchTimer = setInterval(() => tr.sample(), watchMs);
+      }
       if (managed && ch !== null && jobId !== null) {
         ch.send({ t: 'started', jobId, pid: c.pid, pgid });
         hbTimer = setInterval(() => {

@@ -11,6 +11,7 @@
  *   { cmd: 'top' } |
  *   { cmd: 'why', jobId: string } |
  *   { cmd: 'ack', jobId: string, session: string | null } |
+ *   { cmd: 'probe', seconds: number, argv: string[] } |
  *   { cmd: 'help' }
  * )} Command
  */
@@ -21,6 +22,7 @@ export const USAGE = [
   '  conductor top',
   '  conductor why <job>',
   '  conductor ack <job> [--session <id>]',
+  '  conductor probe <秒> -- <コマンド...>',
 ].join('\n');
 
 export class UsageError extends Error {}
@@ -105,6 +107,14 @@ export function parseArgs(args) {
       if (rest.length === 1) return { cmd: 'ack', jobId: rest[0], session: null };
       if (rest.length === 3 && rest[1] === '--session') return { cmd: 'ack', jobId: rest[0], session: rest[2] };
       throw new UsageError('ack <job> [--session <id>]');
+    }
+    case 'probe': {
+      if (rest.indexOf('--') !== 1) throw new UsageError('probe <秒> -- <コマンド...>');
+      const seconds = rest[0] === '' ? NaN : Number(rest[0]);
+      if (!(seconds > 0)) throw new UsageError(`probe の秒数は正の数: ${rest[0]}`);
+      const argv = rest.slice(2);
+      if (argv.length === 0) throw new UsageError('-- の後にコマンドが無い');
+      return { cmd: 'probe', seconds, argv };
     }
     default:
       throw new UsageError(`知らないサブコマンド: ${cmd}`);

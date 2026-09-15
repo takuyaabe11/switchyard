@@ -147,6 +147,28 @@ describe('daemon server', () => {
     assert.deepEqual(second.getState().leases.map((l) => l.job.id), [accA.jobId]);
   });
 
+  it('再起動の後、待っていた包みの resume でその場で入場したときは、grant を 1 通だけ送る', async () => {
+    const home = tempHome();
+    const first = await startDaemon({ home, capacity: 1, tickMs: 20 });
+    const a = await openClient(first.sock);
+    const b = await openClient(first.sock);
+    a.send({ t: 'request', job: jobRequest() });
+    await a.next((m) => m.t === 'grant');
+    b.send({ t: 'request', job: jobRequest() });
+    const accB = await b.next((m) => m.t === 'accepted');
+    await b.next((m) => m.t === 'queued');
+    await first.close();
+    await a.close();
+    await b.close();
+
+    const { d: second } = await daemon({ home });
+    const b2 = await client(second.sock);
+    b2.send({ t: 'resume', jobId: accB.jobId, phase: 'waiting', pid: null, pgid: null });
+    await b2.next((m) => m.t === 'accepted');
+    await b2.next((m) => m.t === 'grant');
+    await assert.rejects(b2.next((m) => m.t === 'grant', 200), /来ない/);
+  });
+
   it('知らないジョブの resume には unknown を返す', async () => {
     const { d } = await daemon();
     const c = await client(d.sock);
@@ -193,26 +215,29 @@ describe('daemon server', () => {
     assert.deepEqual(kinds, ['request']);
   });
 
-  it('再起動の後、待っていた包みの resume でその場で入場したときは、grant を 1 通だけ送る', async () => {
-    const home = tempHome();
-    const first = await startDaemon({ home, capacity: 1, tickMs: 20 });
-    const a = await openClient(first.sock);
-    const b = await openClient(first.sock);
-    a.send({ t: 'request', job: jobRequest() });
+  it('exit に付いた抜けた子を記録し、同じ repo と profile の後の要求に表示し、再起動しても覚えている', async () => {
+    const { d, home } = await daemon();
+    const a = await client(d.sock);
+    a.send({ t: 'request', job: jobRequest({ repo: '/r', profile: 'e2e' }) });
+    const acc = await a.next((m) => m.t === 'accepted');
     await a.next((m) => m.t === 'grant');
-    b.send({ t: 'request', job: jobRequest() });
-    const accB = await b.next((m) => m.t === 'accepted');
-    await b.next((m) => m.t === 'queued');
-    await first.close();
-    await a.close();
-    await b.close();
-
-    const { d: second } = await daemon({ home });
-    const b2 = await client(second.sock);
-    b2.send({ t: 'resume', jobId: accB.jobId, phase: 'waiting', pid: null, pgid: null });
-    await b2.next((m) => m.t === 'accepted');
-    await b2.next((m) => m.t === 'grant');
-    await assert.rejects(b2.next((m) => m.t === 'grant', 200), /来ない/);
+    const escape = { escaped: [{ comm: 'chrome', count: 2 }], survivors: [{ pid: 4242, comm: 'chrome', inGroup: false }] };
+    a.send({ t: 'exit', jobId: acc.jobId, code: 0, killedByCaller: false, durationMs: 5, escape });
+    await a.next((m) => m.t === 'ok');
+    const records = readFileSync(pathsOf(home).events, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.kind === 'escape');
+    assert.deepEqual(records.map((r) => [r.jobId, r.repo, r.profile, r.escaped, r.survivors]), [[acc.jobId, '/r', 'e2e', escape.escaped, escape.survivors]]);
+    const b = await client(d.sock);
+    b.send({ t: 'request', job: jobRequest({ repo: '/r', profile: 'e2e' }) });
+    await b.next((m) => m.t === 'grant');
+    b.send({ t: 'status' });
+    const snap = /** @type {Snapshot} */ ((await b.next((m) => m.t === 'status')).snapshot);
+    assert.deepEqual(snap.leases.map((l) => l.escapes), [['chrome']]);
+    await d.close();
+    const { d: again } = await daemon({ home });
+    const c = await client(again.sock);
+    c.send({ t: 'status' });
+    const snap2 = /** @type {Snapshot} */ ((await c.next((m) => m.t === 'status')).snapshot);
+    assert.deepEqual(snap2.leases.map((l) => l.escapes), [['chrome']]);
   });
 
   it('形の違う要求には、どの項目かを名指しした error を返す', async () => {

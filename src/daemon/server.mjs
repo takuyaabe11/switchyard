@@ -6,10 +6,10 @@ import { decide, initialState } from '../core/decide.mjs';
 import { rebaseForRecovery } from '../core/recovery.mjs';
 import { usedCpus } from '../core/schedule.mjs';
 import { sortWaiting } from '../core/score.mjs';
-import { numOrNull, parseJobRequest } from '../protocol/messages.mjs';
+import { numOrNull, parseEscape, parseJobRequest } from '../protocol/messages.mjs';
 import { createDecoder, encode } from '../protocol/ndjson.mjs';
 import { pathsOf, SOCKET_PATH_LIMIT } from './paths.mjs';
-import { appendRecord, loadEstimates, parseState, readJson, readRecords, writeJsonAtomic } from './store.mjs';
+import { appendRecord, loadEscapes, loadEstimates, parseState, readJson, readRecords, writeJsonAtomic } from './store.mjs';
 
 /** @typedef {import('../core/types.mjs').State} State */
 /** @typedef {import('../core/types.mjs').Event} Event */
@@ -82,6 +82,9 @@ export async function startDaemon(opts) {
 
   const journal = readRecords(p.events);
   const estimates = loadEstimates(journal.records);
+  const escapes = loadEscapes(journal.records);
+  /** @param {string} repo @param {string} profile @returns {string[]} */
+  const escapesOf = (repo, profile) => [...(escapes.get(JSON.stringify([repo, profile])) ?? [])].sort();
   const loaded = parseState(readJson(p.state));
   /** @type {State} */
   let state = loaded === null ? initialState({ capacity, lockCaps }) : rebaseForRecovery({ ...loaded, capacity, lockCaps }, monoNow());
@@ -137,12 +140,14 @@ export async function startDaemon(opts) {
       leases: state.leases.map((l) => ({
         id: l.job.id, session: l.job.session, class: l.job.class, cmd: l.job.cmd, why: l.job.why,
         cpus: l.cpus, locks: l.job.locks, phase: l.phase, recovering: l.recovering, sinceWall: toWall(l.grantedAt), expectedMs: l.job.expectedMs,
+        escapes: escapesOf(l.job.repo, l.job.profile),
       })),
       waiting: sortWaiting(state.waiting, now).map((w) => {
         const n = state.notes[w.job.id];
         return {
           id: w.job.id, session: w.job.session, class: w.job.class, cmd: w.job.cmd, why: w.job.why,
           cpus: w.job.cpus, locks: w.job.locks, recovering: w.recovering, sinceWall: toWall(w.arrivedAt),
+          escapes: escapesOf(w.job.repo, w.job.profile),
           note: n === undefined ? null : { jobId: n.jobId, position: n.position, reason: n.reason, etaWall: n.etaAt === null ? null : toWall(n.etaAt) },
         };
       }),
@@ -224,6 +229,15 @@ export async function startDaemon(opts) {
           exited = true;
           wrappers.delete(id);
           lastHeard.delete(id);
+          const done = state.leases.find((l) => l.job.id === id);
+          const escape = parseEscape(m.escape);
+          if (done !== undefined && escape !== null && (escape.escaped.length > 0 || escape.survivors.length > 0)) {
+            appendRecord(p.events, { at: wallNow(), kind: 'escape', jobId: id, repo: done.job.repo, profile: done.job.profile, escaped: escape.escaped, survivors: escape.survivors });
+            const key = JSON.stringify([done.job.repo, done.job.profile]);
+            const names = escapes.get(key) ?? new Set();
+            for (const e of escape.escaped) names.add(e.comm);
+            escapes.set(key, names);
+          }
           apply({ type: 'exit', now: monoNow(), jobId: id, code: numOrNull(m.code), killedByCaller: m.killedByCaller === true, durationMs: Number(m.durationMs) });
           send(conn, { t: 'ok' });
           return;

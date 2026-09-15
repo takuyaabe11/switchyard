@@ -63,6 +63,35 @@ const SUITES = {
       },
     ],
   },
+  escape: {
+    tests: ['test/run/watch.test.mjs', 'test/run/probe.test.mjs', 'test/run/run.test.mjs', 'test/daemon/server.test.mjs', 'test/cli/main.test.mjs'],
+    mutations: [
+      {
+        name: 'E1 グループの違いを見ない',
+        file: 'src/run/watch.mjs',
+        from: 'for (const [, v] of seen) if (v.pgid !== pgid) counts.set',
+        to: 'for (const [, v] of seen) if (v.pgid !== v.pgid) counts.set',
+      },
+      {
+        name: 'E2 走行中に子孫を見ない',
+        file: 'src/run/run.mjs',
+        from: 'watchTimer = setInterval(() => tr.sample(), watchMs);',
+        to: 'watchTimer = null;',
+      },
+      {
+        name: 'E3 使い回された pid を同じ子とみなす',
+        file: 'src/run/watch.mjs',
+        from: 'const orphanedSame = known !== undefined && r.ppid === 1 && known.comm === comm;',
+        to: 'const orphanedSame = known !== undefined;',
+      },
+      {
+        name: 'E4 デーモンが抜けた子の名前を覚えない',
+        file: 'src/daemon/server.mjs',
+        from: 'for (const e of escape.escaped) names.add(e.comm);',
+        to: '',
+      },
+    ],
+  },
 };
 
 const suiteName = process.argv[2] ?? '';
