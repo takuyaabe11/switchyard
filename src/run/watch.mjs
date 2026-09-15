@@ -9,21 +9,35 @@ import { execFileSync } from 'node:child_process';
 /** @typedef {{ seen: number, escaped: EscapedCount[], survivors: Survivor[] }} EscapeReport */
 
 /**
+ * ps の 1 行(`pid=,ppid=,pgid=,lstart=,comm=`。LC_ALL=C で「曜日 月 日 時刻 年」の固定 5 語)を解析する。
+ * comm はパスに空白を含みうる(実測: この機械の `ps -A` 521 行のうち 65 行が該当。「稀」ではない)ので、
+ * lstart の 5 語より後ろを全部つないで 1 つの comm として扱う。数が読めない・語が足りない行は null。
+ * @param {string} line @returns {ProcRow | null}
+ */
+export function parsePsLine(line) {
+  const parts = line.trim().split(/\s+/);
+  if (parts.length < 9) return null;
+  const pid = Number(parts[0]);
+  const ppid = Number(parts[1]);
+  const pgid = Number(parts[2]);
+  if (!Number.isInteger(pid) || !Number.isInteger(ppid) || !Number.isInteger(pgid)) return null;
+  const started = parts.slice(3, 8).join(' ');
+  const comm = parts.slice(8).join(' ');
+  return { pid, ppid, pgid, comm, started };
+}
+
+/** @param {ProcRow | null} r @returns {r is ProcRow} */
+const isRow = (r) => r !== null;
+
+/**
  * @returns {ProcRow[]}
  */
 export function processTable() {
-  return execFileSync('ps', ['-A', '-o', 'pid=,ppid=,pgid=,lstart=,comm='], { encoding: 'utf8' })
+  return execFileSync('ps', ['-A', '-o', 'pid=,ppid=,pgid=,lstart=,comm='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
     .trim()
     .split('\n')
-    .map((line) => {
-      // lstart は「曜日 月 日 時刻 年」の 5 語(先頭 pid/ppid/pgid の後、末尾の comm の前)。
-      // comm 自体は空白を含まない前提(パスに空白を含む実行ファイルは稀で、既存の実測でも 1 語だった)
-      const parts = line.trim().split(/\s+/);
-      const [pid, ppid, pgid] = parts;
-      const comm = parts[parts.length - 1] ?? '';
-      const started = parts.slice(3, parts.length - 1).join(' ');
-      return { pid: Number(pid), ppid: Number(ppid), pgid: Number(pgid), comm, started };
-    });
+    .map(parsePsLine)
+    .filter(isRow);
 }
 
 /**

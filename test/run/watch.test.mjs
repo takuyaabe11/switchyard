@@ -1,9 +1,29 @@
 // @ts-check
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { createEscapeTracker } from '../../src/run/watch.mjs';
+import { createEscapeTracker, parsePsLine } from '../../src/run/watch.mjs';
 
 /** @typedef {import('../../src/run/watch.mjs').ProcRow} ProcRow */
+
+describe('parsePsLine(R1)', () => {
+  it('空白を含む実行ファイルのパスでも、comm はパス全体・started は lstart の 5 語', () => {
+    const line =
+      '  501     1   501 Tue Sep 15 14:57:31 2026 /Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)';
+    const r = parsePsLine(line);
+    assert.deepEqual(r && [r.pid, r.ppid, r.pgid, r.started], [501, 1, 501, 'Tue Sep 15 14:57:31 2026']);
+    assert.equal(r?.comm, '/Applications/Google Chrome.app/Contents/Frameworks/Google Chrome Helper (Renderer).app/Contents/MacOS/Google Chrome Helper (Renderer)');
+  });
+
+  it('日付が 1 桁で空白が 2 つ続いても、started は単語をつないだ 1 つの空白区切りになる', () => {
+    const line = '   10     1    10 Tue Sep  1 09:05:07 2026 sh';
+    const r = parsePsLine(line);
+    assert.deepEqual(r, { pid: 10, ppid: 1, pgid: 10, comm: 'sh', started: 'Tue Sep 1 09:05:07 2026' });
+  });
+
+  it('語が足りない行は null', () => {
+    assert.equal(parsePsLine('10 1 10 Tue Sep 15'), null);
+  });
+});
 
 describe('createEscapeTracker', () => {
   it('グループの違う子孫を名前ごとに数え、無関係なプロセスは数えない', () => {
