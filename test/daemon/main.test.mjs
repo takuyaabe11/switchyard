@@ -26,10 +26,19 @@ describe('daemon main', () => {
 
   it('ロックは 1 つだけ取れ、持ち主が死んでいれば取り直せる', () => {
     const file = join(tempHome(), 'daemon.lock');
-    assert.equal(acquireLock(file, 111, () => true), true);
-    assert.equal(acquireLock(file, 222, () => true), false);
-    assert.equal(acquireLock(file, 333, () => false), true);
+    assert.equal(acquireLock(file, 111, () => true, () => true), true);
+    assert.equal(acquireLock(file, 222, () => true, () => true), false);
+    assert.equal(acquireLock(file, 333, () => false, () => true), true);
     writeFileSync(file, 'garbage');
-    assert.equal(acquireLock(file, 444, () => true), true);
+    assert.equal(acquireLock(file, 444, () => true, () => true), true);
+  });
+
+  it('持ち主の pid が生きていても conductord でなければ、使い回された pid として取り直せる(I1)', () => {
+    const file = join(tempHome(), 'daemon.lock');
+    assert.equal(acquireLock(file, 111, () => true, () => true), true);
+    // pid 111 は生きているが、いま conductord として走っていない(使い回された)
+    assert.equal(acquireLock(file, 222, () => true, () => false), true);
+    // 生きていて conductord でもあれば、取り直さない
+    assert.equal(acquireLock(file, 333, () => true, () => true), false);
   });
 });

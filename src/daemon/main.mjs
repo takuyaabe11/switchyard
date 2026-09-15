@@ -1,5 +1,6 @@
 // @ts-check
 // デーモンの起動: ロックファイル・容量の決定・シグナルでの停止。
+import { execFileSync } from 'node:child_process';
 import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { join } from 'node:path';
@@ -52,10 +53,23 @@ function pidAlive(pid) {
 }
 
 /**
- * ロックファイルを排他作成して二重起動を防ぐ。持ち主が死んでいれば 1 回だけ取り直す。
- * @param {string} file @param {number} [pid] @param {(pid: number) => boolean} [isAlive] @returns {boolean}
+ * 持ち主の pid が、いま conductord として走っているか(pid の使い回しに備える。I1)。
+ * @param {number} pid @returns {boolean}
  */
-export function acquireLock(file, pid = process.pid, isAlive = pidAlive) {
+function isConductordProcess(pid) {
+  try {
+    return execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }).includes('conductord.mjs');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * ロックファイルを排他作成して二重起動を防ぐ。持ち主が死んでいるか、生きていても conductord でなければ
+ * (pid の使い回し。I1)、1 回だけ取り直す。
+ * @param {string} file @param {number} [pid] @param {(pid: number) => boolean} [isAlive] @param {(pid: number) => boolean} [isConductord] @returns {boolean}
+ */
+export function acquireLock(file, pid = process.pid, isAlive = pidAlive, isConductord = isConductordProcess) {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const fd = openSync(file, 'wx');
@@ -70,7 +84,7 @@ export function acquireLock(file, pid = process.pid, isAlive = pidAlive) {
       } catch {
         // 読む前に消えた: 取り直す
       }
-      if (Number.isInteger(holder) && holder > 0 && isAlive(holder)) return false;
+      if (Number.isInteger(holder) && holder > 0 && isAlive(holder) && isConductord(holder)) return false;
       try {
         unlinkSync(file);
       } catch {
@@ -86,7 +100,16 @@ export async function main(env = process.env) {
   const home = conductorHome(env);
   const p = pathsOf(home);
   mkdirSync(home, { recursive: true });
-  if (!acquireLock(p.lock)) return;
+  if (!acquireLock(p.lock)) {
+    let holder = '?';
+    try {
+      holder = readFileSync(p.lock, 'utf8').trim();
+    } catch {
+      // 読めなければ pid 不明のまま出す
+    }
+    process.stderr.write(`[conductord] 別の conductord(pid ${holder})が動いているので終わる\n`);
+    return;
+  }
   const config = readJson(join(home, 'config.json'));
   try {
     const d = await startDaemon({
