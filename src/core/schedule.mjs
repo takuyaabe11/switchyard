@@ -147,7 +147,7 @@ export function schedule(input, now) {
         admit(w, Math.min(job.cpus.max, free));
         gate = `計測 ${job.id} の走行中は入場しない`;
       } else {
-        if (head !== null) note(`先頭 ${head.id} の後ろ`, null);
+        if (head !== null) note(`先頭 ${head.id} の後ろ(計測は後ろ詰めしない)`, null);
         else note(`走行中 ${s.leases.length} 本の終了を待つ(計測は単独で走る)`, allEnd(s));
         gate = `計測 ${job.id} の入場待ちのため入場しない`;
       }

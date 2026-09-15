@@ -33,6 +33,19 @@ describe('schedule: 計測', () => {
     assert.equal(r.state.notes.q.reason, '計測 m の走行中は入場しない');
   });
 
+  it('先頭が入場できなければ、計測は後ろ詰めしない', () => {
+    const r = schedule(
+      state({
+        capacity: 4,
+        leases: [lease({ id: 'x', expectedMs: 10 * MIN }, { cpus: 3 })],
+        waiting: [waiting({ id: 'q', class: 'quick', cpus: { min: 2, max: 2 } }), waiting({ id: 'm', class: 'measure', expectedMs: 1 * MIN })],
+      }),
+      0,
+    );
+    assert.deepEqual(grants(r.actions), []);
+    assert.equal(r.state.notes.m.reason, '先頭 q の後ろ(計測は後ろ詰めしない)');
+  });
+
   it('計測の直後は、一番長く待っている計測以外のジョブを先に入れる', () => {
     const r = schedule(
       state({
