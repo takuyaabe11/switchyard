@@ -9,7 +9,7 @@ import { sortWaiting } from '../core/score.mjs';
 import { numOrNull, parseEscape, parseJobRequest } from '../protocol/messages.mjs';
 import { createDecoder, encode } from '../protocol/ndjson.mjs';
 import { pathsOf, SOCKET_PATH_LIMIT } from './paths.mjs';
-import { appendRecord, loadEscapes, loadEstimates, parseState, readJson, readRecords, writeJsonAtomic } from './store.mjs';
+import { appendRecord, loadEscapes, loadEstimates, parseState, readJson, readRecords, takeUnmanaged, writeJsonAtomic } from './store.mjs';
 
 /** @typedef {import('../core/types.mjs').State} State */
 /** @typedef {import('../core/types.mjs').Event} Event */
@@ -132,6 +132,13 @@ export async function startDaemon(opts) {
     writeJsonAtomic(p.state, state);
     for (const a of r.actions) dispatch(a);
   };
+
+  // 管理なしで走ったジョブの控えを取り込む(設計 §4.2)。記録に写し、失敗は ack 待ちに積む
+  for (const [i, u] of takeUnmanaged(p.unmanaged).entries()) {
+    const jobId = `u${u.at.toString(36)}${i.toString(36)}`;
+    appendRecord(p.events, { kind: 'unmanaged', jobId, ...u });
+    if (u.code !== 0) apply({ type: 'unmanagedExit', now: monoNow(), session: u.session, jobId, code: u.code, cmd: u.cmd });
+  }
 
   /** @returns {Snapshot} */
   const snapshot = () => {

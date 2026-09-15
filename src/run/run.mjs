@@ -6,6 +6,8 @@ import { channel, connectDaemon, DaemonUnavailableError } from '../client/connec
 import { sessionId } from '../client/session.mjs';
 import { heldLocks, repoRoot } from '../config/context.mjs';
 import { applyTemplate, classify, loadProfiles } from '../config/profiles.mjs';
+import { pathsOf } from '../daemon/paths.mjs';
+import { appendRecord } from '../daemon/store.mjs';
 import { readPgid, signalGroup, spawnInOwnGroup, verifiedGroup, waitGroupGone } from './group.mjs';
 import { createEscapeTracker } from './watch.mjs';
 
@@ -136,6 +138,8 @@ export function runJob(opts) {
     let pgid = null;
     let childStartedAt = 0;
     let killedByCaller = false;
+    /** デーモンの管理の外で走った(届かなかった・見失われた)。終わったら控える(設計 §4.3 の 8) */
+    let unmanaged = false;
     let lastNote = '';
     let finished = false;
     /** @type {NodeJS.Timeout | null} */
@@ -176,6 +180,14 @@ export function runJob(opts) {
       phase = 'done';
       if (killTimer !== null) clearTimeout(killTimer);
       if (escape !== null) for (const line of escapeLines(escape)) out(line);
+      if (unmanaged) {
+        // デーモンの次の起動で取り込まれ、失敗なら持ち主の Stop に出る(設計 §4.2)
+        try {
+          appendRecord(pathsOf(home).unmanaged, { at: Date.now(), session: job.session, repo: job.repo, profile: job.profile, cmd: job.cmd, code, durationMs: Date.now() - childStartedAt });
+        } catch (e) {
+          out(`[conductor] 管理なしの走行を控えられない: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
       const summary = escape === null ? null : { escaped: escape.escaped, survivors: escape.survivors };
       if (ch !== null && jobId !== null && !ch.isClosed()) {
         ch.onMessage((m) => {
@@ -296,10 +308,19 @@ export function runJob(opts) {
             c.send({ t: 'request', job });
           } else if (phase === 'running') {
             out('[conductor] デーモンがこのジョブを知らないので、管理なしで走り続ける');
+            unmanaged = true;
             if (hbTimer !== null) clearInterval(hbTimer);
             ch = null;
             c.close();
           }
+        } else if (m.t === 'error' && phase === 'waiting') {
+          // 待っている間のエラーは要求が受け付けられなかったということ。待ち続けると永遠に終わらないので、
+          // 作業を止めずに管理なしで実行し、控える(設計 §10・§4.3 の 8)
+          out(`[conductor] デーモンが要求を受け付けない(${String(m.message)})ので、管理なしで実行する`);
+          unmanaged = true;
+          ch = null;
+          c.close();
+          startChild(job.cpus.min, false);
         } else if (m.t === 'error') {
           out(`[conductor] デーモンのエラー: ${String(m.message)}`);
         }
@@ -339,6 +360,7 @@ export function runJob(opts) {
         } catch {
           if (phase === 'waiting' && Date.now() - lostAt > unmanagedAfterMs) {
             out(`[conductor] ${unmanagedAfterMs}ms つなげないので、管理なしで実行する(二重貸し防止などの保証なし)`);
+            unmanaged = true;
             startChild(job.cpus.min, false);
             return;
           }
@@ -370,6 +392,7 @@ export function runJob(opts) {
         if (over()) return;
         if (!(e instanceof DaemonUnavailableError)) throw e;
         out(`[conductor] デーモンに届かないので、管理なしで実行する(二重貸し防止などの保証なし・CPU は宣言の最小 ${job.cpus.min}): ${e.message}`);
+        unmanaged = true;
         startChild(job.cpus.min, false);
       });
   });

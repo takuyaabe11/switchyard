@@ -2,7 +2,7 @@
 // @ts-check
 // 門番の検出力を測る(設計 §15)。原本は触らず、一時ディレクトリの写しに変異を 1 つずつ入れて、組ごとのテストを回す。
 // 使い方: node scripts/mutate.mjs <組の名前>   全部の変異が赤になれば終了コード 0、生き残った変異があれば 1。
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -112,6 +112,59 @@ const SUITES = {
       },
     ],
   },
+  wrap: {
+    tests: ['test/run/nest.test.mjs', 'test/run/signals.test.mjs', 'test/daemon/unmanaged.test.mjs'],
+    mutations: [
+      {
+        name: 'W1 祖先が持つ鍵を外さない',
+        file: 'src/run/run.mjs',
+        from: '.filter((k) => !held.has(k)),',
+        to: ',',
+      },
+      {
+        name: 'W2 CPU を持つジョブの子に入れ子の印を立てない',
+        file: 'src/run/run.mjs',
+        from: "if (cpus > 0) childEnv.CONDUCTOR_IN_JOB = '1';",
+        to: '',
+      },
+      {
+        name: 'W3 入れ子で何も要らなくてもデーモンに要求する',
+        file: 'src/run/run.mjs',
+        from: 'if (job.cpus.max === 0 && job.locks.length === 0) {',
+        to: 'if (false) {',
+      },
+      {
+        name: 'W4 CPU を持つジョブの中でも CPU を要求する',
+        file: 'src/run/run.mjs',
+        from: "cpus: env.CONDUCTOR_IN_JOB === '1' ? { min: 0, max: 0 } : flags.cpus",
+        to: 'cpus: flags.cpus',
+      },
+      {
+        name: 'W5 グループの確かめ方を差し替えられない',
+        file: 'src/run/run.mjs',
+        from: 'pgid = verifyGroup(c.pid, ownPgid);',
+        to: 'pgid = verifiedGroup(c.pid, ownPgid);',
+      },
+      {
+        name: 'W6 デーモンが管理なしの失敗を ack 待ちに積まない',
+        file: 'src/daemon/server.mjs',
+        from: "if (u.code !== 0) apply({ type: 'unmanagedExit'",
+        to: "if (false) apply({ type: 'unmanagedExit'",
+      },
+      {
+        name: 'W7 管理なしで走っても控えない',
+        file: 'src/run/run.mjs',
+        from: 'if (unmanaged) {',
+        to: 'if (false) {',
+      },
+      {
+        name: 'W8 待っている間にデーモンが要求を拒んでも待ち続ける',
+        file: 'src/run/run.mjs',
+        from: "} else if (m.t === 'error' && phase === 'waiting') {",
+        to: '} else if (false) {',
+      },
+    ],
+  },
   group: {
     tests: ['test/run/group.test.mjs'],
     mutations: [
@@ -130,6 +183,42 @@ const SUITES = {
     ],
   },
 };
+
+/** 変異で止まったテストに、走行ごと付き合わない上限 */
+const TEST_TIMEOUT_MS = 180_000;
+
+/**
+ * 写しでテストを走らせる。テストは自分のプロセスグループで起動し、時間切れにはそのグループごと SIGKILL する
+ * (親だけを殺すと、テストファイルのプロセスが孤児として残る)。時間切れは件数の行が出ないので「生き残り」に数える
+ * (外から殺された走行を赤に見せない)。
+ * @param {string} dir @param {string[]} tests
+ * @returns {Promise<{ stdout: string, stderr: string, timedOut: boolean }>}
+ */
+function runTests(dir, tests) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ['--test', '--test-reporter=spec', ...tests], { cwd: dir, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    child.stdout.setEncoding('utf8').on('data', (s) => (stdout += s));
+    child.stderr.setEncoding('utf8').on('data', (s) => (stderr += s));
+    const timer = setTimeout(() => {
+      timedOut = true;
+      // detached で起動したので、子の pgid は子の pid(このスクリプトのグループではない)
+      if (child.pid !== undefined) {
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch {
+          // 既に居ない
+        }
+      }
+    }, TEST_TIMEOUT_MS);
+    child.on('close', () => {
+      clearTimeout(timer);
+      resolve({ stdout, stderr, timedOut });
+    });
+  });
+}
 
 const suiteName = process.argv[2] ?? '';
 const suite = SUITES[suiteName];
@@ -152,8 +241,9 @@ for (const m of suite.mutations) {
     const count = src.split(m.from).length - 1;
     if (count !== 1) throw new Error(`${m.name}: 置き換え元が ${count} 箇所ある(1 箇所であるべき)`);
     writeFileSync(file, src.replace(m.from, m.to));
-    const r = spawnSync(process.execPath, ['--test', '--test-reporter=spec', ...suite.tests], { cwd: dir, encoding: 'utf8' });
+    const r = await runTests(dir, suite.tests);
     const out = `${r.stdout}${r.stderr}`;
+    if (r.timedOut) console.log(`   走行が ${TEST_TIMEOUT_MS}ms で終わらず、テストのプロセスグループごと止めた`);
     const num = (/** @type {string} */ k) => (out.match(new RegExp(`^ℹ ${k} (\\d+)`, 'm')) ?? [])[1] ?? '?';
     const section = out.includes('✖ failing tests:') ? out.split('✖ failing tests:')[1] : '';
     /** @type {string[]} */
@@ -162,9 +252,11 @@ for (const m of suite.mutations) {
       const hit = line.match(/^✖ (.+?) \(\d/);
       if (hit && !red.includes(hit[1])) red.push(hit[1]);
     }
-    const killed = num('fail') !== '0' && num('fail') !== '?';
+    // テストごとの時間の上限で打ち切られたテストは fail ではなく cancelled に数えられる。どちらも赤とする
+    const redCount = (/** @type {string} */ k) => num(k) !== '0' && num(k) !== '?';
+    const killed = redCount('fail') || redCount('cancelled');
     if (!killed) survived += 1;
-    console.log(`== ${m.name} | ${m.file} | ${killed ? '赤' : '生き残り'} | tests ${num('tests')} / fail ${num('fail')} / pass ${num('pass')}`);
+    console.log(`== ${m.name} | ${m.file} | ${killed ? '赤' : '生き残り'} | tests ${num('tests')} / fail ${num('fail')} / cancelled ${num('cancelled')} / pass ${num('pass')}`);
     console.log(`   壊した行: ${m.to.trim() === '' ? '(行を消した)' : m.to.trim()}`);
     for (const name of red) console.log(`   赤: ${name}`);
   } finally {

@@ -18,6 +18,7 @@ export function pathsOf(home) {
     lock: join(home, 'daemon.lock'),
     state: join(home, 'state.json'),
     events: join(home, 'events.jsonl'),
+    unmanaged: join(home, 'unmanaged.jsonl'),
     log: join(home, 'conductord.log'),
   };
 }

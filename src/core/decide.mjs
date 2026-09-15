@@ -129,6 +129,14 @@ export function decide(input, e) {
       s = { ...s, unacked: rest.length > 0 ? { ...others, [e.session]: rest } : others };
       break;
     }
+    case 'unmanagedExit': {
+      // 管理なしで走って失敗したジョブ(設計 §4.2)。リースは無いので、ack 待ちに積むだけ(同じ id は 2 度積まない)
+      const list = s.unacked[e.session] ?? [];
+      if (!list.some((u) => u.jobId === e.jobId)) {
+        s = { ...s, unacked: { ...s.unacked, [e.session]: [...list, { jobId: e.jobId, kind: 'failed', code: e.code, cmd: e.cmd }] } };
+      }
+      break;
+    }
     case 'tick':
       break;
   }

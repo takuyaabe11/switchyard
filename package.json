@@ -16,6 +16,7 @@
     "check": "npm run typecheck && npm test",
     "mutate:core": "node scripts/mutate.mjs core",
     "mutate:escape": "node scripts/mutate.mjs escape",
+    "mutate:wrap": "node scripts/mutate.mjs wrap",
     "mutate:group": "node scripts/mutate.mjs group"
   },
   "devDependencies": {
