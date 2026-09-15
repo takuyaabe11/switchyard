@@ -1,6 +1,6 @@
 # 包みの入れ子・信号・管理なしの走行の門番の検出力(conductor 1b)
 
-- 実行日時: 2026-09-16 17:45 JST(改善 3 の実装後、Task 1 で検証)
+- 実行日時: 2026-09-16 07:24 JST(改善 3 の実装後、Task 1 で検証)
 - `uname -sr`: Darwin 25.6.0
 - `node --version`: v24.16.0
 - 組のテスト: `test/run/nest.test.mjs`・`test/run/signals.test.mjs`・`test/daemon/unmanaged.test.mjs`
