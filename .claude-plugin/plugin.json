@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "conductor",
   "displayName": "conductor",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "同じマシンの Claude Code セッションが重い走行を取り合わないように、CPU と排他の鍵を割り振る司令塔",
   "author": {
     "name": "twoyearsold",
