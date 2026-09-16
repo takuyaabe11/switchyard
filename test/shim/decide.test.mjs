@@ -31,6 +31,11 @@ describe('decideShim(設計 §9.1)', () => {
     assert.deepEqual(decideShim({ word: 'npm', args: ['test'], cwd: plainDir(), env: { SWITCHYARD_IN_JOB: '1' } }), { kind: 'pass' });
   });
 
+  it('走らせずに調べるだけの呼び出しは pass(順番待ちに乗せない。改善 3)', () => {
+    assert.deepEqual(decideShim({ word: 'make', args: ['--version'], cwd: plainDir(), env: {} }), { kind: 'pass' });
+    assert.deepEqual(decideShim({ word: 'npx', args: ['playwright', 'test', '--list', '--reporter=json'], cwd: plainDir(), env: {} }), { kind: 'pass' });
+  });
+
   it('既定表に当たれば run とその profile 名。既定表は measure を持たない', () => {
     assert.deepEqual(decideShim({ word: 'npm', args: ['test'], cwd: plainDir(), env: {} }), { kind: 'run', profile: 'default:batch' });
     assert.deepEqual(decideShim({ word: 'node', args: ['benchmarks/run.mjs'], cwd: plainDir(), env: {} }), { kind: 'pass' });

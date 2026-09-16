@@ -21,21 +21,75 @@ import { basename, join } from 'node:path';
 /** @typedef {{ name: string, profile: Profile }} NamedProfile */
 
 /**
+ * 走らせずに調べるだけの旗。この旗を持つ部分は、どの profile にも当てない(改善 3)。
+ * 値を取らない旗だけを置く — 値を取る旗をここに入れると、その後ろの語ごと見送られる。
+ */
+export const INSPECT_FLAGS = ['--version', '--help', '--list', '--dry-run'];
+/**
+ * 1 文字の短い旗は、他の意味で使われることがある(`pytest -n 4` は並列数、`make -n` は空走)。
+ * 末尾に置かれたときだけ「調べるだけ」とみなす。値を取る形(`-n 4`)はここに当たらない。
+ */
+export const INSPECT_FLAGS_TRAILING = ['-V', '-h', '-n'];
+
+/**
+ * その部分が「走らせずに調べるだけ」か(`make --version`・`npx playwright test --list --reporter=json`)。
+ * 当たれば分類しない = 包まないし、背景へも回さない。重くする方へは働かないので、
+ * プロジェクトの設定より前に効いても、待たせるべきものを取り逃がさない。
+ * @param {string} segment 空白で整えた単純コマンド @returns {boolean}
+ */
+export function isInspect(segment) {
+  const words = segment.split(' ');
+  if (words.some((w) => INSPECT_FLAGS.includes(w))) return true;
+  return INSPECT_FLAGS_TRAILING.includes(words[words.length - 1]);
+}
+
+/**
  * 組み込みの既定表。プロジェクト設定の後ろに並ぶので、同じコマンドにはプロジェクト側が先に当たる。
  * measure(他の CPU ジョブを全部待たせる計測)は持たない。計測はプロジェクトの設定か --class measure だけが決める(改善 2・設計 §9.3)。
  * 以前の `*bench*` / `*measure*` はコマンドの全文に当たり、IRC の記録で measure の包み 1,383 件のうち本物の計測は約 160 件だった。
+ *
+ * 語の途中に当てない(改善 3): `make*` は `makeinfo` に、`pytest*` は `pytest-watch` に当たっていた。
+ * 語そのものと「語 + 空白 + 何か」の 2 つに割る。`npm run build*` や `cargo build*` は、
+ * `build:prod` / `build --release` のような続きに当てるのが狙いなので、そのまま残す。
+ *
+ * どの glob も語で始まる(`*` で始まらない)。shim の sh のふるい(shims/_shim.sh)が、
+ * 先頭の語だけを見て「既定表には当たりえない」と判断できるのは、この性質に頼っている。
  * @type {NamedProfile[]}
  */
 export const DEFAULT_PROFILES = [
   {
     name: 'default:batch',
     profile: {
-      match: ['npm test*', 'npm run build*', 'npx vitest run*', 'npx playwright test*', 'cargo build*', 'cargo test*', 'pytest*', 'go test*', 'make*'],
+      match: [
+        'npm test', 'npm test *',
+        'npm run build*',
+        'npx vitest run*',
+        'npx playwright test*',
+        'cargo build*', 'cargo test*',
+        'pytest', 'pytest *',
+        'go test*',
+        'make', 'make *',
+      ],
       class: 'batch',
       cpus: { min: 2, max: 4 },
     },
   },
 ];
+
+/** 既定表の glob が始まる語(shim の sh のふるいが使う)。@returns {string[]} */
+export function defaultHeadWords() {
+  /** @type {Set<string>} */
+  const words = new Set();
+  for (const np of DEFAULT_PROFILES) {
+    for (const g of np.profile.match) {
+      const head = g.split(' ')[0];
+      const cut = head.search(/[*?]/);
+      if (cut === 0) throw new Error(`既定表の glob が語で始まっていない: ${g}`);
+      words.add(cut < 0 ? head : head.slice(0, cut));
+    }
+  }
+  return [...words].sort();
+}
 
 /** node の、インラインのコードを値に取るオプション */
 const NODE_INLINE = new Set(['-e', '--eval', '-p', '--print']);
@@ -140,6 +194,8 @@ export function classify(command, profiles) {
   /** @type {NamedProfile | null} */
   let best = null;
   for (const seg of segments(command)) {
+    // 走らせずに調べるだけの部分は、どの profile にも当てない(`make --version` を順番待ちに乗せない)
+    if (isInspect(seg)) continue;
     const hit = profiles.find((np) => np.profile.match.some((g) => globMatch(g, seg)));
     if (hit === undefined) continue;
     if (best === null || WEIGHT[hit.profile.class] > WEIGHT[best.profile.class]) best = hit;
@@ -185,13 +241,24 @@ export function validateProfile(name, raw) {
   return out;
 }
 
+/** 改名の前の設定ファイルの名前(switchyard は conductor から改名した) */
+export const LEGACY_CONFIG = 'conductor.json';
+
 /**
  * repo 直下の switchyard.json を読み、プロジェクトの profile を既定表の前に並べる。
  * 読めない・形が違うときは既定表だけを返し、理由を error に入れる(黙って無視しない)。
- * @param {string} repoRoot @returns {{ profiles: NamedProfile[], error: string | null }}
+ *
+ * switchyard.json が無く、改名の前の conductor.json があれば、そちらを読んで notice を付ける。
+ * 付けないと、改名の日から repo の設定が黙って効かなくなる — 実測: 10 個の profile を持つ repo が
+ * 既定表だけで走り、e2e と計測の宣言が消えて機械が詰まった(2026-09-16)。
+ * @param {string} repoRoot @returns {{ profiles: NamedProfile[], error: string | null, notice?: string }}
  */
 export function loadProfiles(repoRoot) {
-  return loadProfilesFile(join(repoRoot, 'switchyard.json'));
+  const file = join(repoRoot, 'switchyard.json');
+  if (existsSync(file)) return loadProfilesFile(file);
+  const legacy = join(repoRoot, LEGACY_CONFIG);
+  if (!existsSync(legacy)) return { profiles: DEFAULT_PROFILES, error: null };
+  return { ...loadProfilesFile(legacy), notice: `${legacy} を読んだ(switchyard は conductor から改名した)。switchyard.json へ改名すると、この知らせは消える` };
 }
 
 /**

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { applyTemplate, classifiableCommand, classify, DEFAULT_PROFILES, globMatch, loadProfiles, segments, validateProfile } from '../../src/config/profiles.mjs';
+import { applyTemplate, classifiableCommand, classify, DEFAULT_PROFILES, defaultHeadWords, globMatch, isInspect, LEGACY_CONFIG, loadProfiles, segments, validateProfile } from '../../src/config/profiles.mjs';
 
 describe('globMatch', () => {
   it('* は任意の文字列、? は 1 文字、全体一致', () => {
@@ -68,6 +68,49 @@ describe('既定表(設計 §9.3)', () => {
     assert.equal(classify('node benchmarks/run.mjs', DEFAULT_PROFILES), null);
     assert.equal(classify('cat benchmarks/standards.json', DEFAULT_PROFILES), null);
   });
+
+  it('語の途中には当てない: makeinfo / pytest-watch は make・pytest ではない', () => {
+    assert.equal(classify('makeinfo doc.texi', DEFAULT_PROFILES), null);
+    assert.equal(classify('makepkg -si', DEFAULT_PROFILES), null);
+    assert.equal(classify('pytest-watch', DEFAULT_PROFILES), null);
+    // 本体はこれまでどおり当たる
+    assert.equal(classify('make', DEFAULT_PROFILES)?.profile.class, 'batch');
+    assert.equal(classify('make build', DEFAULT_PROFILES)?.profile.class, 'batch');
+    assert.equal(classify('pytest tests/', DEFAULT_PROFILES)?.profile.class, 'batch');
+  });
+
+  it('どの glob も語で始まる(shim の sh のふるいが先頭の語だけで判断できる)', () => {
+    for (const np of DEFAULT_PROFILES) for (const g of np.profile.match) assert.equal(g.startsWith('*'), false, g);
+    assert.deepEqual(defaultHeadWords(), ['cargo', 'go', 'make', 'npm', 'npx', 'pytest']);
+  });
+});
+
+describe('isInspect(走らせずに調べるだけの部分。改善 3)', () => {
+  it('--version / --help / --list / --dry-run は、どこにあっても分類しない', () => {
+    for (const cmd of [
+      'make --version',
+      'npm test -- --help',
+      'cargo build --help',
+      'npx playwright test --list --reporter=json',
+      'go test --help',
+      'pytest --version',
+    ]) {
+      assert.equal(isInspect(cmd), true, cmd);
+      assert.equal(classify(cmd, DEFAULT_PROFILES), null, cmd);
+    }
+  });
+
+  it('1 文字の旗は末尾のときだけ。値を取る形(pytest -n 4)は分類したまま', () => {
+    assert.equal(isInspect('make -n'), true);
+    assert.equal(isInspect('pytest -n 4'), false);
+    assert.equal(isInspect('make -n build'), false);
+    assert.equal(classify('pytest -n 4', DEFAULT_PROFILES)?.profile.class, 'batch');
+    assert.equal(classify('make -n build', DEFAULT_PROFILES)?.profile.class, 'batch');
+  });
+
+  it('重い部分が別にあれば、そちらは分類される(部分ごとに見る)', () => {
+    assert.equal(classify('make --version && npm test', DEFAULT_PROFILES)?.profile.class, 'batch');
+  });
 });
 
 describe('classifiableCommand(分類に渡す文字列)', () => {
@@ -113,6 +156,24 @@ describe('loadProfiles', () => {
     const r = loadProfiles(dir);
     assert.equal(r.error, null);
     assert.deepEqual(r.profiles.map((p) => p.name), ['unit', ...DEFAULT_PROFILES.map((p) => p.name)]);
+  });
+
+  it('switchyard.json が無く conductor.json があれば、そちらを読んで知らせを付ける(改名の移行)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'switchyard-'));
+    writeFileSync(join(dir, LEGACY_CONFIG), JSON.stringify({ profiles: { e2e: { match: ['npm run e2e*'], class: 'batch', locks: ['port:4173'] } } }));
+    const r = loadProfiles(dir);
+    assert.equal(r.error, null);
+    assert.deepEqual(r.profiles.map((p) => p.name), ['e2e', ...DEFAULT_PROFILES.map((p) => p.name)], '古い名前でも profile は効く');
+    assert.match(r.notice ?? '', /conductor\.json を読んだ/);
+  });
+
+  it('switchyard.json があれば conductor.json は見ない(知らせも出さない)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'switchyard-'));
+    writeFileSync(join(dir, 'switchyard.json'), JSON.stringify({ profiles: { neu: { match: ['npm test'], class: 'batch' } } }));
+    writeFileSync(join(dir, LEGACY_CONFIG), JSON.stringify({ profiles: { alt: { match: ['npm test'], class: 'measure' } } }));
+    const r = loadProfiles(dir);
+    assert.deepEqual(r.profiles.map((p) => p.name), ['neu', ...DEFAULT_PROFILES.map((p) => p.name)]);
+    assert.equal(r.notice, undefined);
   });
 
   it('壊れた設定は既定表に戻し、理由を返す', () => {
