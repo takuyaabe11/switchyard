@@ -2,6 +2,13 @@
   "name": "conductor",
   "version": "0.2.1",
   "private": true,
+  "description": "同じマシンの Claude Code セッションが重い走行を取り合わないように、CPU と排他の鍵を割り振る司令塔",
+  "license": "MIT",
+  "homepage": "https://github.com/takuyaabe11/conductor#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/takuyaabe11/conductor.git"
+  },
   "type": "module",
   "engines": {
     "node": ">=20"

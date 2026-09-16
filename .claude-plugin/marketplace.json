@@ -2,7 +2,8 @@
   "name": "conductor",
   "description": "conductor の配布口(この repo をそのまま marketplace として使う)",
   "owner": {
-    "name": "abe"
+    "name": "twoyearsold",
+    "url": "https://github.com/takuyaabe11"
   },
   "plugins": [
     {
