@@ -24,6 +24,7 @@ const SUITES = {
       'test/core/schedule.lockchild.test.mjs',
       'test/core/schedule.lockonly.test.mjs',
       'test/core/schedule.measure.test.mjs',
+      'test/core/schedule.preempt.test.mjs',
       'test/core/score.test.mjs',
     ],
     mutations: [
@@ -120,8 +121,8 @@ const SUITES = {
         // 改善 3・最終レビュー I-2: usedCpus が親の子の借りを数えない(二重に貸さないという性質そのものを壊す)
         name: 'M15 usedCpus が親の子の借りを数えない',
         file: 'src/core/schedule.mjs',
-        from: 'return s.leases.reduce((n, l) => n + l.cpus, 0);',
-        to: 'return s.leases.reduce((n, l) => n + (l.lockChild === true ? 0 : l.cpus), 0);',
+        from: 'return s.leases.reduce((n, l) => n + (isHeld(l) ? 0 : l.cpus), 0);',
+        to: 'return s.leases.reduce((n, l) => n + (isHeld(l) || l.lockChild === true ? 0 : l.cpus), 0);',
       },
       {
         // 改善 3・最終レビュー I-1(オーナー決定): 親ごとの借りの上限(1 本まで)を外す
@@ -135,6 +136,36 @@ const SUITES = {
         name: 'M17 親の子の並べ替えで親ごとに 1 本へ絞らない',
         file: 'src/core/schedule.mjs',
         from: 'if (seenParents.has(w.job.parent)) return false;',
+        to: '',
+      },
+      {
+        name: 'M19 計測でなくても道を譲らせる(容量が足りないだけで止める)',
+        file: 'src/core/schedule.mjs',
+        from: "const headMeasure = runningMeasure === undefined && ordered.length > 0 && ordered[0].job.class === 'measure' ? ordered[0].job : null;",
+        to: 'const headMeasure = runningMeasure === undefined && ordered.length > 0 ? ordered[0].job : null;',
+      },
+      {
+        name: 'M20 never を宣言したジョブも止める',
+        file: 'src/core/schedule.mjs',
+        from: "l.job.preempt !== 'never' && l.job.class !== 'measure'",
+        to: "l.job.class !== 'measure'",
+      },
+      {
+        name: 'M21 計測と鍵が重なる相手も止める(鍵が返らず永久に待つ)',
+        file: 'src/core/schedule.mjs',
+        from: ' && !l.job.locks.some((k) => measure.locks.includes(k)),',
+        to: ',',
+      },
+      {
+        name: 'M22 止めたリースも単独判定に数える(計測が入場できない)',
+        file: 'src/core/schedule.mjs',
+        from: 'return s.leases.filter((l) => l.cpus > 0 && !isHeld(l));',
+        to: 'return s.leases.filter((l) => l.cpus > 0);',
+      },
+      {
+        name: 'M23 計測が消えても止めたものを戻さない',
+        file: 'src/core/schedule.mjs',
+        from: "      for (const l of releases) holdActions.push({ type: 'unhold', jobId: l.job.id });\n",
         to: '',
       },
       {
@@ -194,8 +225,20 @@ const SUITES = {
       {
         name: 'E2 走行中に子孫を見ない',
         file: 'src/run/run.mjs',
-        from: 'watchTimer = setInterval(() => tr.sample(), watchMs);',
-        to: 'watchTimer = null;',
+        from: 'let everyMs = watchMs;',
+        to: 'let everyMs = 86_400_000;',
+      },
+      {
+        name: 'E6 見張りの間隔を後退させたまま戻さない',
+        file: 'src/run/watch.mjs',
+        from: 'return changed ? baseMs : Math.min(current * 2, maxMs);',
+        to: 'return Math.min(current * 2, maxMs);',
+      },
+      {
+        name: 'E7 子孫が増えても変化なしと答える',
+        file: 'src/run/watch.mjs',
+        from: 'if (known === undefined || known.pgid !== r.pgid || known.comm !== comm) changed = true;',
+        to: 'if (known !== undefined && known.pgid !== r.pgid) changed = true;',
       },
       {
         // I2: 開始時刻(started)の照合をやめ、使い回された pid を同じ子とみなしてしまう変異
@@ -540,6 +583,11 @@ function runTests(dir, tests) {
   return new Promise((resolve) => {
     // SWITCHYARD_HOME は写しの中へ向ける(env を渡さないと、テストの試算が実際の ~/.switchyard/ を汚す)
     const env = { ...process.env, SWITCHYARD_HOME: join(dir, '.switchyard-home') };
+    // 入れ子の印を落とす(package.json の `env -u` と同じ)。この script 自身が switchyard に包まれて走ると
+    // SWITCHYARD_IN_JOB=1 が立ち、それが test へ漏れると、その印を読む側の振る舞いを試す試験が別物になる
+    delete env.SWITCHYARD_IN_JOB;
+    delete env.SWITCHYARD_HELD_LOCKS;
+    delete env.SWITCHYARD_JOB_ID;
     const child = spawn(process.execPath, ['--test', '--test-reporter=spec', ...tests], { cwd: dir, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';

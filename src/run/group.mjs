@@ -52,6 +52,22 @@ export function signalGroup(pgid, signal, ownPgid = readPgid(process.pid)) {
 }
 
 /**
+ * プロセスグループの優先度を下げる(設計 §6.7 の throttle)。
+ * `renice` はグループ全体に効く(`os.setPriority` は pid 1 つにしか効かず、先に生まれた子には届かない)。
+ * 下げられなくても走行は続くので、失敗は false を返すだけにする。
+ * @param {number} pgid @param {number} priority 0 が普通・大きいほど後回し @returns {boolean}
+ */
+export function renicePriority(pgid, priority) {
+  if (!Number.isInteger(pgid) || pgid <= 1) throw new Error(`不正な pgid: ${pgid}`);
+  try {
+    execFileSync('renice', ['-n', String(priority), '-g', String(pgid)], { stdio: ['ignore', 'ignore', 'ignore'] });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * グループのプロセスが全部消えるまで待つ。消えたら true、時間内に消えなければ false。
  * @param {number} pgid @param {number} timeoutMs @param {number} [stepMs] @returns {Promise<boolean>}
  */

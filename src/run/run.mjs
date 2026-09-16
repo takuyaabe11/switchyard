@@ -9,8 +9,8 @@ import { heldLocks, repoRoot } from '../config/context.mjs';
 import { applyTemplate, classifiableCommand, classify, loadProfiles } from '../config/profiles.mjs';
 import { pathsOf } from '../daemon/paths.mjs';
 import { appendRecord } from '../daemon/store.mjs';
-import { readPgid, signalGroup, spawnInOwnGroup, verifiedGroup, waitGroupGone } from './group.mjs';
-import { createEscapeTracker } from './watch.mjs';
+import { readPgid, renicePriority, signalGroup, spawnInOwnGroup, verifiedGroup, waitGroupGone } from './group.mjs';
+import { createEscapeTracker, nextWatchMs } from './watch.mjs';
 
 /** @typedef {import('../core/types.mjs').JobClass} JobClass */
 /** @typedef {import('../core/types.mjs').CpuRange} CpuRange */
@@ -34,6 +34,8 @@ import { createEscapeTracker } from './watch.mjs';
  *   reconnectMs?: number,
  *   unmanagedAfterMs?: number,
  *   watchMs?: number,
+ *   maxWatchMs?: number,
+ *   throttleNice?: number,
  *   connect?: typeof connectDaemon,
  *   signals?: SignalSource,
  *   verifyGroup?: typeof verifiedGroup
@@ -55,11 +57,11 @@ function signalCode(sig) {
  * 入れ子(設計 §4.3 の 7): 祖先が持つ鍵は外す。CPU を持つジョブの中(SWITCHYARD_IN_JOB=1)では CPU を 0..0 にする
  * (親が CPU を持っているので二重に数えない。数えると、容量いっぱいのときに親子が互いを待つ)。
  * @param {{ argv: string[], flags: RunFlags, env: NodeJS.ProcessEnv, cwd: string }} input
- * @returns {{ job: JobRequest, profile: Profile | null, configError: string | null }}
+ * @returns {{ job: JobRequest, profile: Profile | null, configError: string | null, configNotice: string | null }}
  */
 export function buildRequest({ argv, flags, env, cwd }) {
   const repo = repoRoot(cwd);
-  const { profiles, error } = loadProfiles(repo);
+  const { profiles, error, notice } = loadProfiles(repo);
   const cmd = argv.join(' ');
   const named = flags.profile !== undefined ? profiles.find((p) => p.name === flags.profile) ?? null : classify(classifiableCommand(argv), profiles);
   if (flags.profile !== undefined && named === null) throw new Error(`profile ${flags.profile} が見つからない`);
@@ -84,12 +86,15 @@ export function buildRequest({ argv, flags, env, cwd }) {
       class: flags.class ?? base?.class ?? 'batch',
       cpus: env.SWITCHYARD_IN_JOB === '1' ? { min: 0, max: 0 } : flags.cpus ?? base?.cpus ?? { min: 1, max: 1 },
       locks: declaredLocks.filter((k) => !held.has(k)),
-      preempt: flags.preempt ?? base?.preempt ?? 'throttle',
+      // 既定は never。宣言していないジョブは、計測のために止められない(設計 §6.7)。
+      // 止める / 降格するのは、そのジョブが中断に耐えると書いた人だけ
+      preempt: flags.preempt ?? base?.preempt ?? 'never',
       why: flags.why ?? null,
       ...(parent !== null ? { parent } : {}),
     },
     profile: base,
     configError: error,
+    configNotice: notice ?? null,
   };
 }
 
@@ -128,12 +133,15 @@ export function runJob(opts) {
     reconnectMs = 1_000,
     unmanagedAfterMs = 30_000,
     watchMs = 2_000,
+    maxWatchMs = 30_000,
+    throttleNice = 10,
     connect = connectDaemon,
     signals = process,
     verifyGroup = verifiedGroup,
   } = opts;
-  const { job, profile, configError } = buildRequest({ argv, flags, env, cwd });
+  const { job, profile, configError, configNotice } = buildRequest({ argv, flags, env, cwd });
   if (configError !== null) out(`[switchyard] ${configError}(既定表で続ける)`);
+  if (configNotice !== null) out(`[switchyard] ${configNotice}`);
   const ownPgid = readPgid(process.pid);
 
   return new Promise((resolve) => {
@@ -163,8 +171,23 @@ export function runJob(opts) {
     let tracker = null;
     /** @type {NodeJS.Timeout | null} */
     let watchTimer = null;
+    /** @type {'pause' | 'throttle' | null} 計測に道を譲って止めている / 降格している(設計 §6.7) */
+    let held = null;
     // await を挟んだ後の読み取りを型の絞り込みに巻き込まないよう、関数越しに読む
     const over = () => finished || phase === 'done';
+
+    /**
+     * 止めた子を必ず動かし直してから次へ進む。
+     * SIGSTOP で止まったプロセスは SIGTERM を受け取っても処理できないので、終わらせる前にここを通す。
+     */
+    const release = () => {
+      if (held === null) return;
+      const was = held;
+      held = null;
+      if (pgid === null) return;
+      if (was === 'pause') signalGroup(pgid, 'SIGCONT', ownPgid);
+      else renicePriority(pgid, 0);
+    };
 
     const handlers = CALLER_SIGNALS.map((sig) => {
       const h = () => onSignal(sig);
@@ -176,10 +199,11 @@ export function runJob(opts) {
     const finish = (code) => {
       if (finished) return;
       finished = true;
+      release();
       if (hbTimer !== null) clearInterval(hbTimer);
       if (killTimer !== null) clearTimeout(killTimer);
       if (backoffTimer !== null) clearTimeout(backoffTimer);
-      if (watchTimer !== null) clearInterval(watchTimer);
+      if (watchTimer !== null) clearTimeout(watchTimer);
       for (const [sig, h] of handlers) signals.off(sig, h);
       ch?.close();
       resolve(code);
@@ -233,7 +257,7 @@ export function runJob(opts) {
       });
       c.once('exit', (code, sig) => {
         const result = code ?? signalCode(sig);
-        if (watchTimer !== null) clearInterval(watchTimer);
+        if (watchTimer !== null) clearTimeout(watchTimer);
         tracker?.sample();
         const done = () => report(result, tracker === null ? null : tracker.report());
         if (!killedByCaller || pgid === null) {
@@ -254,11 +278,19 @@ export function runJob(opts) {
       if (pgid === null) {
         out('[switchyard] 子のプロセスグループを確かめられないので、グループへの信号は送らない(呼び出し元の終了だけを子に伝える)');
       } else {
-        // どのコマンドでも、子孫がグループから抜けるかを実行中に見る(設計 §13 V6)
+        // どのコマンドでも、子孫がグループから抜けるかを実行中に見る(設計 §13 V6)。
+        // 顔ぶれが変わらない間は間隔を倍にして伸ばす(ps は 1 回が安くない。watch.mjs の nextWatchMs)
         const tr = createEscapeTracker({ rootPid: c.pid, pgid });
         tracker = tr;
         tr.sample();
-        watchTimer = setInterval(() => tr.sample(), watchMs);
+        let everyMs = watchMs;
+        const again = () => {
+          watchTimer = setTimeout(() => {
+            everyMs = nextWatchMs(everyMs, tr.sample(), watchMs, maxWatchMs);
+            again();
+          }, everyMs);
+        };
+        again();
       }
       if (managed && ch !== null && jobId !== null) {
         ch.send({ t: 'started', jobId, pid: c.pid, pgid });
@@ -271,6 +303,8 @@ export function runJob(opts) {
     /** @param {NodeJS.Signals} sig */
     function onSignal(sig) {
       killedByCaller = true;
+      // 止まっている子は信号を処理できない。転送の前に必ず動かし直す
+      release();
       if (phase === 'waiting') {
         out(`[switchyard] ${sig} を受けたので待つのをやめる`);
         phase = 'done';
@@ -315,6 +349,23 @@ export function runJob(opts) {
         } else if (m.t === 'grant' && phase === 'waiting') {
           out(`[switchyard] 開始 ${jobId}(CPU ${String(m.cpus)})`);
           startChild(Number(m.cpus), true);
+        } else if (m.t === 'hold' && phase === 'running' && pgid !== null) {
+          const mode = m.mode === 'pause' ? 'pause' : 'throttle';
+          if (held === null) {
+            held = mode;
+            if (mode === 'pause') {
+              signalGroup(pgid, 'SIGSTOP', ownPgid);
+              out('[switchyard] 計測に道を譲るため止まる(SIGSTOP)。計測が終われば動き出す');
+            } else {
+              renicePriority(pgid, throttleNice);
+              out(`[switchyard] 計測に道を譲るため優先度を下げる(nice ${throttleNice})`);
+            }
+          }
+        } else if (m.t === 'unhold') {
+          if (held !== null) {
+            release();
+            out('[switchyard] 走行に戻る');
+          }
         } else if (m.t === 'unknown') {
           if (phase === 'waiting') {
             jobId = null;

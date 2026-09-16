@@ -15,7 +15,7 @@ export function job(over = {}) {
     class: 'batch',
     cpus: { min: 1, max: 1 },
     locks: [],
-    preempt: 'throttle',
+    preempt: 'never',
     why: null,
     expectedMs: null,
     ...over,

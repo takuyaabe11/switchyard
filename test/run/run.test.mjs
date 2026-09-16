@@ -1,7 +1,7 @@
 // @ts-check
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -41,6 +41,27 @@ function project(profiles) {
 }
 
 const node = process.execPath;
+
+/**
+ * そのプロセスグループの子が停止(状態 T)しているか。
+ * `ps -g` は土台で意味が違う(macOS はプロセスグループ、Linux の procps は実効グループ名)ので使わない。
+ * 全部を出して pgid で絞る形にする。
+ * @param {number} pgid
+ */
+function stopped(pgid) {
+  try {
+    const out = execFileSync('ps', ['-A', '-o', 'pgid=,stat='], { encoding: 'utf8' });
+    const states = out
+      .trim()
+      .split('\n')
+      .map((l) => l.trim().split(/\s+/))
+      .filter((w) => Number(w[0]) === pgid)
+      .map((w) => w[1] ?? '');
+    return states.length > 0 && states.every((st) => st.startsWith('T'));
+  } catch {
+    return false;
+  }
+}
 
 describe('buildRequest', () => {
   it('--profile の性格を使い、引数で上書きし、鍵は足し合わせる', () => {
@@ -87,6 +108,60 @@ describe('runJob', () => {
     assert.ok(lines.some((l) => l.includes('CPU 3')), lines.join('\n'));
     const history = readFileSync(pathsOf(home).events, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.kind === 'history');
     assert.deepEqual(history.map((h) => [h.profile, h.code]), [['x', 33]]);
+  });
+
+  it('preempt: pause を宣言したジョブは、計測が先頭に立つと本当に止まり、計測の後で動き出す(設計 §6.7)', async () => {
+    const { d, home } = await daemon();
+    const cwd = project({
+      long: { match: ['never'], class: 'batch', cpus: { min: 1, max: 1 }, preempt: 'pause' },
+      bench: { match: ['never'], class: 'measure', cpus: { min: 1, max: 1 } },
+    });
+    /** @type {string[]} */
+    const lines = [];
+    // 走り続ける子(SIGCONT されるまで進まないことを、経過時間ではなく状態 T で見る)
+    const running = runJob({
+      argv: ['sh', '-c', 'sleep 30 & wait'],
+      flags: { profile: 'long' },
+      home,
+      cwd,
+      out: (l) => lines.push(l),
+      connect: noAutoStart,
+    });
+    // pgid は started の報告で入るので、埋まるまで待つ(埋まる前に読むと 0 になり、-0 は自分のグループを指す)
+    await waitFor(() => (d.getState().leases[0]?.pgid ?? 0) > 1);
+    const pgid = Number(d.getState().leases[0].pgid);
+
+    // 計測を投げると、走行中の pause 宣言のジョブが止まり、計測はその場で入場する
+    const measure = runJob({ argv: [node, '-e', ''], flags: { profile: 'bench' }, home, cwd, out: () => {}, connect: noAutoStart });
+    await waitFor(() => d.getState().leases.some((l) => l.held === 'pause'));
+    await waitFor(() => stopped(pgid), 3_000);
+    assert.equal(stopped(pgid), true, '子のプロセスグループが T(停止)になっている');
+    assert.ok(lines.some((l) => l.includes('SIGSTOP')), lines.join('\n'));
+
+    assert.equal(await measure, 0);
+    // 計測が終われば戻る
+    await waitFor(() => !stopped(pgid), 3_000);
+    assert.ok(lines.some((l) => l.includes('走行に戻る')), lines.join('\n'));
+    process.kill(-pgid, 'SIGKILL');
+    await running;
+  });
+
+  it('preempt: never(既定)のジョブは止められない', async () => {
+    const { d, home } = await daemon();
+    const cwd = project({
+      long: { match: ['never'], class: 'batch', cpus: { min: 1, max: 1 } },
+      bench: { match: ['never'], class: 'measure', cpus: { min: 1, max: 1 } },
+    });
+    const running = runJob({ argv: ['sh', '-c', 'sleep 30 & wait'], flags: { profile: 'long' }, home, cwd, out: () => {}, connect: noAutoStart });
+    await waitFor(() => (d.getState().leases[0]?.pgid ?? 0) > 1);
+    const pgid = Number(d.getState().leases[0].pgid);
+    const measure = runJob({ argv: [node, '-e', ''], flags: { profile: 'bench' }, home, cwd, out: () => {}, connect: noAutoStart });
+    await waitFor(() => d.getState().waiting.length === 1);
+    assert.equal(d.getState().leases.some((l) => l.held !== undefined), false, '止めない');
+    assert.equal(stopped(pgid), false);
+    process.kill(-pgid, 'SIGKILL');
+    await running;
+    assert.equal(await measure, 0, '相手が終われば計測は入場する');
   });
 
   it('同じ鍵を持つ 2 本は、重ならずに順に走る', async () => {
@@ -232,18 +307,21 @@ describe('runJob', () => {
         "const cwd = mkdtempSync(join(tmpdir(), 'cproj-'));",
         // 子は SIGTERM を捕まえて 300ms 後に終わる(猶予 3000ms より十分短い)
         "const p = runJob({ argv: ['sh', '-c', 'trap \"sleep 0.3; exit 0\" TERM; sleep 30 & wait'], flags: {}, home: cwd, cwd, out: () => {}, connect, signals, killGraceMs: 3000 });",
-        "setTimeout(() => signals.emit('SIGTERM'), 150);",
+        // 測るのは「最初の転送から終わるまで」。node の起動時間を混ぜると、機械が混んだだけで破れる
+        "let firstAt = 0;",
+        "setTimeout(() => { firstAt = Date.now(); signals.emit('SIGTERM'); }, 150);",
         "setTimeout(() => signals.emit('SIGTERM'), 200);", // 50ms space
-        "console.log('code=' + (await p));",
+        "const code = await p;",
+        "console.log('code=' + code + ' ms=' + (Date.now() - firstAt));",
       ].join('\n'),
     );
-    const started = Date.now();
     const out = await new Promise((resolve, reject) => {
       execFile(process.execPath, [script], { timeout: 15_000 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
     });
-    const elapsed = Date.now() - started;
     assert.match(String(out), /code=0/);
-    assert.ok(elapsed < 1_500, `スクリプトの終了までに ${elapsed}ms かかった(killGraceMs 3000ms に引きずられている): ${out}`);
+    const ms = Number(/ms=(\d+)/.exec(String(out))?.[1] ?? NaN);
+    // 子は SIGTERM を捕まえて 300ms で終わる。猶予が 2 度目の信号で始まり直していれば 3000ms 近くになる
+    assert.ok(ms < 1_500, `最初の転送から ${ms}ms かかった(killGraceMs 3000ms に引きずられている): ${out}`);
   });
 
   it('再接続を待っている間に子が終わったら、待ちのタイマーでプロセスの終了を遅らせない', async () => {

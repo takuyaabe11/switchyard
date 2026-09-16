@@ -36,7 +36,8 @@
  *   pid: number | null,
  *   pgid: number | null,
  *   recovering: boolean,
- *   lockChild?: boolean
+ *   lockChild?: boolean,
+ *   held?: 'pause' | 'throttle'
  * }} Lease
  */
 
@@ -75,7 +76,9 @@
  * @typedef {(
  *   { type: 'grant', jobId: string, cpus: number, lockChild?: boolean } |
  *   { type: 'queued', jobId: string, position: number, reason: string, etaAt: number | null } |
- *   { type: 'history', repo: string, profile: string, class: JobClass, cpus: number, durationMs: number, code: number | null }
+ *   { type: 'history', repo: string, profile: string, class: JobClass, cpus: number, durationMs: number, code: number | null } |
+ *   { type: 'hold', jobId: string, mode: 'pause' | 'throttle' } |
+ *   { type: 'unhold', jobId: string }
  * )} Action
  */
 
