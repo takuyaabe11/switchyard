@@ -34,6 +34,32 @@ if [ "$name" = git ]; then
   esac
 fi
 
+# sh のふるい(設計 §9.1)。node を 1 本起動すると、素通しのコマンドにもその時間(実測 21ms)がまるごと乗る。
+# switchyard.json の無い repo では既定表だけが効き、既定表の glob はどれも語で始まる
+# (src/config/profiles.mjs の defaultHeadWords。test/shim/shims.test.mjs が食い違いを止める)。
+# だから先頭の語がその中に無ければ、分類器を呼ぶまでもない。
+# git はここまで来た時点で index を書き換えるサブコマンドで、鍵は profile の表ではなく git-dir が決める。ふるいにかけない
+if [ "$name" != git ]; then
+  sieve_root=${PWD:-$(pwd)}
+  while [ ! -e "$sieve_root/.git" ]; do
+    sieve_up=${sieve_root%/*}
+    [ -n "$sieve_up" ] || sieve_up=/
+    if [ "$sieve_up" = "$sieve_root" ]; then
+      sieve_root=${PWD:-$(pwd)}
+      break
+    fi
+    sieve_root=$sieve_up
+  done
+  # 改名の前の名前(conductor.json)も見る。見ないと、古い名前の設定を持つ repo で
+  # 既定表に無い語(node など)がふるいで素通しになり、その repo の profile が効かなくなる
+  if [ ! -f "$sieve_root/switchyard.json" ] && [ ! -f "$sieve_root/conductor.json" ]; then
+    case "$name" in
+      cargo | go | make | npm | npx | pytest) ;;
+      *) exec "$real" "$@" ;;
+    esac
+  fi
+fi
+
 node=$(PATH=$stripped command -v node 2>/dev/null)
 [ -n "$node" ] || exec "$real" "$@"
 answer=$(PATH=$stripped "$node" "$root/src/shim/decide.mjs" "$name" "$@" 2>/dev/null) || exec "$real" "$@"

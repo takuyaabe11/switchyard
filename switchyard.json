@@ -1,0 +1,14 @@
+{
+  "profiles": {
+    "unit": {
+      "match": ["npm test", "npm test *", "npm run check*"],
+      "class": "batch",
+      "cpus": { "min": 2, "max": 8 }
+    },
+    "mutate": {
+      "match": ["npm run mutate:*", "node scripts/mutate.mjs*"],
+      "class": "batch",
+      "cpus": { "min": 2, "max": 6 }
+    }
+  }
+}

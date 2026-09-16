@@ -6,6 +6,8 @@ import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, re
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { defaultHeadWords, LEGACY_CONFIG } from '../../src/config/profiles.mjs';
+import { stopDaemon } from '../../src/daemon/control.mjs';
 import { pathsOf } from '../../src/daemon/paths.mjs';
 import { startDaemon } from '../../src/daemon/server.mjs';
 import { tempHome } from '../../testkit/tmp.mjs';
@@ -53,6 +55,9 @@ async function daemon() {
  */
 function sh(command, { cwd, home, path, env = {} }) {
   const fake = fakeBin();
+  // shim の中の `switchyard run` は、届かなければデーモンを切り離して起動する。
+  // 試験が終わってもそれが残り続けていた(実測: 1 回の全件で 10 本以上・1 本あたり約 42MB)ので、後始末に積む
+  cleanups.push(() => stopDaemon({ home }));
   return new Promise((resolve) => {
     execFile(
       '/bin/sh',
@@ -87,6 +92,42 @@ function shimsWithClassifier(decideSource) {
 describe('shims(設計 §9.1)', () => {
   it('shims に 8 語がそろい、どれも実行できる', () => {
     for (const word of SHIM_WORDS) assert.ok((statSync(join(SHIMS, word)).mode & 0o111) !== 0, word);
+  });
+
+  it('sh のふるいの語が、既定表の glob が始まる語と一致する(片方だけ直す事故を止める)', () => {
+    const src = readFileSync(join(SHIMS, '_shim.sh'), 'utf8');
+    const m = /case "\$name" in\n\s*([^)]*)\)/.exec(src);
+    assert.notEqual(m, null, 'ふるいの case が見つからない');
+    const inSieve = String(m?.[1]).split('|').map((w) => w.trim()).filter((w) => w !== '').sort();
+    assert.deepEqual(inSieve, defaultHeadWords());
+  });
+
+  it('switchyard.json が無い repo では、既定表に無い語は node を起動せずに本物へ直行する', async () => {
+    const { home } = await daemon();
+    const cwd = plainDir();
+    // node を PATH から外す。ふるいが効いていれば分類器を呼ばないので、それでも本物が走る
+    const fake = fakeBin();
+    const r = await sh('npm run lint', { cwd, home, path: `${SHIMS}:${fake}:${BASE_PATH}` });
+    assert.match(r.stdout, /fake-npm run lint/);
+    assert.deepEqual(history(home), [], 'ジョブにならない');
+  });
+
+  it('改名の前の conductor.json があるときも、ふるいを通さず分類器にかける', async () => {
+    const { home } = await daemon();
+    const cwd = plainDir();
+    writeFileSync(join(cwd, LEGACY_CONFIG), JSON.stringify({ profiles: { lint: { match: ['npm run lint*'], class: 'batch', cpus: { min: 1, max: 1 } } } }));
+    const r = await sh('npm run lint', { cwd, home, env: { SWITCHYARD_TICK_MS: '20' } });
+    assert.match(r.stdout, /fake-npm run lint/);
+    assert.deepEqual(history(home).map((h) => h.profile), ['lint'], '古い名前の設定でも包まれる');
+  });
+
+  it('switchyard.json があれば、ふるいを通さず分類器にかける', async () => {
+    const { home } = await daemon();
+    const cwd = plainDir();
+    writeFileSync(join(cwd, 'switchyard.json'), JSON.stringify({ profiles: { lint: { match: ['npm run lint*'], class: 'batch', cpus: { min: 1, max: 1 } } } }));
+    const r = await sh('npm run lint', { cwd, home, env: { SWITCHYARD_TICK_MS: '20' } });
+    assert.match(r.stdout, /fake-npm run lint/);
+    assert.deepEqual(history(home).map((h) => h.profile), ['lint'], '包まれてジョブになる');
   });
 
   it('管理対象(npm test)は switchyard run に包まれ、子にジョブの印が渡る', async () => {
