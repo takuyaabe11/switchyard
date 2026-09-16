@@ -34,7 +34,7 @@ describe('parseArgs report', () => {
   });
 
   it('--repo と --since を読む', () => {
-    assert.deepEqual(parseArgs(['report', '--repo', '/Users/abe/dev/irc', '--since', '7d']), { cmd: 'report', repoPrefix: '/Users/abe/dev/irc', sinceDays: 7 });
+    assert.deepEqual(parseArgs(['report', '--repo', '/home/u/dev/irc', '--since', '7d']), { cmd: 'report', repoPrefix: '/home/u/dev/irc', sinceDays: 7 });
   });
 
   it('--since の形が違えば使い方の誤り', () => {

@@ -1,6 +1,15 @@
 {
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "conductor",
+  "displayName": "conductor",
   "version": "0.2.1",
   "description": "同じマシンの Claude Code セッションが重い走行を取り合わないように、CPU と排他の鍵を割り振る司令塔",
+  "author": {
+    "name": "twoyearsold",
+    "url": "https://github.com/takuyaabe11"
+  },
+  "homepage": "https://github.com/takuyaabe11/conductor#readme",
+  "repository": "https://github.com/takuyaabe11/conductor",
+  "license": "MIT",
   "keywords": ["resources", "scheduler", "hooks", "sessions"]
 }
