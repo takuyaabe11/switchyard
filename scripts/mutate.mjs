@@ -231,7 +231,7 @@ const SUITES = {
       {
         name: 'W2 CPU を持つジョブの子に入れ子の印を立てない',
         file: 'src/run/run.mjs',
-        from: "if (cpus > 0) childEnv.CONDUCTOR_IN_JOB = '1';",
+        from: "if (cpus > 0) childEnv.SWITCHYARD_IN_JOB = '1';",
         to: '',
       },
       {
@@ -243,7 +243,7 @@ const SUITES = {
       {
         name: 'W4 CPU を持つジョブの中でも CPU を要求する',
         file: 'src/run/run.mjs',
-        from: "cpus: env.CONDUCTOR_IN_JOB === '1' ? { min: 0, max: 0 } : flags.cpus",
+        from: "cpus: env.SWITCHYARD_IN_JOB === '1' ? { min: 0, max: 0 } : flags.cpus",
         to: 'cpus: flags.cpus',
       },
       {
@@ -288,7 +288,7 @@ const SUITES = {
         // 改善 3: 鍵だけのジョブの子の要求に、親のジョブの id を載せない(規則層が親の子として先に入れられない)
         name: 'W11 鍵だけのジョブの子の要求に parent を載せない',
         file: 'src/run/run.mjs',
-        from: "const parent = held.size > 0 && env.CONDUCTOR_IN_JOB !== '1' && env.CONDUCTOR_JOB_ID ? env.CONDUCTOR_JOB_ID : null;",
+        from: "const parent = held.size > 0 && env.SWITCHYARD_IN_JOB !== '1' && env.SWITCHYARD_JOB_ID ? env.SWITCHYARD_JOB_ID : null;",
         to: 'const parent = null;',
       },
     ],
@@ -299,12 +299,12 @@ const SUITES = {
       {
         name: 'D1 CPU を持つジョブの中でも分類する',
         file: 'src/shim/decide.mjs',
-        from: "if (env.CONDUCTOR_IN_JOB === '1') return { kind: 'pass' };",
+        from: "if (env.SWITCHYARD_IN_JOB === '1') return { kind: 'pass' };",
         to: '',
       },
       {
-        // I2: bin/conductor が PATH の node(node の shim)を通っても、conductor の CLI 自身を外側のジョブに包まない
-        name: 'D2 conductor の CLI 自身も分類して包む',
+        // I2: bin/switchyard が PATH の node(node の shim)を通っても、switchyard の CLI 自身を外側のジョブに包まない
+        name: 'D2 switchyard の CLI 自身も分類して包む',
         file: 'src/shim/decide.mjs',
         from: "if (word === 'node' && isOwnCli(args[0], cwd)) return { kind: 'pass' };",
         to: '',
@@ -406,7 +406,7 @@ const SUITES = {
         to: '',
       },
       {
-        name: 'H5 conductor run で包んだ中も拒否の判定にかける',
+        name: 'H5 switchyard run で包んだ中も拒否の判定にかける',
         file: 'src/hooks/pretooluse.mjs',
         from: 'visit(w.argv, true);',
         to: 'visit(w.argv, false);',
@@ -426,8 +426,8 @@ const SUITES = {
         to: "if (base === 'never-git') {",
       },
       {
-        // I1: conductor run の `--` の後ろを見ない(直す前は conductor run を含むコマンドを丸ごと素通しした)
-        name: 'H12 conductor run の包みの性格と -- の後ろを見ない',
+        // I1: switchyard run の `--` の後ろを見ない(直す前は switchyard run を含むコマンドを丸ごと素通しした)
+        name: 'H12 switchyard run の包みの性格と -- の後ろを見ない',
         file: 'src/hooks/pretooluse.mjs',
         from: "if (w.jobClass !== 'quick') found.heavy = true;\n      visit(w.argv, true);",
         to: '',
@@ -463,14 +463,14 @@ const SUITES = {
       {
         name: 'H6 考える層の中でも判定する',
         file: 'src/hooks/pretooluse.mjs',
-        from: "if (env.CONDUCTOR_THINKER === '1') return null;",
+        from: "if (env.SWITCHYARD_THINKER === '1') return null;",
         to: '',
       },
       {
         name: 'H7 Stop が 2 度目の停止も差し戻す',
         file: 'src/hooks/session.mjs',
-        from: "if (env.CONDUCTOR_THINKER === '1' || input.stop_hook_active === true) return null;",
-        to: "if (env.CONDUCTOR_THINKER === '1') return null;",
+        from: "if (env.SWITCHYARD_THINKER === '1' || input.stop_hook_active === true) return null;",
+        to: "if (env.SWITCHYARD_THINKER === '1') return null;",
       },
       {
         name: 'H8 SessionStart が同じ行を何度も足す',
@@ -538,8 +538,8 @@ const TEST_TIMEOUT_MS = 180_000;
  */
 function runTests(dir, tests) {
   return new Promise((resolve) => {
-    // CONDUCTOR_HOME は写しの中へ向ける(env を渡さないと、テストの試算が実際の ~/.conductor/ を汚す)
-    const env = { ...process.env, CONDUCTOR_HOME: join(dir, '.conductor-home') };
+    // SWITCHYARD_HOME は写しの中へ向ける(env を渡さないと、テストの試算が実際の ~/.switchyard/ を汚す)
+    const env = { ...process.env, SWITCHYARD_HOME: join(dir, '.switchyard-home') };
     const child = spawn(process.execPath, ['--test', '--test-reporter=spec', ...tests], { cwd: dir, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';

@@ -1,22 +1,23 @@
-# conductor
+# switchyard
 
 **A traffic controller for heavy runs across Claude Code sessions on one machine.**
 
 When several Claude Code sessions share a laptop, they all want to run `npm test`,
 `cargo build`, `playwright test` at the same time. The machine thrashes, benchmarks
-become meaningless, and two sessions rewrite the same git index. conductor hands out
+become meaningless, and two sessions rewrite the same git index. switchyard hands out
 CPU shares and exclusive locks (ports, the git index, anything you name) so those runs
-queue instead of collide.
+queue instead of collide. A switchyard is where trains are sorted onto the right track,
+one at a time — that is what this does for heavy runs.
 
 You do not change how you type commands. A `PATH` shim in front of `npm`, `npx`, `node`,
 `cargo`, `pytest`, `go`, `make` and `git` classifies each command and routes it through
-conductor automatically.
+switchyard automatically.
 
 ## Install
 
 ```
-/plugin marketplace add takuyaabe11/conductor
-/plugin install conductor@conductor
+/plugin marketplace add takuyaabe11/switchyard
+/plugin install switchyard@switchyard
 ```
 
 Requires Node.js >= 20, macOS or Linux. The daemon starts on demand; there is nothing
@@ -33,22 +34,22 @@ Once installed, every new Claude Code session gets three hooks:
 ## Commands
 
 ```
-conductor top                      # the whole board: what runs, what waits, why
-conductor why <job>                # one job's reason for waiting
-conductor ack <job>                # mark a failed job as looked at
-conductor run --why "..." -- <cmd> # run something through conductor explicitly
-conductor probe <seconds> -- <cmd> # measure a command to pick cpus/class
-conductor replay [--since 7d]      # re-run past decisions against a config
-conductor report [--since 7d]      # aggregate decisions and hook verdicts
+switchyard top                      # the whole board: what runs, what waits, why
+switchyard why <job>                # one job's reason for waiting
+switchyard ack <job>                # mark a failed job as looked at
+switchyard run --why "..." -- <cmd> # run something through switchyard explicitly
+switchyard probe <seconds> -- <cmd> # measure a command to pick cpus/class
+switchyard replay [--since 7d]      # re-run past decisions against a config
+switchyard report [--since 7d]      # aggregate decisions and hook verdicts
 ```
 
-`conductor run` flags: `--profile <name>`, `--class quick|batch|measure`,
+`switchyard run` flags: `--profile <name>`, `--class quick|batch|measure`,
 `--cpus 4` or `--cpus 2..10` (`0` means a locks-only job), `--lock <name>` (repeatable),
 `--preempt pause|throttle|never`.
 
 ## Per-project configuration
 
-Drop a `conductor.json` at the repo root to classify that project's commands:
+Drop a `switchyard.json` at the repo root to classify that project's commands:
 
 ```json
 {
@@ -81,11 +82,11 @@ Drop a `conductor.json` at the repo root to classify that project's commands:
 - `locks`: names, not files. Two jobs naming `port:4173` never overlap.
 - `{cpus}` in `env` is replaced with the share the job was actually granted.
 
-Without a `conductor.json`, a built-in table covers the usual commands.
+Without a `switchyard.json`, a built-in table covers the usual commands.
 
 ## Telling your agent about it
 
-conductor never edits your `AGENTS.md` or `CLAUDE.md`. If you want sessions to
+switchyard never edits your `AGENTS.md` or `CLAUDE.md`. If you want sessions to
 understand the queue, paste the snippet in [docs/agents-snippet.md](docs/agents-snippet.md)
 yourself.
 
@@ -95,23 +96,24 @@ MIT. See [LICENSE](LICENSE).
 
 ---
 
-# conductor(日本語)
+# switchyard(日本語)
 
 **同じマシンで動く Claude Code のセッションが、重い走行を取り合わないようにする司令塔。**
 
 1 台のノート PC で複数のセッションが動いていると、それぞれが同時に `npm test` や
 `cargo build`、`playwright test` を始める。マシンは詰まり、ベンチの数字は意味を失い、
-2 つのセッションが同じ git の index を書き換える。conductor は CPU の取り分と排他の鍵
+2 つのセッションが同じ git の index を書き換える。switchyard は CPU の取り分と排他の鍵
 (ポート・git の index・任意の名前)を割り振り、それらの走行をぶつけずに順番へ流す。
+switchyard は操車場のこと。重い走行を 1 本ずつ、正しい線路へ振り分ける。
 
 コマンドの打ち方は変えない。`npm` / `npx` / `node` / `cargo` / `pytest` / `go` / `make` /
-`git` の前に入る `PATH` の shim が、打たれたコマンドを分類して自動で conductor に通す。
+`git` の前に入る `PATH` の shim が、打たれたコマンドを分類して自動で switchyard に通す。
 
 ## 導入
 
 ```
-/plugin marketplace add takuyaabe11/conductor
-/plugin install conductor@conductor
+/plugin marketplace add takuyaabe11/switchyard
+/plugin install switchyard@switchyard
 ```
 
 必要なのは Node.js 20 以上、macOS か Linux。デーモンは必要になった時に自分で起動する。
@@ -128,22 +130,22 @@ MIT. See [LICENSE](LICENSE).
 ## コマンド
 
 ```
-conductor top                      # 盤面全体。何が走り、何が待ち、なぜか
-conductor why <job>                # 1 本の待ちの理由
-conductor ack <job>                # 失敗したジョブを確認済みにする
-conductor run --why "..." -- <cmd> # 明示的に conductor を通して走らせる
-conductor probe <秒> -- <cmd>      # cpus / class を決めるためにコマンドを計測する
-conductor replay [--since 7d]      # 過去の決定を、今の設定でやり直して見る
-conductor report [--since 7d]      # 決定と hook の判断を集計する
+switchyard top                      # 盤面全体。何が走り、何が待ち、なぜか
+switchyard why <job>                # 1 本の待ちの理由
+switchyard ack <job>                # 失敗したジョブを確認済みにする
+switchyard run --why "..." -- <cmd> # 明示的に switchyard を通して走らせる
+switchyard probe <秒> -- <cmd>      # cpus / class を決めるためにコマンドを計測する
+switchyard replay [--since 7d]      # 過去の決定を、今の設定でやり直して見る
+switchyard report [--since 7d]      # 決定と hook の判断を集計する
 ```
 
-`conductor run` の旗: `--profile <名前>`、`--class quick|batch|measure`、
+`switchyard run` の旗: `--profile <名前>`、`--class quick|batch|measure`、
 `--cpus 4` または `--cpus 2..10`(`0` は鍵だけのジョブ)、`--lock <名前>`(繰り返し可)、
 `--preempt pause|throttle|never`。
 
 ## repo ごとの設定
 
-repo の根に `conductor.json` を置くと、その repo のコマンドの分類を決められる。
+repo の根に `switchyard.json` を置くと、その repo のコマンドの分類を決められる。
 形式は上の英語側の例と同じ。
 
 - `class`: `quick` は素通し、`batch` は CPU を取り、絞られることがある。
@@ -151,11 +153,11 @@ repo の根に `conductor.json` を置くと、その repo のコマンドの分
 - `locks`: ファイルではなく名前。`port:4173` を名乗る 2 本は決して重ならない。
 - `env` の中の `{cpus}` は、そのジョブに実際に渡された取り分に置き換わる。
 
-`conductor.json` が無ければ、組み込みの既定表がよくあるコマンドを見る。
+`switchyard.json` が無ければ、組み込みの既定表がよくあるコマンドを見る。
 
 ## エージェントに知らせる
 
-conductor は `AGENTS.md` や `CLAUDE.md` を自動では書き換えない。セッションに順番待ちを
+switchyard は `AGENTS.md` や `CLAUDE.md` を自動では書き換えない。セッションに順番待ちを
 理解させたければ、[docs/agents-snippet.md](docs/agents-snippet.md) の一節を自分で貼る。
 
 ## ライセンス

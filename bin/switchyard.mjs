@@ -7,7 +7,7 @@ cli(process.argv.slice(2)).then(
     process.exitCode = code;
   },
   (e) => {
-    console.error(`[conductor] ${e instanceof Error ? e.stack : String(e)}`);
+    console.error(`[switchyard] ${e instanceof Error ? e.stack : String(e)}`);
     process.exitCode = 1;
   },
 );

@@ -1,4 +1,4 @@
-# 記録(決定・hook の判断)と conductor report の門番の検出力
+# 記録(決定・hook の判断)と switchyard report の門番の検出力
 
 - 実行日時: 2026-09-16 10:08 JST(`date "+%Y-%m-%d %H:%M"` の出力)
 - `uname -sr`: Darwin 25.6.0
@@ -59,18 +59,18 @@
 
 - `classify`(`src/config/profiles.mjs`)は、**1 つの部分に複数の profile が当たったら先に書いた方**を採る。設計書 §4.5 の
   「複数の profile に当たったら measure > batch > quick の順で重い方を採る」は、**部分をまたいだときだけ**そうなっている。
-  IRC の `conductor.json` では、同じコマンドを 2 つの profile に書かない形で回避した(`npm run e2e` は計測の側だけに置く)。
+  IRC の `switchyard.json` では、同じコマンドを 2 つの profile に書かない形で回避した(`npm run e2e` は計測の側だけに置く)。
   設計書の文言を実体に合わせるか、実装を重い方優先へ変えるかは、次の改善で決める。
 
 ## 導入の当日に踏んだ不具合と、その直し(2026-09-16)
 
-plugin を入れて IRC の unit 全件を 1 本通した直後、`~/.conductor/hooks.jsonl` が **142 KB・864 行**になっていた。
+plugin を入れて IRC の unit 全件を 1 本通した直後、`~/.switchyard/hooks.jsonl` が **142 KB・864 行**になっていた。
 中身を数えると、`cwd` は `/repo`(258 行)・`/w/irc`(54 行)・一時ディレクトリ(`cagree-*` / `cproj-*`)で、
-**すべてテストと `conductor replay` の試算**だった。原因は、判断の記録を判定そのもの(`preToolUse`)の中に置いたこと:
+**すべてテストと `switchyard replay` の試算**だった。原因は、判断の記録を判定そのもの(`preToolUse`)の中に置いたこと:
 
-- `conductor replay` は記録の全コマンドを `preToolUse` に流す(空回し)ので、流した数だけ本物の記録へ書く。
-- `test/hooks/*` の多くは `env: {}` で呼ぶため、`conductorHome({})` が**実際のホーム**を指し、テストが `~/.conductor/` を汚す
-  (全タスク共通の制約「テストは実際のホームの `~/.conductor/` を作らない」に違反していた)。
+- `switchyard replay` は記録の全コマンドを `preToolUse` に流す(空回し)ので、流した数だけ本物の記録へ書く。
+- `test/hooks/*` の多くは `env: {}` で呼ぶため、`switchyardHome({})` が**実際のホーム**を指し、テストが `~/.switchyard/` を汚す
+  (全タスク共通の制約「テストは実際のホームの `~/.switchyard/` を作らない」に違反していた)。
 
 直し: **記録を hook の入口 `runHook`(`src/hooks/main.mjs`)へ移し、`preToolUse` は何も書かない純粋な関数に戻した**。
 汚れた `hooks.jsonl` は消した(本物のセッションの行は 1 行も無かった)。門番は次の 3 本で、いずれも赤を実測した。
@@ -91,16 +91,16 @@ plugin を入れて IRC の unit 全件を 1 本通した直後、`~/.conductor/
 
 ### 汚す経路は 2 つあった(同じ日の続き)
 
-入口へ移した後も、実際の `~/.conductor/hooks.jsonl` に 26 行が増えた。2 つ目の経路は**テストの呼び方**で、
-`test/hooks/session.test.mjs` が `runHook` を `env` 無しで呼んでいたため、`conductorHome(process.env)` が
-本物のホームを指していた(全タスク共通の制約「テストは実際のホームの `~/.conductor/` を作らない」違反)。
+入口へ移した後も、実際の `~/.switchyard/hooks.jsonl` に 26 行が増えた。2 つ目の経路は**テストの呼び方**で、
+`test/hooks/session.test.mjs` が `runHook` を `env` 無しで呼んでいたため、`switchyardHome(process.env)` が
+本物のホームを指していた(全タスク共通の制約「テストは実際のホームの `~/.switchyard/` を作らない」違反)。
 
 直しは 3 つで、**呼び方の是正だけでなく構造で塞いだ**:
 
-1. `test/hooks/session.test.mjs` は一時の `CONDUCTOR_HOME` を渡す。
-2. `package.json` の `test` が `CONDUCTOR_HOME=$(mktemp -d)` を立てる(全テストが既定で一時のホームを見る)。
-3. `scripts/mutate.mjs` の走らせ方も、写しの中の `.conductor-home` を `CONDUCTOR_HOME` に渡す
+1. `test/hooks/session.test.mjs` は一時の `SWITCHYARD_HOME` を渡す。
+2. `package.json` の `test` が `SWITCHYARD_HOME=$(mktemp -d)` を立てる(全テストが既定で一時のホームを見る)。
+3. `scripts/mutate.mjs` の走らせ方も、写しの中の `.switchyard-home` を `SWITCHYARD_HOME` に渡す
    (変異の走行はテストを別プロセスで起こすので、env を渡さないと同じ穴が開く)。
 
 実測: 実ホームの `hooks.jsonl` を消してから `npm test`(383 / 383)と `npm run mutate:hooks`(23 本すべて赤)を
-走らせ、どちらの後も `~/.conductor/hooks.jsonl` は**作られなかった**(`ls` で不在を確認)。
+走らせ、どちらの後も `~/.switchyard/hooks.jsonl` は**作られなかった**(`ls` で不在を確認)。

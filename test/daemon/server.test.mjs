@@ -272,7 +272,7 @@ describe('daemon server', () => {
   });
 
   it('待たせた決定(queued)も、理由と順番つきで events.jsonl に記録する', async () => {
-    // 「なぜ・どれだけ待ったか」を後から数えるための記録(改善: conductor report)
+    // 「なぜ・どれだけ待ったか」を後から数えるための記録(改善: switchyard report)
     const { d, home } = await daemon({ capacity: 1, tickMs: 10 });
     const a = await client(d.sock);
     a.send({ t: 'request', job: jobRequest({ cpus: { min: 1, max: 1 } }) });

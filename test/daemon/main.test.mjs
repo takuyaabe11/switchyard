@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { acquireLock, capacityFrom, commandLooksLikeConductord, defaultReserve, lockCapsFrom } from '../../src/daemon/main.mjs';
+import { acquireLock, capacityFrom, commandLooksLikeSwitchyardd, defaultReserve, lockCapsFrom } from '../../src/daemon/main.mjs';
 import { tempHome } from '../../testkit/tmp.mjs';
 
 describe('daemon main', () => {
@@ -13,10 +13,10 @@ describe('daemon main', () => {
     assert.equal(capacityFrom({}, 1, null), 1);
   });
 
-  it('config.json の reserve と、CONDUCTOR_CAPACITY の上書き', () => {
+  it('config.json の reserve と、SWITCHYARD_CAPACITY の上書き', () => {
     assert.equal(capacityFrom({}, 15, { reserve: 5 }), 10);
-    assert.equal(capacityFrom({ CONDUCTOR_CAPACITY: '3' }, 15, { reserve: 5 }), 3);
-    assert.equal(capacityFrom({ CONDUCTOR_CAPACITY: 'x' }, 15, null), 12);
+    assert.equal(capacityFrom({ SWITCHYARD_CAPACITY: '3' }, 15, { reserve: 5 }), 3);
+    assert.equal(capacityFrom({ SWITCHYARD_CAPACITY: 'x' }, 15, null), 12);
   });
 
   it('lockCaps は 1 以上の整数だけを採る', () => {
@@ -33,19 +33,19 @@ describe('daemon main', () => {
     assert.equal(acquireLock(file, 444, () => true, () => true), true);
   });
 
-  it('command の語のどれかの basename が conductord/conductord.mjs なら conductord とみなす(R3)', () => {
-    assert.equal(commandLooksLikeConductord('node /x/bin/conductord.mjs'), true);
-    assert.equal(commandLooksLikeConductord('/usr/bin/env node /x/node_modules/.bin/conductord'), true);
-    assert.equal(commandLooksLikeConductord('node /x/other.mjs'), false);
-    assert.equal(commandLooksLikeConductord('vim notes-about-conductord.txt'), false);
+  it('command の語のどれかの basename が switchyardd/switchyardd.mjs なら switchyardd とみなす(R3)', () => {
+    assert.equal(commandLooksLikeSwitchyardd('node /x/bin/switchyardd.mjs'), true);
+    assert.equal(commandLooksLikeSwitchyardd('/usr/bin/env node /x/node_modules/.bin/switchyardd'), true);
+    assert.equal(commandLooksLikeSwitchyardd('node /x/other.mjs'), false);
+    assert.equal(commandLooksLikeSwitchyardd('vim notes-about-switchyardd.txt'), false);
   });
 
-  it('持ち主の pid が生きていても conductord でなければ、使い回された pid として取り直せる(I1)', () => {
+  it('持ち主の pid が生きていても switchyardd でなければ、使い回された pid として取り直せる(I1)', () => {
     const file = join(tempHome(), 'daemon.lock');
     assert.equal(acquireLock(file, 111, () => true, () => true), true);
-    // pid 111 は生きているが、いま conductord として走っていない(使い回された)
+    // pid 111 は生きているが、いま switchyardd として走っていない(使い回された)
     assert.equal(acquireLock(file, 222, () => true, () => false), true);
-    // 生きていて conductord でもあれば、取り直さない
+    // 生きていて switchyardd でもあれば、取り直さない
     assert.equal(acquireLock(file, 333, () => true, () => true), false);
   });
 });

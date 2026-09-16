@@ -27,9 +27,9 @@ const run = (over) => ({ at: 1_000, session: 's1', repo: '/r', profile: 'cmd:npm
 /** 呼び出し元の入れ子の印を持ち込まない環境 @param {Record<string, string>} [over] @returns {NodeJS.ProcessEnv} */
 function cleanEnv(over = {}) {
   const env = { ...process.env };
-  delete env.CONDUCTOR_IN_JOB;
-  delete env.CONDUCTOR_HELD_LOCKS;
-  delete env.CONDUCTOR_JOB_ID;
+  delete env.SWITCHYARD_IN_JOB;
+  delete env.SWITCHYARD_HELD_LOCKS;
+  delete env.SWITCHYARD_JOB_ID;
   return { ...env, ...over };
 }
 
@@ -134,7 +134,7 @@ describe('管理なしの走行の控え(設計 §4.2・§4.3 の 8)', () => {
     };
     const code = await runJob({ argv: [process.execPath, '-e', 'process.exit(3)'], flags: {}, home, cwd, env: cleanEnv({ CLAUDE_CODE_SESSION_ID: 'sessUnmg1' }), out: () => {}, connect: unavailable });
     assert.equal(code, 3);
-    await runJob({ argv: [process.execPath, '-e', 'process.exit(4)'], flags: { locks: ['g'] }, home, cwd, env: cleanEnv({ CONDUCTOR_IN_JOB: '1', CONDUCTOR_HELD_LOCKS: 'g' }), out: () => {}, connect: unavailable });
+    await runJob({ argv: [process.execPath, '-e', 'process.exit(4)'], flags: { locks: ['g'] }, home, cwd, env: cleanEnv({ SWITCHYARD_IN_JOB: '1', SWITCHYARD_HELD_LOCKS: 'g' }), out: () => {}, connect: unavailable });
     const lines = readFileSync(pathsOf(home).unmanaged, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
     assert.deepEqual(lines.map((l) => [l.session, l.code, l.profile]), [['sessUnmg', 3, `cmd:${process.execPath.split('/').pop()} -e`]]);
   });

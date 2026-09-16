@@ -35,7 +35,7 @@ describe('render', () => {
         '  jA [重] 走行 CPU 3 2分  npm test  (目的: push 前 / 鍵: port:4173)',
         '待ち:',
         '  1. jB [計測] npm run benchmark  1分待ち  理由: 走行中 1 本の終了を待つ(計測は単独で走る)',
-        '未確認(conductor ack <job> で確認済みにする):',
+        '未確認(switchyard ack <job> で確認済みにする):',
         '  s3: jC failed(終了コード 1) npm run build',
         '',
       ].join('\n'),

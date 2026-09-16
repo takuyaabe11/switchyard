@@ -4,16 +4,16 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { conductorHome, pathsOf } from '../../src/daemon/paths.mjs';
+import { switchyardHome, pathsOf } from '../../src/daemon/paths.mjs';
 import { appendRecord, loadEscapes, loadEstimates, parseState, readJson, readRecords, writeJsonAtomic } from '../../src/daemon/store.mjs';
 import { state } from '../../testkit/fixtures.mjs';
 
-const tmp = () => mkdtempSync(join(tmpdir(), 'conductor-'));
+const tmp = () => mkdtempSync(join(tmpdir(), 'switchyard-'));
 
 describe('paths', () => {
-  it('CONDUCTOR_HOME があればそれを使う', () => {
-    assert.equal(conductorHome({ CONDUCTOR_HOME: '/x/y' }), '/x/y');
-    assert.equal(pathsOf('/x/y').sock, '/x/y/conductord.sock');
+  it('SWITCHYARD_HOME があればそれを使う', () => {
+    assert.equal(switchyardHome({ SWITCHYARD_HOME: '/x/y' }), '/x/y');
+    assert.equal(pathsOf('/x/y').sock, '/x/y/switchyardd.sock');
     assert.equal(pathsOf('/x/y').hooks, '/x/y/hooks.jsonl');
   });
 });

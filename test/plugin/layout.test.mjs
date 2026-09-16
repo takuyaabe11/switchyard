@@ -24,7 +24,7 @@ describe('plugin の形(設計 §9・§9.6)', () => {
     const plugin = json('.claude-plugin/plugin.json');
     const market = json('.claude-plugin/marketplace.json');
     const version = json('package.json').version;
-    assert.deepEqual([plugin.name, plugin.version], ['conductor', version]);
+    assert.deepEqual([plugin.name, plugin.version], ['switchyard', version]);
     assert.deepEqual([market.plugins[0].name, market.plugins[0].version, market.plugins[0].source], [plugin.name, version, './']);
   });
 
@@ -35,9 +35,9 @@ describe('plugin の形(設計 §9・§9.6)', () => {
     /** @type {Record<string, string>} */
     const arg = { SessionStart: 'session-start', PreToolUse: 'pre-tool-use', Stop: 'stop' };
     for (const [event, entries] of Object.entries(hooks)) {
-      assert.equal(entries[0].hooks[0].command, `node "\${CLAUDE_PLUGIN_ROOT}/bin/conductor-hook.mjs" ${arg[event]}`);
+      assert.equal(entries[0].hooks[0].command, `node "\${CLAUDE_PLUGIN_ROOT}/bin/switchyard-hook.mjs" ${arg[event]}`);
     }
-    assert.ok(existsSync(join(ROOT, 'bin/conductor-hook.mjs')));
+    assert.ok(existsSync(join(ROOT, 'bin/switchyard-hook.mjs')));
   });
 
   it('hooks.json のコマンドを sh で実際に走らせると、判定の無い入力には何も出さずに終わる', () => {
@@ -52,20 +52,20 @@ describe('plugin の形(設計 §9・§9.6)', () => {
     for (const f of files) assert.ok(executable(`shims/${f}`), f);
   });
 
-  it('bin/conductor は実行でき、CLI へつながる', () => {
-    assert.ok(executable('bin/conductor'));
-    assert.match(execFileSync(join(ROOT, 'bin/conductor'), ['help'], { encoding: 'utf8', env: { PATH: BASE_PATH } }), /^使い方:/);
+  it('bin/switchyard は実行でき、CLI へつながる', () => {
+    assert.ok(executable('bin/switchyard'));
+    assert.match(execFileSync(join(ROOT, 'bin/switchyard'), ['help'], { encoding: 'utf8', env: { PATH: BASE_PATH } }), /^使い方:/);
   });
 
-  it('skill conductor は名前と説明を持つ', () => {
-    const text = readFileSync(join(ROOT, 'skills/conductor/SKILL.md'), 'utf8');
-    assert.match(text, /^---\nname: conductor\ndescription: .+\n---\n/);
+  it('skill switchyard は名前と説明を持つ', () => {
+    const text = readFileSync(join(ROOT, 'skills/switchyard/SKILL.md'), 'utf8');
+    assert.match(text, /^---\nname: switchyard\ndescription: .+\n---\n/);
   });
 
-  it('コマンド /conductor は説明を持ち、状態の 3 つ(統治下か・走行と待ち・直近の集計)を指す', () => {
-    const text = readFileSync(join(ROOT, 'commands/conductor.md'), 'utf8');
+  it('コマンド /switchyard は説明を持ち、状態の 3 つ(統治下か・走行と待ち・直近の集計)を指す', () => {
+    const text = readFileSync(join(ROOT, 'commands/switchyard.md'), 'utf8');
     assert.match(text, /^---\ndescription: .+\n---\n/);
     // 表示の文言ではなく、実際に走らせる口を指しているか(どれかが欠けると状態が分からない)
-    for (const needle of ['which npm', 'conductor top', 'conductor report']) assert.ok(text.includes(needle), needle);
+    for (const needle of ['which npm', 'switchyard top', 'switchyard report']) assert.ok(text.includes(needle), needle);
   });
 });

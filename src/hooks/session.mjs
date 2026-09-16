@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ask, connectDaemon, DaemonUnavailableError } from '../client/connect.mjs';
-import { conductorHome, pathsOf } from '../daemon/paths.mjs';
+import { switchyardHome, pathsOf } from '../daemon/paths.mjs';
 import { VERSION } from '../version.mjs';
 
 /** @typedef {import('../protocol/messages.mjs').Snapshot} Snapshot */
@@ -29,12 +29,12 @@ export function pathExportLine(root) {
  * @returns {Promise<string[]>}
  */
 export async function sessionStart(_input, { env = process.env, connect = connectDaemon, root = PLUGIN_ROOT, version = VERSION } = {}) {
-  if (env.CONDUCTOR_THINKER === '1') return [];
+  if (env.SWITCHYARD_THINKER === '1') return [];
   /** @type {string[]} */
   const lines = [];
   const envFile = env.CLAUDE_ENV_FILE;
   if (envFile === undefined || envFile === '') {
-    lines.push('[conductor] shim を PATH に足せない(CLAUDE_ENV_FILE が無い)ので、このセッションの重い走行は conductor に管理されない');
+    lines.push('[switchyard] shim を PATH に足せない(CLAUDE_ENV_FILE が無い)ので、このセッションの重い走行は switchyard に管理されない');
   } else {
     const line = pathExportLine(root);
     // resume / clear / compact でも呼ばれるので、同じ行を 2 度足さない
@@ -42,17 +42,17 @@ export async function sessionStart(_input, { env = process.env, connect = connec
   }
   try {
     // 届かなければ自動起動を 1 回試みる(connectDaemon の既定)
-    const conn = await connect({ home: conductorHome(env), env });
+    const conn = await connect({ home: switchyardHome(env), env });
     const m = await ask(conn, { t: 'status' }, (x) => x.t === 'status');
     const snap = /** @type {Snapshot} */ (m.snapshot);
     const measure = snap.leases.find((l) => l.class === 'measure');
-    if (measure !== undefined) lines.push(`[conductor] 計測 ${measure.id}(${measure.cmd})が走っている。重い走行は計測が終わるまで待ちになる`);
+    if (measure !== undefined) lines.push(`[switchyard] 計測 ${measure.id}(${measure.cmd})が走っている。重い走行は計測が終わるまで待ちになる`);
     if (snap.version !== version) {
       // 版を snapshot に載せ始めたのは 0.2.0 なので、名乗らないデーモンは 0.1.0 以前
-      lines.push(`[conductor] 走っているデーモンの版 ${snap.version ?? '0.1.0 以前'} と plugin の版 ${version} が違う。デーモン(~/.conductor/daemon.lock の pid)を止めると、次の要求で新しい版が起動する`);
+      lines.push(`[switchyard] 走っているデーモンの版 ${snap.version ?? '0.1.0 以前'} と plugin の版 ${version} が違う。デーモン(~/.switchyard/daemon.lock の pid)を止めると、次の要求で新しい版が起動する`);
     }
   } catch (e) {
-    lines.push(`[conductor] デーモンに届かない(${e instanceof Error ? e.message : String(e)})。このセッションの重い走行は管理なしで走る`);
+    lines.push(`[switchyard] デーモンに届かない(${e instanceof Error ? e.message : String(e)})。このセッションの重い走行は管理なしで走る`);
   }
   return lines;
 }
@@ -67,10 +67,10 @@ const KIND = { failed: '失敗', killed: '呼び出し元の信号で終了', or
  * @returns {Promise<Record<string, unknown> | null>}
  */
 export async function stop(input, { env = process.env, connect = connectDaemon } = {}) {
-  if (env.CONDUCTOR_THINKER === '1' || input.stop_hook_active === true) return null;
+  if (env.SWITCHYARD_THINKER === '1' || input.stop_hook_active === true) return null;
   const session = typeof input.session_id === 'string' ? input.session_id.slice(0, 8) : '';
   if (session === '') return null;
-  const home = conductorHome(env);
+  const home = switchyardHome(env);
   /** @type {Unacked[]} */
   let jobs;
   try {
@@ -86,7 +86,7 @@ export async function stop(input, { env = process.env, connect = connectDaemon }
   return {
     decision: 'block',
     reason:
-      `[conductor] このセッションのジョブに、まだ確認されていない終わり方がある:\n${list}\n` +
-      `記録: ${pathsOf(home).events}(conductor why <job> でも読める)。中身を確かめて直すか、直さないと決めたら conductor ack <job> で確認済みにする。`,
+      `[switchyard] このセッションのジョブに、まだ確認されていない終わり方がある:\n${list}\n` +
+      `記録: ${pathsOf(home).events}(switchyard why <job> でも読める)。中身を確かめて直すか、直さないと決めたら switchyard ack <job> で確認済みにする。`,
   };
 }

@@ -1,4 +1,4 @@
-# verifiedGroup の拒否枝の門番の検出力(conductor 1a・最終レビュー I3)
+# verifiedGroup の拒否枝の門番の検出力(switchyard 1a・最終レビュー I3)
 
 - 実行: `npm run mutate:group`(原本は触らず、一時ディレクトリの写しに 1 つずつ入れる)
 - 日時と環境: Tue Sep 15 15:11:15 JST 2026 / Darwin 25.6.0 / Node v24.16.0(再レビューの残りの修正で再実行。group.mjs 自体は今回変更していない)

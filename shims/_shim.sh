@@ -1,4 +1,4 @@
-# conductor の shim の本体(設計 §9.1)。各 shim は name を決めてから、これを読み込む。
+# switchyard の shim の本体(設計 §9.1)。各 shim は name を決めてから、これを読み込む。
 # 分からないことがあれば、本物のコマンドをそのまま exec する(shim の失敗で作業を止めない)。
 # PATH が空でも動くよう、外部コマンド(dirname など)は使わない。
 
@@ -19,12 +19,12 @@ IFS=$old_ifs
 
 real=$(PATH=$stripped command -v "$name" 2>/dev/null)
 if [ -z "$real" ]; then
-  echo "conductor shim: 本物の $name が PATH に見つからない" >&2
+  echo "switchyard shim: 本物の $name が PATH に見つからない" >&2
   exit 127
 fi
 
 # CPU を持つジョブの中なら、そのジョブの一部として走らせる(設計 §4.3 の 7。分類器を呼ぶまでもない)
-if [ "${CONDUCTOR_IN_JOB:-}" = 1 ]; then exec "$real" "$@"; fi
+if [ "${SWITCHYARD_IN_JOB:-}" = 1 ]; then exec "$real" "$@"; fi
 
 # git は index を書き換えるサブコマンドのときだけ分類器を呼ぶ(git status などを速いまま通す)
 if [ "$name" = git ]; then
@@ -39,7 +39,7 @@ node=$(PATH=$stripped command -v node 2>/dev/null)
 answer=$(PATH=$stripped "$node" "$root/src/shim/decide.mjs" "$name" "$@" 2>/dev/null) || exec "$real" "$@"
 
 case "$answer" in
-  "run "*) exec "$node" "$root/bin/conductor.mjs" run --profile "${answer#run }" -- "$real" "$@" ;;
-  "lock "*) exec "$node" "$root/bin/conductor.mjs" run --class quick --cpus 0..0 --lock "${answer#lock }" -- "$real" "$@" ;;
+  "run "*) exec "$node" "$root/bin/switchyard.mjs" run --profile "${answer#run }" -- "$real" "$@" ;;
+  "lock "*) exec "$node" "$root/bin/switchyard.mjs" run --class quick --cpus 0..0 --lock "${answer#lock }" -- "$real" "$@" ;;
   *) exec "$real" "$@" ;;
 esac

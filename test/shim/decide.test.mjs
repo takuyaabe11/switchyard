@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { decideShim, formatAnswer } from '../../src/shim/decide.mjs';
 
 const DECIDE = fileURLToPath(new URL('../../src/shim/decide.mjs', import.meta.url));
-const CLI = fileURLToPath(new URL('../../bin/conductor.mjs', import.meta.url));
+const CLI = fileURLToPath(new URL('../../bin/switchyard.mjs', import.meta.url));
 
 /** git の外の一時ディレクトリ */
 const plainDir = () => mkdtempSync(join(tmpdir(), 'cproj-'));
@@ -28,7 +28,7 @@ const mustNotRead = () => {
 
 describe('decideShim(設計 §9.1)', () => {
   it('CPU を持つジョブの中では、何でも pass', () => {
-    assert.deepEqual(decideShim({ word: 'npm', args: ['test'], cwd: plainDir(), env: { CONDUCTOR_IN_JOB: '1' } }), { kind: 'pass' });
+    assert.deepEqual(decideShim({ word: 'npm', args: ['test'], cwd: plainDir(), env: { SWITCHYARD_IN_JOB: '1' } }), { kind: 'pass' });
   });
 
   it('既定表に当たれば run とその profile 名。既定表は measure を持たない', () => {
@@ -43,18 +43,18 @@ describe('decideShim(設計 §9.1)', () => {
     assert.deepEqual(decideShim({ word: 'node', args: ['node_modules/.bin/vitest', 'run'], cwd: plainDir(), env: {}, profilesFor }), { kind: 'run', profile: 'vitest' });
   });
 
-  it('node で呼んだこの plugin の conductor の CLI は、分類せずに pass(外側のジョブに包まない)', () => {
+  it('node で呼んだこの plugin の switchyard の CLI は、分類せずに pass(外側のジョブに包まない)', () => {
     const bench = [{ name: 'bench', profile: { match: ['*npm run bench*'], class: /** @type {const} */ ('measure') } }];
     const profilesFor = () => bench;
     const dir = plainDir();
-    symlinkSync(CLI, join(dir, 'conductor.mjs'));
+    symlinkSync(CLI, join(dir, 'switchyard.mjs'));
     assert.deepEqual(decideShim({ word: 'node', args: [CLI, 'run', '--lock', 'port:4173', '--', 'npm', 'run', 'bench'], cwd: dir, env: {}, profilesFor }), { kind: 'pass' });
     // 相対パス・symlink でも実パスで見分ける
-    assert.deepEqual(decideShim({ word: 'node', args: ['conductor.mjs', 'run', '--', 'npm', 'run', 'bench'], cwd: dir, env: {}, profilesFor }), { kind: 'pass' });
+    assert.deepEqual(decideShim({ word: 'node', args: ['switchyard.mjs', 'run', '--', 'npm', 'run', 'bench'], cwd: dir, env: {}, profilesFor }), { kind: 'pass' });
     // 同じ名前の別のファイルは、いつもどおり分類する
     const other = plainDir();
-    writeFileSync(join(other, 'conductor.mjs'), '');
-    assert.deepEqual(decideShim({ word: 'node', args: ['conductor.mjs', 'run', '--', 'npm', 'run', 'bench'], cwd: other, env: {}, profilesFor }), { kind: 'run', profile: 'bench' });
+    writeFileSync(join(other, 'switchyard.mjs'), '');
+    assert.deepEqual(decideShim({ word: 'node', args: ['switchyard.mjs', 'run', '--', 'npm', 'run', 'bench'], cwd: other, env: {}, profilesFor }), { kind: 'run', profile: 'bench' });
   });
 
   it('どれにも当たらなければ pass', () => {
@@ -63,11 +63,11 @@ describe('decideShim(設計 §9.1)', () => {
 
   it('プロジェクト設定の profile は既定表より先に当たる', () => {
     const dir = plainDir();
-    writeFileSync(join(dir, 'conductor.json'), JSON.stringify({ profiles: { unit: { match: ['node --test*'], class: 'batch' } } }));
+    writeFileSync(join(dir, 'switchyard.json'), JSON.stringify({ profiles: { unit: { match: ['node --test*'], class: 'batch' } } }));
     assert.deepEqual(decideShim({ word: 'node', args: ['--test', 'a.test.mjs'], cwd: dir, env: {} }), { kind: 'run', profile: 'unit' });
   });
 
-  it('profilesFor を渡せば、repo の設定を読まずにその profile で分類する(conductor replay の --config)', () => {
+  it('profilesFor を渡せば、repo の設定を読まずにその profile で分類する(switchyard replay の --config)', () => {
     const e2e = { name: 'e2e', profile: { match: ['npm run e2e*'], class: /** @type {const} */ ('batch'), locks: ['port:4173'] } };
     /** @type {string[]} */
     const asked = [];
@@ -95,7 +95,7 @@ describe('decideShim(設計 §9.1)', () => {
   it('祖先が同じ git の鍵を持っていれば pass', () => {
     const dir = gitDir();
     const lock = `git-index:${realpathSync(join(dir, '.git'))}`;
-    assert.deepEqual(decideShim({ word: 'git', args: ['stash'], cwd: dir, env: { CONDUCTOR_HELD_LOCKS: `other,${lock}` } }), { kind: 'pass' });
+    assert.deepEqual(decideShim({ word: 'git', args: ['stash'], cwd: dir, env: { SWITCHYARD_HELD_LOCKS: `other,${lock}` } }), { kind: 'pass' });
   });
 
   it('git の外の git commit は pass', () => {
@@ -108,8 +108,8 @@ describe('decideShim(設計 §9.1)', () => {
 
   it('CLI として呼ぶと、答えを 1 行出す', () => {
     const env = { ...process.env };
-    delete env.CONDUCTOR_IN_JOB;
-    delete env.CONDUCTOR_HELD_LOCKS;
+    delete env.SWITCHYARD_IN_JOB;
+    delete env.SWITCHYARD_HELD_LOCKS;
     assert.equal(execFileSync(process.execPath, [DECIDE, 'npm', 'test'], { cwd: plainDir(), env, encoding: 'utf8' }), 'run default:batch\n');
   });
 });

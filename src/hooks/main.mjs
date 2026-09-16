@@ -1,8 +1,8 @@
 // @ts-check
 // hook の入口(設計 §9.2): 標準入力の JSON を読み、イベントごとの判定を呼び、結果を標準出力へ書く。
 // 判断の記録(§4.2 の hooks.jsonl)もここで行う — 判定そのもの(preToolUse)は書かない純粋な関数に保つ。
-// conductor replay の空回しや、テストでの試算が、実際の記録を汚さないようにするため。
-import { conductorHome, pathsOf } from '../daemon/paths.mjs';
+// switchyard replay の空回しや、テストでの試算が、実際の記録を汚さないようにするため。
+import { switchyardHome, pathsOf } from '../daemon/paths.mjs';
 import { appendRecord } from '../daemon/store.mjs';
 import { preToolUse } from './pretooluse.mjs';
 import { sessionStart, stop } from './session.mjs';
@@ -20,7 +20,7 @@ function recordPreToolUse(input, out, env) {
   const decision = h.permissionDecision === 'deny' ? 'deny' : 'background';
   const ti = /** @type {Record<string, unknown>} */ (typeof input.tool_input === 'object' && input.tool_input !== null ? input.tool_input : {});
   try {
-    appendRecord(pathsOf(conductorHome(env)).hooks, {
+    appendRecord(pathsOf(switchyardHome(env)).hooks, {
       at: Date.now(),
       kind: 'hook',
       decision,

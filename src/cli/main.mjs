@@ -7,7 +7,7 @@ import { ask, connectDaemon, DaemonUnavailableError } from '../client/connect.mj
 import { isClaudeSession, sessionId } from '../client/session.mjs';
 import { repoRoot } from '../config/context.mjs';
 import { loadProfiles, loadProfilesFile } from '../config/profiles.mjs';
-import { conductorHome, pathsOf } from '../daemon/paths.mjs';
+import { switchyardHome, pathsOf } from '../daemon/paths.mjs';
 import { readRecords } from '../daemon/store.mjs';
 import { formatReport, replay } from '../replay/replay.mjs';
 import { formatReport as formatSummary, summarize } from '../report/report.mjs';
@@ -40,7 +40,7 @@ export async function cli(args, opts = {}) {
     connect = connectDaemon,
     now = Date.now,
   } = opts;
-  const home = conductorHome(env);
+  const home = switchyardHome(env);
 
   /** @type {import('./args.mjs').Command} */
   let command;
@@ -128,7 +128,7 @@ export async function cli(args, opts = {}) {
         }
         profilesFor = () => loaded.profiles;
       } else {
-        // 記録の cwd ごとに、その repo の conductor.json と既定表(git を叩くので cwd ごとに 1 回)
+        // 記録の cwd ごとに、その repo の switchyard.json と既定表(git を叩くので cwd ごとに 1 回)
         /** @type {Map<string, NamedProfile[]>} */
         const byCwd = new Map();
         profilesFor = (c) => {
@@ -158,7 +158,7 @@ export async function cli(args, opts = {}) {
         stdout(renderProbe(await probe({ argv: command.argv, seconds: command.seconds, cwd, env })));
         return 0;
       } catch (e) {
-        stderr(`[conductor] probe に失敗: ${e instanceof Error ? e.message : String(e)}\n`);
+        stderr(`[switchyard] probe に失敗: ${e instanceof Error ? e.message : String(e)}\n`);
         return 1;
       }
     }

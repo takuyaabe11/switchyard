@@ -17,7 +17,7 @@ const bash = (command) => JSON.stringify({ session_id: 's1', cwd: '/repo', hook_
 describe('runHook(pre-tool-use)の記録(設計 §4.2・§9.2)', () => {
   it('背景へ回した判断と拒否した判断を hooks.jsonl に残し、何もしなかった分は書かない', async () => {
     const home = mkdtempSync(join(tmpdir(), 'chook-'));
-    const opts = { env: { CONDUCTOR_HOME: home }, profilesFor: () => PROFILES, write: () => {} };
+    const opts = { env: { SWITCHYARD_HOME: home }, profilesFor: () => PROFILES, write: () => {} };
     await runHook('pre-tool-use', bash('npm test'), opts);
     await runHook('pre-tool-use', bash('/usr/local/bin/npm test'), opts);
     await runHook('pre-tool-use', bash('echo hi'), opts);
@@ -31,9 +31,9 @@ describe('runHook(pre-tool-use)の記録(設計 §4.2・§9.2)', () => {
     );
   });
 
-  it('判定そのもの(preToolUse)は何も書かない — conductor replay の空回しが記録を汚さないため', () => {
+  it('判定そのもの(preToolUse)は何も書かない — switchyard replay の空回しが記録を汚さないため', () => {
     const home = mkdtempSync(join(tmpdir(), 'chook-'));
-    const out = preToolUse(JSON.parse(bash('npm test')), { env: { CONDUCTOR_HOME: home }, profilesFor: () => PROFILES });
+    const out = preToolUse(JSON.parse(bash('npm test')), { env: { SWITCHYARD_HOME: home }, profilesFor: () => PROFILES });
     assert.notEqual(out, null);
     assert.equal(existsSync(pathsOf(home).hooks), false);
   });
@@ -41,11 +41,11 @@ describe('runHook(pre-tool-use)の記録(設計 §4.2・§9.2)', () => {
   it('記録の置き場所へ書けなくても、判断はそのまま返す', async () => {
     /** @type {string[]} */
     const written = [];
-    // CONDUCTOR_HOME をファイル(ディレクトリを作れない場所)にして、記録の書き込みだけを失敗させる
+    // SWITCHYARD_HOME をファイル(ディレクトリを作れない場所)にして、記録の書き込みだけを失敗させる
     const file = join(mkdtempSync(join(tmpdir(), 'chook-')), 'not-a-dir');
     const { writeFileSync } = await import('node:fs');
     writeFileSync(file, '');
-    await runHook('pre-tool-use', bash('npm test'), { env: { CONDUCTOR_HOME: file }, profilesFor: () => PROFILES, write: (s) => written.push(s) });
+    await runHook('pre-tool-use', bash('npm test'), { env: { SWITCHYARD_HOME: file }, profilesFor: () => PROFILES, write: (s) => written.push(s) });
     assert.equal(written.length, 1);
     assert.match(written[0], /run_in_background/);
   });

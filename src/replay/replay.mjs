@@ -1,5 +1,5 @@
 // @ts-check
-// conductor replay: 過去の Claude Code のセッション記録の Bash の呼び出しを、PreToolUse(設計 §9.2)と shim の分類器(§9.1)の実物に流して数える。
+// switchyard replay: 過去の Claude Code のセッション記録の Bash の呼び出しを、PreToolUse(設計 §9.2)と shim の分類器(§9.1)の実物に流して数える。
 // 記録は読むだけで、何も書き出さない。判定のロジックは写さず、hook と分類器をそのまま呼ぶ。
 // 近似: shim の欄は、記録のコマンドを区切った単純コマンドのうち shim の語で始まるものだけを数える
 //       (パスで呼んだ node のスクリプトが中で通る node の shim と、bash -c の引用の中は数えない)。

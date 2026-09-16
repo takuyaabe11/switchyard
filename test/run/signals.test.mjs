@@ -35,7 +35,7 @@ const pidAlive = (file) => {
  */
 function start({ argv, killGraceMs, cwd }) {
   const signals = new EventEmitter();
-  const running = runJob({ argv, flags: {}, home: tempHome(), cwd, env: { ...process.env, CONDUCTOR_IN_JOB: '', CONDUCTOR_HELD_LOCKS: '' }, out: () => {}, connect: unavailable, signals, killGraceMs, verifyGroup: noGroup });
+  const running = runJob({ argv, flags: {}, home: tempHome(), cwd, env: { ...process.env, SWITCHYARD_IN_JOB: '', SWITCHYARD_HELD_LOCKS: '' }, out: () => {}, connect: unavailable, signals, killGraceMs, verifyGroup: noGroup });
   return { signals, running };
 }
 

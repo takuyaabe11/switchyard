@@ -116,7 +116,7 @@ export async function startDaemon(opts) {
       return;
     }
     // 決定(入場と、待たせた順番・理由)も記録に残す。包みが繋がっていなくても残すので、
-    // 後から「なぜ・どれだけ待ったか」「容量を超えて借りたか」を数えられる(conductor report)
+    // 後から「なぜ・どれだけ待ったか」「容量を超えて借りたか」を数えられる(switchyard report)
     appendRecord(p.events, { at: wallNow(), kind: 'decision', decision: a });
     const conn = wrappers.get(a.jobId);
     if (conn === undefined) return;
@@ -328,7 +328,7 @@ export async function startDaemon(opts) {
       ingestUnmanaged();
     } catch (e) {
       // 控えを読めなくても割り振りの tick は止めない(次の tick で試し直す)
-      process.stderr.write(`[conductord] 管理なしの走行の控えを取り込めない: ${e instanceof Error ? e.message : String(e)}\n`);
+      process.stderr.write(`[switchyardd] 管理なしの走行の控えを取り込めない: ${e instanceof Error ? e.message : String(e)}\n`);
     }
     apply({ type: 'tick', now });
   }, tickMs);

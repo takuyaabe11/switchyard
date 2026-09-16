@@ -16,7 +16,7 @@ describe('live-claude(設計 §15)', () => {
       JSON.stringify({ type: 'system', subtype: 'init' }),
       JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'Command running in background with ID: b1' }] } }),
       '壊れた行',
-      JSON.stringify({ type: 'user', message: { content: '[conductor] このセッションのジョブに、まだ確認されていない終わり方がある:' } }),
+      JSON.stringify({ type: 'user', message: { content: '[switchyard] このセッションのジョブに、まだ確認されていない終わり方がある:' } }),
       JSON.stringify({ type: 'result', result: 'LIVE_JOB=j123', total_cost_usd: 0.012 }),
     ];
     assert.deepEqual(analyzeStream(lines.join('\n')), { background: true, blockedStop: true, result: 'LIVE_JOB=j123', costUsd: 0.012 });
@@ -34,9 +34,9 @@ describe('live-claude(設計 §15)', () => {
     assert.doesNotThrow(() => stopDaemon(home));
   });
 
-  it('CONDUCTOR_LIVE_CLAUDE=1 でなければ、何もせずに終わる(費用を出さない)', () => {
+  it('SWITCHYARD_LIVE_CLAUDE=1 でなければ、何もせずに終わる(費用を出さない)', () => {
     const env = { ...process.env };
-    delete env.CONDUCTOR_LIVE_CLAUDE;
-    assert.match(execFileSync(process.execPath, [SCRIPT], { encoding: 'utf8', env }), /CONDUCTOR_LIVE_CLAUDE=1 のときだけ走る/);
+    delete env.SWITCHYARD_LIVE_CLAUDE;
+    assert.match(execFileSync(process.execPath, [SCRIPT], { encoding: 'utf8', env }), /SWITCHYARD_LIVE_CLAUDE=1 のときだけ走る/);
   });
 });

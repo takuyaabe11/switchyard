@@ -1,7 +1,7 @@
 // @ts-check
 // shim の分類器(設計 §9.1)。shim の sh が `node decide.mjs <語> <引数…>` で呼び、答えを 1 行出す。
-//   run <profile>  conductor run --profile <profile> で包む
-//   lock <鍵>      鍵だけのジョブとして conductor run で包む
+//   run <profile>  switchyard run --profile <profile> で包む
+//   lock <鍵>      鍵だけのジョブとして switchyard run で包む
 //   pass           本物をそのまま実行する
 // npm や node のたびに呼ばれるので、軽いモジュールだけを import する。
 import { execFileSync } from 'node:child_process';
@@ -14,15 +14,15 @@ import { classifiableCommand, classify, loadProfiles } from '../config/profiles.
 /** git の index を書き換えるサブコマンド(設計 §9.1) */
 export const GIT_LOCK_SUBCOMMANDS = new Set(['commit', 'merge', 'rebase', 'cherry-pick', 'stash', 'am']);
 
-/** この plugin の conductor の CLI の入口(bin/conductor は PATH の node で、これを起動する) */
-const OWN_CLI = fileURLToPath(new URL('../../bin/conductor.mjs', import.meta.url));
+/** この plugin の switchyard の CLI の入口(bin/switchyard は PATH の node で、これを起動する) */
+const OWN_CLI = fileURLToPath(new URL('../../bin/switchyard.mjs', import.meta.url));
 
 /**
- * node の最初の引数が、この plugin の conductor の CLI の入口か(相対パス・symlink でも実パスで比べる)。
+ * node の最初の引数が、この plugin の switchyard の CLI の入口か(相対パス・symlink でも実パスで比べる)。
  * @param {string | undefined} script @param {string} cwd @returns {boolean}
  */
 function isOwnCli(script, cwd) {
-  if (script === undefined || basename(script) !== 'conductor.mjs') return false;
+  if (script === undefined || basename(script) !== 'switchyard.mjs') return false;
   try {
     return realpathSync(resolve(cwd, script)) === realpathSync(OWN_CLI);
   } catch {
@@ -42,7 +42,7 @@ export function absoluteGitDir(cwd) {
 }
 
 /**
- * profilesFor は、cwd の repo の設定の代わりに使う profile の表(conductor replay の --config。省けば repo の conductor.json と既定表)。
+ * profilesFor は、cwd の repo の設定の代わりに使う profile の表(switchyard replay の --config。省けば repo の switchyard.json と既定表)。
  * @param {{
  *   word: string, args: string[], cwd: string, env: NodeJS.ProcessEnv,
  *   gitDir?: (cwd: string) => string | null,
@@ -52,9 +52,9 @@ export function absoluteGitDir(cwd) {
  */
 export function decideShim({ word, args, cwd, env, gitDir = absoluteGitDir, profilesFor = (dir) => loadProfiles(repoRoot(dir)).profiles }) {
   // CPU を持つジョブの中なら、そのジョブの一部として走らせる(設計 §4.3 の 7)
-  if (env.CONDUCTOR_IN_JOB === '1') return { kind: 'pass' };
-  // conductor の CLI 自身は包まない(bin/conductor が PATH の node、つまり node の shim を通る)。包むと、外側のジョブが CPU と計測の quiet を
-  // 取ってから内側の conductor run が鍵を 2 段目に要求し、資源を一括で取る(設計 §5.3)が崩れる。性格は内側の conductor run が決める
+  if (env.SWITCHYARD_IN_JOB === '1') return { kind: 'pass' };
+  // switchyard の CLI 自身は包まない(bin/switchyard が PATH の node、つまり node の shim を通る)。包むと、外側のジョブが CPU と計測の quiet を
+  // 取ってから内側の switchyard run が鍵を 2 段目に要求し、資源を一括で取る(設計 §5.3)が崩れる。性格は内側の switchyard run が決める
   if (word === 'node' && isOwnCli(args[0], cwd)) return { kind: 'pass' };
   if (word === 'git') {
     if (!GIT_LOCK_SUBCOMMANDS.has(args[0] ?? '')) return { kind: 'pass' };

@@ -31,30 +31,30 @@ const noAutoStart = (o) => connectDaemon({ ...o, autoStart: false });
 /** 呼び出し元の入れ子の印を持ち込まない環境 @param {Record<string, string>} [over] @returns {NodeJS.ProcessEnv} */
 function cleanEnv(over = {}) {
   const env = { ...process.env };
-  delete env.CONDUCTOR_IN_JOB;
-  delete env.CONDUCTOR_HELD_LOCKS;
-  delete env.CONDUCTOR_JOB_ID;
+  delete env.SWITCHYARD_IN_JOB;
+  delete env.SWITCHYARD_HELD_LOCKS;
+  delete env.SWITCHYARD_JOB_ID;
   return { ...env, ...over };
 }
 
 const node = process.execPath;
 
-/** 子が受け取った conductor の環境変数を JSON で file に書く argv @param {string} file */
+/** 子が受け取った switchyard の環境変数を JSON で file に書く argv @param {string} file */
 const dumpEnv = (file) => [
   node,
   '-e',
-  `require('fs').writeFileSync(${JSON.stringify(file)}, JSON.stringify({ inJob: process.env.CONDUCTOR_IN_JOB ?? null, held: process.env.CONDUCTOR_HELD_LOCKS ?? null, cpus: process.env.CONDUCTOR_CPUS ?? null }))`,
+  `require('fs').writeFileSync(${JSON.stringify(file)}, JSON.stringify({ inJob: process.env.SWITCHYARD_IN_JOB ?? null, held: process.env.SWITCHYARD_HELD_LOCKS ?? null, cpus: process.env.SWITCHYARD_CPUS ?? null }))`,
 ];
 
 describe('入れ子(設計 §4.3 の 7)', () => {
-  it('heldLocks は CONDUCTOR_HELD_LOCKS のカンマ区切りを読み、空の要素を捨てる', () => {
-    assert.deepEqual([...heldLocks({ CONDUCTOR_HELD_LOCKS: 'a,,b' })], ['a', 'b']);
+  it('heldLocks は SWITCHYARD_HELD_LOCKS のカンマ区切りを読み、空の要素を捨てる', () => {
+    assert.deepEqual([...heldLocks({ SWITCHYARD_HELD_LOCKS: 'a,,b' })], ['a', 'b']);
     assert.deepEqual([...heldLocks({})], []);
   });
 
   it('buildRequest は祖先の鍵を外し、CPU を持つジョブの中では CPU を 0..0 にする', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'cproj-'));
-    const r = buildRequest({ argv: ['x'], flags: { locks: ['a', 'c'] }, env: { CONDUCTOR_HELD_LOCKS: 'a,b', CONDUCTOR_IN_JOB: '1' }, cwd });
+    const r = buildRequest({ argv: ['x'], flags: { locks: ['a', 'c'] }, env: { SWITCHYARD_HELD_LOCKS: 'a,b', SWITCHYARD_IN_JOB: '1' }, cwd });
     assert.deepEqual([r.job.locks, r.job.cpus], [['c'], { min: 0, max: 0 }]);
   });
 
@@ -63,17 +63,17 @@ describe('入れ子(設計 §4.3 の 7)', () => {
     assert.equal(buildRequest({ argv: ['/opt/homebrew/bin/npm', 'install', 'x'], flags: {}, env: {}, cwd }).job.profile, 'cmd:npm install');
   });
 
-  it('buildRequest は、鍵だけのジョブの子(祖先の鍵があり CONDUCTOR_IN_JOB が無い)にだけ、親のジョブの id を parent として載せる(設計 §4.3 の 7)', () => {
+  it('buildRequest は、鍵だけのジョブの子(祖先の鍵があり SWITCHYARD_IN_JOB が無い)にだけ、親のジョブの id を parent として載せる(設計 §4.3 の 7)', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'cproj-'));
     const parentOf = (/** @type {NodeJS.ProcessEnv} */ env) => buildRequest({ argv: ['npm', 'test'], flags: {}, env, cwd }).job.parent;
-    assert.equal(parentOf({ CONDUCTOR_HELD_LOCKS: 'git-index:/r/.git', CONDUCTOR_JOB_ID: 'j9' }), 'j9');
+    assert.equal(parentOf({ SWITCHYARD_HELD_LOCKS: 'git-index:/r/.git', SWITCHYARD_JOB_ID: 'j9' }), 'j9');
     // CPU を持つジョブの中(入れ子の印あり)・祖先の鍵なし・親の id なしでは載せない
-    assert.equal(parentOf({ CONDUCTOR_HELD_LOCKS: 'git-index:/r/.git', CONDUCTOR_JOB_ID: 'j9', CONDUCTOR_IN_JOB: '1' }), undefined);
-    assert.equal(parentOf({ CONDUCTOR_JOB_ID: 'j9' }), undefined);
-    assert.equal(parentOf({ CONDUCTOR_HELD_LOCKS: 'git-index:/r/.git' }), undefined);
+    assert.equal(parentOf({ SWITCHYARD_HELD_LOCKS: 'git-index:/r/.git', SWITCHYARD_JOB_ID: 'j9', SWITCHYARD_IN_JOB: '1' }), undefined);
+    assert.equal(parentOf({ SWITCHYARD_JOB_ID: 'j9' }), undefined);
+    assert.equal(parentOf({ SWITCHYARD_HELD_LOCKS: 'git-index:/r/.git' }), undefined);
   });
 
-  it('CPU を持つジョブの子には CONDUCTOR_IN_JOB=1 と、持っている鍵を CONDUCTOR_HELD_LOCKS で渡す', async () => {
+  it('CPU を持つジョブの子には SWITCHYARD_IN_JOB=1 と、持っている鍵を SWITCHYARD_HELD_LOCKS で渡す', async () => {
     const { home } = await daemon();
     const cwd = mkdtempSync(join(tmpdir(), 'cproj-'));
     const file = join(cwd, 'env.json');
@@ -82,7 +82,7 @@ describe('入れ子(設計 §4.3 の 7)', () => {
     assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { inJob: '1', held: 'L', cpus: '1' });
   });
 
-  it('鍵だけのジョブの子には CONDUCTOR_IN_JOB を立てず、鍵だけを渡す', async () => {
+  it('鍵だけのジョブの子には SWITCHYARD_IN_JOB を立てず、鍵だけを渡す', async () => {
     const { home } = await daemon();
     const cwd = mkdtempSync(join(tmpdir(), 'cproj-'));
     const file = join(cwd, 'env.json');
@@ -105,7 +105,7 @@ describe('入れ子(設計 §4.3 の 7)', () => {
       flags: { locks: ['g'] },
       home: tempHome(),
       cwd: mkdtempSync(join(tmpdir(), 'cproj-')),
-      env: cleanEnv({ CONDUCTOR_IN_JOB: '1', CONDUCTOR_HELD_LOCKS: 'g' }),
+      env: cleanEnv({ SWITCHYARD_IN_JOB: '1', SWITCHYARD_HELD_LOCKS: 'g' }),
       out: (l) => lines.push(l),
       connect: counting,
     });
@@ -113,18 +113,18 @@ describe('入れ子(設計 §4.3 の 7)', () => {
     assert.ok(!lines.some((l) => l.includes('管理なし')), lines.join('\n'));
   });
 
-  it('デーモンに要求せずに走らせる子(入れ子で直接・管理なし)には、祖先の CONDUCTOR_JOB_ID を渡さない', async () => {
+  it('デーモンに要求せずに走らせる子(入れ子で直接・管理なし)には、祖先の SWITCHYARD_JOB_ID を渡さない', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'cproj-'));
     /** @param {string} file */
-    const dumpJob = (file) => [node, '-e', `require('fs').writeFileSync(${JSON.stringify(file)}, JSON.stringify(process.env.CONDUCTOR_JOB_ID ?? null))`];
+    const dumpJob = (file) => [node, '-e', `require('fs').writeFileSync(${JSON.stringify(file)}, JSON.stringify(process.env.SWITCHYARD_JOB_ID ?? null))`];
     /** @type {typeof connectDaemon} */
     const unavailable = async () => {
       throw new DaemonUnavailableError('テスト');
     };
     const nested = join(cwd, 'nested.json');
-    const direct = await runJob({ argv: dumpJob(nested), flags: { locks: ['g'] }, home: tempHome(), cwd, env: cleanEnv({ CONDUCTOR_IN_JOB: '1', CONDUCTOR_HELD_LOCKS: 'g', CONDUCTOR_JOB_ID: 'jparent' }), out: () => {}, connect: unavailable });
+    const direct = await runJob({ argv: dumpJob(nested), flags: { locks: ['g'] }, home: tempHome(), cwd, env: cleanEnv({ SWITCHYARD_IN_JOB: '1', SWITCHYARD_HELD_LOCKS: 'g', SWITCHYARD_JOB_ID: 'jparent' }), out: () => {}, connect: unavailable });
     const lone = join(cwd, 'unmanaged.json');
-    const unmanaged = await runJob({ argv: dumpJob(lone), flags: {}, home: tempHome(), cwd, env: cleanEnv({ CONDUCTOR_JOB_ID: 'jparent' }), out: () => {}, connect: unavailable });
+    const unmanaged = await runJob({ argv: dumpJob(lone), flags: {}, home: tempHome(), cwd, env: cleanEnv({ SWITCHYARD_JOB_ID: 'jparent' }), out: () => {}, connect: unavailable });
     assert.deepEqual([direct, unmanaged], [0, 0]);
     assert.deepEqual([JSON.parse(readFileSync(nested, 'utf8')), JSON.parse(readFileSync(lone, 'utf8'))], [null, null]);
   });
@@ -148,7 +148,7 @@ describe('入れ子(設計 §4.3 の 7)', () => {
       flags: { cpus: { min: 0, max: 0 }, locks: ['g'] },
       home,
       cwd,
-      env: cleanEnv({ CONDUCTOR_HELD_LOCKS: 'g' }),
+      env: cleanEnv({ SWITCHYARD_HELD_LOCKS: 'g' }),
       out: () => {},
       connect: noAutoStart,
     });

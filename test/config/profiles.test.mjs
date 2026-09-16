@@ -102,25 +102,25 @@ describe('validateProfile', () => {
 });
 
 describe('loadProfiles', () => {
-  it('conductor.json が無ければ既定表だけ', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'conductor-'));
+  it('switchyard.json が無ければ既定表だけ', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'switchyard-'));
     assert.deepEqual(loadProfiles(dir), { profiles: DEFAULT_PROFILES, error: null });
   });
 
   it('プロジェクトの profile を既定表の前に並べる', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'conductor-'));
-    writeFileSync(join(dir, 'conductor.json'), JSON.stringify({ profiles: { unit: { match: ['npm test'], class: 'batch' } } }));
+    const dir = mkdtempSync(join(tmpdir(), 'switchyard-'));
+    writeFileSync(join(dir, 'switchyard.json'), JSON.stringify({ profiles: { unit: { match: ['npm test'], class: 'batch' } } }));
     const r = loadProfiles(dir);
     assert.equal(r.error, null);
     assert.deepEqual(r.profiles.map((p) => p.name), ['unit', ...DEFAULT_PROFILES.map((p) => p.name)]);
   });
 
   it('壊れた設定は既定表に戻し、理由を返す', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'conductor-'));
-    writeFileSync(join(dir, 'conductor.json'), '{ not json');
+    const dir = mkdtempSync(join(tmpdir(), 'switchyard-'));
+    writeFileSync(join(dir, 'switchyard.json'), '{ not json');
     const r = loadProfiles(dir);
     assert.deepEqual(r.profiles, DEFAULT_PROFILES);
-    assert.match(r.error ?? '', /conductor.json を読めない/);
+    assert.match(r.error ?? '', /switchyard.json を読めない/);
   });
 });
 
