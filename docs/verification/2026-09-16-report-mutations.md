@@ -88,3 +88,19 @@ plugin を入れて IRC の unit 全件を 1 本通した直後、`~/.conductor/
 ★ 教訓: **記録は「決めたところ」ではなく「実際に効かせるところ」に置く。** 判定を純粋に保てば、空回し(replay)と
 テストが本物の記録を汚さない。これは設計 §4.4 の replay(「記録は読むだけで、何も書き出さない」)と同じ規律で、
 今回はその規律を hook 側で破っていた。
+
+### 汚す経路は 2 つあった(同じ日の続き)
+
+入口へ移した後も、実際の `~/.conductor/hooks.jsonl` に 26 行が増えた。2 つ目の経路は**テストの呼び方**で、
+`test/hooks/session.test.mjs` が `runHook` を `env` 無しで呼んでいたため、`conductorHome(process.env)` が
+本物のホームを指していた(全タスク共通の制約「テストは実際のホームの `~/.conductor/` を作らない」違反)。
+
+直しは 3 つで、**呼び方の是正だけでなく構造で塞いだ**:
+
+1. `test/hooks/session.test.mjs` は一時の `CONDUCTOR_HOME` を渡す。
+2. `package.json` の `test` が `CONDUCTOR_HOME=$(mktemp -d)` を立てる(全テストが既定で一時のホームを見る)。
+3. `scripts/mutate.mjs` の走らせ方も、写しの中の `.conductor-home` を `CONDUCTOR_HOME` に渡す
+   (変異の走行はテストを別プロセスで起こすので、env を渡さないと同じ穴が開く)。
+
+実測: 実ホームの `hooks.jsonl` を消してから `npm test`(383 / 383)と `npm run mutate:hooks`(23 本すべて赤)を
+走らせ、どちらの後も `~/.conductor/hooks.jsonl` は**作られなかった**(`ls` で不在を確認)。
