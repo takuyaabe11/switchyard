@@ -1,0 +1,42 @@
+name: check
+
+# 公開した後は、手元の macOS だけで通っていることが根拠にならない。
+# README が名乗る土台(macOS / Linux・Node 20 以上)で、型と全件テストを回す。
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: ['20', '22', '24']
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm ci
+      - run: npm run typecheck
+      # 走行の面倒(プロセスグループ・信号・ps の読み方)は土台ごとに違うので、全件を回す
+      - run: npm test
+
+  mutate:
+    # 門番の検出力。遅いので main への push だけ
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: node scripts/mutate.mjs core
+      - run: node scripts/mutate.mjs escape
+      - run: node scripts/mutate.mjs hooks

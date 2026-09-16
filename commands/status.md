@@ -1,5 +1,5 @@
 ---
-description: switchyard の状態を 1 目で出す(このセッションが統治下か・走行と待ち・直近 1 日の集計)
+description: Show switchyard's state at a glance - whether this session is governed, what runs and waits, and the last day's totals. switchyard の状態を 1 目で出す(このセッションが統治下か・走行と待ち・直近 1 日の集計)
 ---
 
 このセッションが switchyard の統治下にあるかと、いまの走行・待ち・直近の集計を調べて、短くまとめる。

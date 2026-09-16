@@ -1,6 +1,6 @@
 // @ts-check
 // SessionStart と Stop の hooks(設計 §9.2)。
-import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ask, connectDaemon, DaemonUnavailableError } from '../client/connect.mjs';
@@ -22,6 +22,46 @@ export function pathExportLine(root) {
   return `export PATH=${shQuote(join(root, 'shims'))}:"$PATH"`;
 }
 
+/** 書いた行から shims のパスを取り出す(`export PATH='…/shims':"$PATH"`) */
+const SHIMS_LINE = /^export PATH='(.*\/shims)':"\$PATH"$/;
+
+/**
+ * CLAUDE_ENV_FILE に書かれた shims の行のうち、指す先がもう無いもの。
+ * plugin を置き換えたり改名したりすると古い行が残るが、PATH の壊れたエントリは黙って読み飛ばされるので、
+ * 「shim が無い」のと見分けが付かない。実測(2026-09-16): 改名の前から続いていたセッションが、
+ * 消えたディレクトリを PATH の先頭に置いたまま、重い走行を 1 時間まるごと管理の外で流した。
+ * いま動いている plugin 自身の shims は除く(それが無いのは別の話で、ここで言っても直せない)。
+ * @param {string} text env ファイルの中身 @param {string} [own] いまの plugin の shims のパス @returns {string[]} 生きていない shims のパス
+ */
+export function deadShimPaths(text, own = join(PLUGIN_ROOT, 'shims')) {
+  /** @type {string[]} */
+  const dead = [];
+  for (const line of text.split('\n')) {
+    const m = SHIMS_LINE.exec(line.trim());
+    if (m !== null && m[1] !== own && !existsSync(m[1]) && !dead.includes(m[1])) dead.push(m[1]);
+  }
+  return dead;
+}
+
+/**
+ * 指定した shims のパスを足す行だけを取り除く。他の行(他の plugin が足したものを含む)は 1 文字も変えない。
+ * @param {string} text @param {string[]} paths @returns {string}
+ */
+export function pruneShimLines(text, paths) {
+  const kept = text.split('\n').filter((l) => {
+    const m = SHIMS_LINE.exec(l.trim());
+    return m === null || !paths.includes(m[1]);
+  });
+  return kept.join('\n');
+}
+
+/** 一時ファイルに書いて rename で置き換える(書きかけの env ファイルを残さない) @param {string} file @param {string} text */
+function writeFileAtomic(file, text) {
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, text);
+  renameSync(tmp, file);
+}
+
 /**
  * SessionStart: shims を PATH の先頭へ足し、知らせることがあれば行で返す(Claude の文脈に入る)。
  * @param {Record<string, unknown>} _input
@@ -37,8 +77,17 @@ export async function sessionStart(_input, { env = process.env, connect = connec
     lines.push('[switchyard] shim を PATH に足せない(CLAUDE_ENV_FILE が無い)ので、このセッションの重い走行は switchyard に管理されない');
   } else {
     const line = pathExportLine(root);
+    let text = existsSync(envFile) ? readFileSync(envFile, 'utf8') : '';
+    // plugin を更新すると置き場のパスに版が入って変わるので、古い行が残り続ける。
+    // 指す先が無い行は PATH の中で黙って読み飛ばされ、「shim が無い」のと区別が付かないので取り除く
+    const dead = deadShimPaths(text, join(root, 'shims'));
+    if (dead.length > 0) {
+      text = pruneShimLines(text, dead);
+      writeFileAtomic(envFile, text);
+      lines.push(`[switchyard] PATH から、もう無い shims を指す行を外した: ${dead.join(' / ')}(plugin の更新か置き場の移動で残ったもの)`);
+    }
     // resume / clear / compact でも呼ばれるので、同じ行を 2 度足さない
-    if (!(existsSync(envFile) ? readFileSync(envFile, 'utf8') : '').split('\n').includes(line)) appendFileSync(envFile, `${line}\n`);
+    if (!text.split('\n').includes(line)) appendFileSync(envFile, `${line}\n`);
   }
   try {
     // 届かなければ自動起動を 1 回試みる(connectDaemon の既定)
@@ -49,7 +98,7 @@ export async function sessionStart(_input, { env = process.env, connect = connec
     if (measure !== undefined) lines.push(`[switchyard] 計測 ${measure.id}(${measure.cmd})が走っている。重い走行は計測が終わるまで待ちになる`);
     if (snap.version !== version) {
       // 版を snapshot に載せ始めたのは 0.2.0 なので、名乗らないデーモンは 0.1.0 以前
-      lines.push(`[switchyard] 走っているデーモンの版 ${snap.version ?? '0.1.0 以前'} と plugin の版 ${version} が違う。デーモン(~/.switchyard/daemon.lock の pid)を止めると、次の要求で新しい版が起動する`);
+      lines.push(`[switchyard] 走っているデーモンの版 ${snap.version ?? '0.1.0 以前'} と plugin の版 ${version} が違う。switchyard restart で入れ替わる`);
     }
   } catch (e) {
     lines.push(`[switchyard] デーモンに届かない(${e instanceof Error ? e.message : String(e)})。このセッションの重い走行は管理なしで走る`);
