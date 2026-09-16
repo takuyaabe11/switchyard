@@ -7,8 +7,9 @@ import { ask, connectDaemon, DaemonUnavailableError } from '../client/connect.mj
 import { isClaudeSession, sessionId } from '../client/session.mjs';
 import { repoRoot } from '../config/context.mjs';
 import { loadProfiles, loadProfilesFile } from '../config/profiles.mjs';
+import { stopDaemon } from '../daemon/control.mjs';
 import { switchyardHome, pathsOf } from '../daemon/paths.mjs';
-import { readRecords } from '../daemon/store.mjs';
+import { readJournal } from '../daemon/store.mjs';
 import { formatReport, replay } from '../replay/replay.mjs';
 import { formatReport as formatSummary, summarize } from '../report/report.mjs';
 import { probe } from '../run/probe.mjs';
@@ -82,6 +83,34 @@ export async function cli(args, opts = {}) {
       stdout(snap === null ? 'デーモンは動いていない(走行も待ちも無い)\n' : renderTop(snap, now()));
       return 0;
     }
+    case 'stop': {
+      // 走っているものがあれば、何を落とすのかを先に出す(包みは死なず、次のデーモンへ resume で戻る)
+      const snap = await status();
+      if (snap !== null && (snap.leases.length > 0 || snap.waiting.length > 0)) {
+        stdout(`走行 ${snap.leases.length} 本・待ち ${snap.waiting.length} 本を抱えたまま止める(包みは走り続け、次のデーモンにリースを取り戻す)\n`);
+      }
+      const r = await stopDaemon({ home });
+      stdout(`${r.reason}\n`);
+      return r.stopped || r.pid === null ? 0 : 1;
+    }
+    case 'restart': {
+      const r = await stopDaemon({ home });
+      if (!r.stopped && r.pid !== null) {
+        stderr(`${r.reason}\n`);
+        return 1;
+      }
+      stdout(`${r.stopped ? r.reason : 'デーモンは動いていなかった'}。新しいデーモンを起動する\n`);
+      try {
+        const conn = await connect({ home, env });
+        const m = await ask(conn, { t: 'status' }, (x) => x.t === 'status');
+        const snap = /** @type {Snapshot} */ (m.snapshot);
+        stdout(`起動した(版 ${snap.version ?? '不明'})\n`);
+        return 0;
+      } catch (e) {
+        stderr(`新しいデーモンを起動できない: ${e instanceof Error ? e.message : String(e)}\n`);
+        return 1;
+      }
+    }
     case 'why': {
       const snap = await status();
       if (snap === null) {
@@ -149,7 +178,8 @@ export async function cli(args, opts = {}) {
       // 記録(events.jsonl と hooks.jsonl)を読むだけ。デーモンが動いていなくても出る
       const p = pathsOf(home);
       const since = command.sinceDays === null ? null : now() - command.sinceDays * 86_400_000;
-      const s = summarize({ events: readRecords(p.events).records, hooks: readRecords(p.hooks).records, repoPrefix: command.repoPrefix, since });
+      // 回した 1 世代前も数に入れる(switchyard report が回転の前後で飛ばない)
+      const s = summarize({ events: readJournal(p.events).records, hooks: readJournal(p.hooks).records, repoPrefix: command.repoPrefix, since });
       stdout(formatSummary(s, { repoPrefix: command.repoPrefix, sinceDays: command.sinceDays }));
       return 0;
     }

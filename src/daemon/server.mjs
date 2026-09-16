@@ -10,7 +10,7 @@ import { numOrNull, parseEscape, parseJobRequest } from '../protocol/messages.mj
 import { createDecoder, encode } from '../protocol/ndjson.mjs';
 import { VERSION } from '../version.mjs';
 import { pathsOf, SOCKET_PATH_LIMIT } from './paths.mjs';
-import { appendRecord, loadEscapes, loadEstimates, parseState, readJson, readRecords, takeUnmanaged, writeJsonAtomic } from './store.mjs';
+import { appendRecord, createStateWriter, loadEscapes, loadEstimates, parseState, readJournal, readJson, rotateRecords, takeUnmanaged } from './store.mjs';
 
 /** @typedef {import('../core/types.mjs').State} State */
 /** @typedef {import('../core/types.mjs').Event} Event */
@@ -26,6 +26,8 @@ import { appendRecord, loadEscapes, loadEstimates, parseState, readJson, readRec
  *   tickMs?: number,
  *   heartbeatTimeoutMs?: number,
  *   recoveryGraceMs?: number,
+ *   idleExitMs?: number | null,
+ *   onIdleExit?: () => void,
  *   isAlive?: (pgid: number) => boolean,
  *   monoNow?: () => number,
  *   wallNow?: () => number
@@ -71,6 +73,8 @@ export async function startDaemon(opts) {
     tickMs = 5_000,
     heartbeatTimeoutMs = 30_000,
     recoveryGraceMs = 60_000,
+    idleExitMs = 120_000,
+    onIdleExit = null,
     isAlive = isGroupAlive,
     monoNow = defaultMono,
     wallNow = Date.now,
@@ -81,7 +85,14 @@ export async function startDaemon(opts) {
   mkdirSync(home, { recursive: true });
   await removeStaleSocket(p.sock);
 
-  const journal = readRecords(p.events);
+  // 回した 1 世代前も含めて読んでから、上限を超えていれば回す(見込みの帳簿を切らさない)
+  const journal = readJournal(p.events);
+  // PreToolUse の判断の記録はデーモンが読まないので、回すだけ
+  const rotateJournals = () => {
+    rotateRecords(p.events);
+    rotateRecords(p.hooks);
+  };
+  rotateJournals();
   const estimates = loadEstimates(journal.records);
   const escapes = loadEscapes(journal.records);
   /** @param {string} repo @param {string} profile @returns {string[]} */
@@ -91,7 +102,9 @@ export async function startDaemon(opts) {
   let state = loaded === null ? initialState({ capacity, lockCaps }) : rebaseForRecovery({ ...loaded, capacity, lockCaps }, monoNow());
   /** @type {number | null} 包みの再接続を待つ期限 */
   let recoveryDeadline = state.waiting.some((w) => w.recovering) || state.leases.some((l) => l.recovering) ? monoNow() + recoveryGraceMs : null;
-  writeJsonAtomic(p.state, state);
+  // 状態は変わったときだけ書く。tick は何も起きなくても来るので、書き分けないと待ちも走行も無い間ずっと書き続ける
+  const writeState = createStateWriter(p.state);
+  writeState(state);
 
   /** @type {Map<string, Socket>} jobId → 包みの接続 */
   const wrappers = new Map();
@@ -118,6 +131,8 @@ export async function startDaemon(opts) {
     // 決定(入場と、待たせた順番・理由)も記録に残す。包みが繋がっていなくても残すので、
     // 後から「なぜ・どれだけ待ったか」「容量を超えて借りたか」を数えられる(switchyard report)
     appendRecord(p.events, { at: wallNow(), kind: 'decision', decision: a });
+    // 包みが繋がっていなくても、入場を出したなら「仕事をした」(アイドル終了の対象から外す)
+    if (a.type === 'grant') everGranted = true;
     const conn = wrappers.get(a.jobId);
     if (conn === undefined) return;
     if (a.type === 'grant') {
@@ -125,6 +140,12 @@ export async function startDaemon(opts) {
       // 待っている包みは心拍を送らないので、更新しないと grant から started までの間に途絶の判定へ落ちる
       lastHeard.set(a.jobId, monoNow());
       send(conn, { t: 'grant', jobId: a.jobId, cpus: a.cpus });
+    } else if (a.type === 'hold') {
+      // 止める / 降格する側も声を聞いた扱いにする(止まっている間も包みは心拍を送り続けるが、往復を待たない)
+      lastHeard.set(a.jobId, monoNow());
+      send(conn, { t: 'hold', jobId: a.jobId, mode: a.mode });
+    } else if (a.type === 'unhold') {
+      send(conn, { t: 'unhold', jobId: a.jobId });
     } else send(conn, { t: 'queued', jobId: a.jobId, position: a.position, reason: a.reason, etaWall: a.etaAt === null ? null : wallNow() + (a.etaAt - monoNow()) });
   };
 
@@ -133,7 +154,7 @@ export async function startDaemon(opts) {
     if (e.type !== 'tick') appendRecord(p.events, { at: wallNow(), kind: 'event', event: e });
     const r = decide(state, e);
     state = r.state;
-    writeJsonAtomic(p.state, state);
+    writeState(state);
     for (const a of r.actions) dispatch(a);
   };
 
@@ -187,6 +208,15 @@ export async function startDaemon(opts) {
       return;
     }
     if (l.phase === 'orphan') return;
+    // 止めたジョブの包みを見失った(設計 §6.7)。包みが SIGCONT を送れないまま消えると、
+    // 子は永久に止まったままで、生きているので孤児のリースも返らない。デーモンが代わりに動かし直す
+    if (l.held === 'pause' && l.pgid !== null) {
+      try {
+        process.kill(-l.pgid, 'SIGCONT');
+      } catch {
+        // 既に居ない
+      }
+    }
     apply({ type: 'heartbeatLost', now: monoNow(), jobId: id, alive: l.pgid !== null && isAlive(l.pgid) });
   };
 
@@ -301,8 +331,27 @@ export async function startDaemon(opts) {
     });
   });
 
+  // 一度も仕事をしていないデーモンは、しばらく誰も来なければ終わる。
+  // テストは `SWITCHYARD_HOME` を一時ディレクトリにするので、包みが自動起動したデーモンが誰にも見られないまま
+  // 居座り続けていた(実測: 仕事を 1 件もしていないデーモンが 3 本・合計 144MB)。
+  // grant を 1 度でも出したデーモンは落とさない — 走行の見込みの帳簿と ack 待ちを抱えているため。
+  const startedAt = monoNow();
+  let everGranted = false;
+  /** 誰も待っておらず、走っておらず、繋がってもいないか */
+  const quiet = () => state.leases.length === 0 && state.waiting.length === 0 && Object.keys(state.unacked).length === 0 && conns.size === 0;
+
+  /** 記録を回すかを見るまでの tick の数(既定の tick で 1 時間ごと) */
+  const rotateEvery = Math.max(1, Math.round(3_600_000 / tickMs));
+  let ticks = 0;
   const timer = setInterval(() => {
     const now = monoNow();
+    if (++ticks % rotateEvery === 0) rotateJournals();
+    // 終わり方を持たない呼び出し元(startDaemon を直に使うテストなど)では、黙って tick を止めない
+    if (onIdleExit !== null && !everGranted && idleExitMs !== null && now - startedAt >= idleExitMs && quiet()) {
+      clearInterval(timer);
+      onIdleExit?.();
+      return;
+    }
     for (const l of [...state.leases]) {
       if (l.phase === 'orphan' || l.recovering) continue;
       const heard = lastHeard.get(l.job.id);

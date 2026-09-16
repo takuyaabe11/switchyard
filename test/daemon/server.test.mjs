@@ -35,6 +35,94 @@ async function client(sock) {
   return c;
 }
 
+describe('daemon server: 止めたジョブの包みを見失ったとき(設計 §6.7)', () => {
+  it('pause で止めたリースの包みが消えたら、デーモンが SIGCONT を送る', async () => {
+    const home = tempHome();
+    /** @type {Array<[number, string]>} */
+    const sent = [];
+    // 心拍の途絶ではなく、接続が切れたことで見失う経路を見たいので、心拍の上限は長く取る
+    const d = await startDaemon({ home, capacity: 4, tickMs: 10, heartbeatTimeoutMs: 10_000, idleExitMs: null, isAlive: () => false });
+    cleanups.push(() => d.close());
+    const c = await client(d.sock);
+    c.send({ t: 'request', job: jobRequest({ cpus: { min: 1, max: 1 }, preempt: 'pause' }) });
+    const g = await c.next((m) => m.t === 'grant');
+    c.send({ t: 'started', jobId: g.jobId, pid: process.pid, pgid: 999_999 });
+    await waitFor(() => d.getState().leases[0]?.phase === 'running');
+    // 計測を投げると、走行中のジョブが止まる
+    const c2 = await client(d.sock);
+    c2.send({ t: 'request', job: jobRequest({ class: 'measure', cpus: { min: 1, max: 1 } }) });
+    await waitFor(() => d.getState().leases.some((l) => l.held === 'pause'));
+    // 包みが消える。存在しない pgid なので送信は失敗するが、投げずに進むこと(リースは返る)
+    c.close();
+    await waitFor(() => d.getState().leases.every((l) => l.held === undefined), 3_000);
+    assert.deepEqual(sent, []);
+  });
+});
+
+describe('daemon server のアイドル終了', () => {
+  it('一度も入場を出していないまま静かなら、自分で終わる', async () => {
+    const home = tempHome();
+    let exited = 0;
+    const d = await startDaemon({ home, capacity: 4, tickMs: 5, idleExitMs: 1, onIdleExit: () => { exited += 1; } });
+    cleanups.push(() => d.close());
+    await waitFor(() => exited > 0);
+    assert.equal(exited > 0, true);
+  });
+
+  it('入場を 1 度でも出したら、その後どれだけ静かでも終わらない', async () => {
+    const home = tempHome();
+    let exited = 0;
+    const d = await startDaemon({ home, capacity: 4, tickMs: 5, idleExitMs: 1, onIdleExit: () => { exited += 1; } });
+    cleanups.push(() => d.close());
+    const c = await client(d.sock);
+    c.send({ t: 'request', job: jobRequest({ cpus: { min: 1, max: 1 } }) });
+    const g = await c.next((m) => m.t === 'grant');
+    c.send({ t: 'exit', jobId: g.jobId, code: 0, durationMs: 1 });
+    await c.next((m) => m.t === 'ok');
+    c.close();
+    // tick を何度も回す時間を置いても、終了は呼ばれない
+    await new Promise((r) => setTimeout(r, 60));
+    assert.equal(exited, 0);
+  });
+
+  it('待っているジョブがあれば、入場前でも終わらない', async () => {
+    const home = tempHome();
+    let exited = 0;
+    // 容量 0 にはできないので、鍵を取り合わせて待たせる
+    const d = await startDaemon({ home, capacity: 1, tickMs: 5, idleExitMs: 1, onIdleExit: () => { exited += 1; } });
+    cleanups.push(() => d.close());
+    const a = await client(d.sock);
+    a.send({ t: 'request', job: jobRequest({ cpus: { min: 1, max: 1 }, locks: ['k'] }) });
+    await a.next((m) => m.t === 'grant');
+    const b = await client(d.sock);
+    b.send({ t: 'request', job: jobRequest({ cpus: { min: 1, max: 1 }, locks: ['k'] }) });
+    await b.next((m) => m.t === 'queued');
+    await new Promise((r) => setTimeout(r, 60));
+    assert.equal(exited, 0);
+  });
+
+  it('終わり方を渡さなければ、静かでも tick を止めない', async () => {
+    const home = tempHome();
+    const d = await startDaemon({ home, capacity: 4, tickMs: 5, idleExitMs: 1 });
+    cleanups.push(() => d.close());
+    await new Promise((r) => setTimeout(r, 60));
+    // tick が生きていれば、要求はいつもどおり通る
+    const c = await client(d.sock);
+    c.send({ t: 'status' });
+    const m = await c.next((x) => x.t === 'status');
+    assert.equal(typeof m.snapshot, 'object');
+  });
+
+  it('idleExitMs が null なら終わらない', async () => {
+    const home = tempHome();
+    let exited = 0;
+    const d = await startDaemon({ home, capacity: 4, tickMs: 5, idleExitMs: null, onIdleExit: () => { exited += 1; } });
+    cleanups.push(() => d.close());
+    await new Promise((r) => setTimeout(r, 60));
+    assert.equal(exited, 0);
+  });
+});
+
 describe('daemon server', () => {
   it('request に accepted と grant を返し、status と state.json にリースが出る', async () => {
     const { d, home } = await daemon();

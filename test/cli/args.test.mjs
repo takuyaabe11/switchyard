@@ -1,7 +1,21 @@
 // @ts-check
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseArgs, parseCpus, UsageError } from '../../src/cli/args.mjs';
+import { parseArgs, parseCpus, UsageError, USAGE } from '../../src/cli/args.mjs';
+
+describe('stop / restart', () => {
+  it('引数を取らない', () => {
+    assert.deepEqual(parseArgs(['stop']), { cmd: 'stop' });
+    assert.deepEqual(parseArgs(['restart']), { cmd: 'restart' });
+    assert.throws(() => parseArgs(['stop', 'x']), /stop は引数を取らない/);
+    assert.throws(() => parseArgs(['restart', 'x']), /restart は引数を取らない/);
+  });
+
+  it('使い方に出る', () => {
+    assert.match(USAGE, /switchyard stop/);
+    assert.match(USAGE, /switchyard restart/);
+  });
+});
 
 describe('parseArgs', () => {
   it('run のオプションとコマンドを分ける', () => {
