@@ -1,7 +1,7 @@
 // @ts-check
 // PreToolUse(Bash)の判定(設計 §9.2)。hook の標準入力の JSON を受け、出力の JSON を返す(何もしないなら null)。
-//   - 背景への書き換え: PATH の shim か conductor run の包みが CPU を持つ走行(batch / measure)を起こす部分があれば、run_in_background だけを true にする。
-//     コマンドの文字列は変えないので権限の判定に影響しない。だから判定は広めに取る(bash -c の中・( … )・$( … )・conductor run の `--` の後ろも見る)
+//   - 背景への書き換え: PATH の shim か switchyard run の包みが CPU を持つ走行(batch / measure)を起こす部分があれば、run_in_background だけを true にする。
+//     コマンドの文字列は変えないので権限の判定に影響しない。だから判定は広めに取る(bash -c の中・( … )・$( … )・switchyard run の `--` の後ろも見る)
 //   - 拒否: shim の語の実行ファイルをパスで直に呼ぶ部分(/usr/local/bin/npm test・/usr/bin/git commit)だけ。本当に shim を迂回する形はこれしか無い。
 //     shim の語でないものをパスで呼ぶ形(scripts/probe-run.sh・./node_modules/.bin/vitest)と shim の無い語は、重ければ背景に回すだけ(改善 2)
 //   - 分類に渡すのは classifiableCommand の文字列(node -e のコードの中身では分類しない)
@@ -90,18 +90,18 @@ function shellScript(rest) {
 }
 
 /**
- * conductor run の部分なら、`run` より後ろの引数。`conductor` / `conductor.mjs` をどこから呼んでも、`node …/conductor.mjs run` でも同じ。
+ * switchyard run の部分なら、`run` より後ろの引数。`switchyard` / `switchyard.mjs` をどこから呼んでも、`node …/switchyard.mjs run` でも同じ。
  * @param {string} head @param {string[]} rest @returns {string[] | null}
  */
-function conductorRunArgs(head, rest) {
+function switchyardRunArgs(head, rest) {
   const base = basename(head);
-  if ((base === 'conductor' || base === 'conductor.mjs') && rest[0] === 'run') return rest.slice(1);
-  if (base === 'node' && basename(rest[0] ?? '') === 'conductor.mjs' && rest[1] === 'run') return rest.slice(2);
+  if ((base === 'switchyard' || base === 'switchyard.mjs') && rest[0] === 'run') return rest.slice(1);
+  if (base === 'node' && basename(rest[0] ?? '') === 'switchyard.mjs' && rest[1] === 'run') return rest.slice(2);
   return null;
 }
 
 /**
- * conductor run の包みが要求する性格と、`--` の後ろの語。buildRequest と同じ順(--class → --profile → `--` の後ろの分類 → batch)で決める。
+ * switchyard run の包みが要求する性格と、`--` の後ろの語。buildRequest と同じ順(--class → --profile → `--` の後ろの分類 → batch)で決める。
  * 引数が読めなければ `--` の後ろだけを見る(背景への判定は広めでよい)。
  * @param {string[]} args @param {NamedProfile[]} profiles @returns {{ jobClass: JobClass, argv: string[] }}
  */
@@ -125,7 +125,7 @@ function wrapperOf(args, profiles) {
  * @returns {Record<string, unknown> | null}
  */
 export function preToolUse(input, { env = process.env, profilesFor = (cwd) => loadProfiles(repoRoot(cwd)).profiles } = {}) {
-  if (env.CONDUCTOR_THINKER === '1') return null;
+  if (env.SWITCHYARD_THINKER === '1') return null;
   if (input.tool_name !== 'Bash') return null;
   const ti = /** @type {Record<string, unknown>} */ (typeof input.tool_input === 'object' && input.tool_input !== null ? input.tool_input : {});
   const command = typeof ti.command === 'string' ? ti.command : '';
@@ -136,7 +136,7 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
 
   /**
    * 単純コマンド 1 つを判定する。
-   * @param {string[]} words @param {boolean} wrapped conductor run で包んだ中(拒否の判定にかけない)
+   * @param {string[]} words @param {boolean} wrapped switchyard run で包んだ中(拒否の判定にかけない)
    */
   const visit = (words, wrapped) => {
     const { head, rest } = headOf(words);
@@ -151,9 +151,9 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
         return;
       }
     }
-    // conductor run で包んだ部分: 書いた人が包んだので拒否しない(包んだコマンドには普段どおり権限の確認が出る)。
+    // switchyard run で包んだ部分: 書いた人が包んだので拒否しない(包んだコマンドには普段どおり権限の確認が出る)。
     // 背景への判定は、包みが要求する性格と、中で PATH の shim が包むもので行う
-    const run = conductorRunArgs(head, rest);
+    const run = switchyardRunArgs(head, rest);
     if (run !== null) {
       const w = wrapperOf(run, profiles);
       if (w.jobClass !== 'quick') found.heavy = true;
@@ -184,7 +184,7 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
     const ownText = classifiableCommand([head, ...rest]);
     const hit = classify(ownText, profiles) ?? (pathHead ? classify(classifiableCommand([base, ...rest]), profiles) : null);
     const launches = pathHead || profiles.some((np) => np.profile.match.some((g) => leadWord(g) === head && globMatch(g, ownText)));
-    // conductor run で包んだ中では、子に入れ子の印が立ち node の shim も包まないので、重さは包みの性格だけで決まる(ここでは数えない)
+    // switchyard run で包んだ中では、子に入れ子の印が立ち node の shim も包まないので、重さは包みの性格だけで決まる(ここでは数えない)
     if (!wrapped && hit !== null && launches && hit.profile.class !== 'quick') found.heavy = true;
     // パスで呼ぶスクリプトの引数の中の shim の語・シェルから後ろ(scripts/probe-run.sh gates npm run bench など)は、中で PATH の shim が包みうる。
     // 背景への判定だけに使う(拒否にはかけない)
@@ -202,8 +202,8 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
         hookEventName: 'PreToolUse',
         permissionDecision: 'deny',
         permissionDecisionReason:
-          `[conductor] shim の語(${SHIM_WORDS.join(' / ')})の実行ファイルをパスで直に呼ぶと、shim を迂回して順番待ちを通らない: ${unshimmed.join(' / ')}。` +
-          'パスを付けずに名前で呼ぶ(例: npm test)か、`conductor run -- <その部分>` で包んでから実行する(包んだコマンドには普段どおり権限の確認が出る)。',
+          `[switchyard] shim の語(${SHIM_WORDS.join(' / ')})の実行ファイルをパスで直に呼ぶと、shim を迂回して順番待ちを通らない: ${unshimmed.join(' / ')}。` +
+          'パスを付けずに名前で呼ぶ(例: npm test)か、`switchyard run -- <その部分>` で包んでから実行する(包んだコマンドには普段どおり権限の確認が出る)。',
       },
     };
   }

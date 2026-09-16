@@ -1,5 +1,5 @@
 // @ts-check
-// コマンドの分類。プロジェクト設定 conductor.json と組み込みの既定表(設計 §4.5 / §9.2)。
+// コマンドの分類。プロジェクト設定 switchyard.json と組み込みの既定表(設計 §4.5 / §9.2)。
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 
@@ -186,16 +186,16 @@ export function validateProfile(name, raw) {
 }
 
 /**
- * repo 直下の conductor.json を読み、プロジェクトの profile を既定表の前に並べる。
+ * repo 直下の switchyard.json を読み、プロジェクトの profile を既定表の前に並べる。
  * 読めない・形が違うときは既定表だけを返し、理由を error に入れる(黙って無視しない)。
  * @param {string} repoRoot @returns {{ profiles: NamedProfile[], error: string | null }}
  */
 export function loadProfiles(repoRoot) {
-  return loadProfilesFile(join(repoRoot, 'conductor.json'));
+  return loadProfilesFile(join(repoRoot, 'switchyard.json'));
 }
 
 /**
- * 設定ファイル 1 つを読む(conductor replay の --config は repo の外のファイルも渡せる)。無ければ既定表だけ。
+ * 設定ファイル 1 つを読む(switchyard replay の --config は repo の外のファイルも渡せる)。無ければ既定表だけ。
  * @param {string} file @returns {{ profiles: NamedProfile[], error: string | null }}
  */
 export function loadProfilesFile(file) {
@@ -206,7 +206,7 @@ export function loadProfilesFile(file) {
     const own = Object.entries(table).map(([name, p]) => ({ name, profile: validateProfile(name, p) }));
     return { profiles: [...own, ...DEFAULT_PROFILES], error: null };
   } catch (e) {
-    return { profiles: DEFAULT_PROFILES, error: `conductor.json を読めない: ${e instanceof Error ? e.message : String(e)}` };
+    return { profiles: DEFAULT_PROFILES, error: `switchyard.json を読めない: ${e instanceof Error ? e.message : String(e)}` };
   }
 }
 

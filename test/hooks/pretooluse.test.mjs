@@ -78,7 +78,7 @@ describe('preToolUse(設計 §9.2)', () => {
     assert.equal(out.hookSpecificOutput.permissionDecision, 'deny');
     assert.match(out.hookSpecificOutput.permissionDecisionReason, /\/usr\/local\/bin\/npm test/);
     assert.match(out.hookSpecificOutput.permissionDecisionReason, /パスを付けずに名前で呼ぶ/);
-    assert.match(out.hookSpecificOutput.permissionDecisionReason, /conductor run -- <その部分>/);
+    assert.match(out.hookSpecificOutput.permissionDecisionReason, /switchyard run -- <その部分>/);
   });
 
   it('パスで呼ぶ git commit は拒否し、git commit は通す', () => {
@@ -104,15 +104,15 @@ describe('preToolUse(設計 §9.2)', () => {
     assert.equal(outcome(preToolUse(bash('npm test && /usr/local/bin/npm run build'), opts)), 'deny');
   });
 
-  it('conductor run で包んだ部分は拒否しない。背景への判定は包みが要求する性格で行う', () => {
-    assert.equal(preToolUse(bash('conductor run --class quick -- ./node_modules/.bin/vitest run'), opts), null);
-    assert.equal(preToolUse(bash('conductor run --class quick -- /usr/local/bin/npm test'), opts), null);
-    const out = /** @type {any} */ (preToolUse(bash('conductor run -- ./node_modules/.bin/vitest run'), opts));
-    assert.deepEqual(out.hookSpecificOutput, { hookEventName: 'PreToolUse', updatedInput: { command: 'conductor run -- ./node_modules/.bin/vitest run', run_in_background: true } });
+  it('switchyard run で包んだ部分は拒否しない。背景への判定は包みが要求する性格で行う', () => {
+    assert.equal(preToolUse(bash('switchyard run --class quick -- ./node_modules/.bin/vitest run'), opts), null);
+    assert.equal(preToolUse(bash('switchyard run --class quick -- /usr/local/bin/npm test'), opts), null);
+    const out = /** @type {any} */ (preToolUse(bash('switchyard run -- ./node_modules/.bin/vitest run'), opts));
+    assert.deepEqual(out.hookSpecificOutput, { hookEventName: 'PreToolUse', updatedInput: { command: 'switchyard run -- ./node_modules/.bin/vitest run', run_in_background: true } });
   });
 
-  it('CONDUCTOR_THINKER=1 と Bash 以外では何もしない', () => {
-    assert.equal(preToolUse(bash('/usr/local/bin/npm test'), { ...opts, env: { CONDUCTOR_THINKER: '1' } }), null);
+  it('SWITCHYARD_THINKER=1 と Bash 以外では何もしない', () => {
+    assert.equal(preToolUse(bash('/usr/local/bin/npm test'), { ...opts, env: { SWITCHYARD_THINKER: '1' } }), null);
     assert.equal(preToolUse({ ...bash('npm test'), tool_name: 'Read' }, opts), null);
   });
 

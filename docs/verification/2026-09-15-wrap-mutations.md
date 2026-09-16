@@ -1,4 +1,4 @@
-# 包みの入れ子・信号・管理なしの走行の門番の検出力(conductor 1b)
+# 包みの入れ子・信号・管理なしの走行の門番の検出力(switchyard 1b)
 
 - 実行日時: 2026-09-16 07:24 JST(改善 3 の実装後、Task 1 で検証)
 - `uname -sr`: Darwin 25.6.0
@@ -20,7 +20,7 @@
 ## `npm run mutate:wrap` の出力(全文)
 
 ```
-> conductor@0.2.0 mutate:wrap
+> switchyard@0.2.0 mutate:wrap
 > node scripts/mutate.mjs wrap
 
 == W1 祖先が持つ鍵を外さない | src/run/run.mjs | 赤 | tests 21 / fail 4 / cancelled 0 / pass 17
@@ -31,7 +31,7 @@
    赤: 祖先が持つ鍵は待たない(git commit の中の git stash が、親の鍵で止まらない)
 == W2 CPU を持つジョブの子に入れ子の印を立てない | src/run/run.mjs | 赤 | tests 21 / fail 1 / cancelled 0 / pass 20
    壊した行: (行を消した)
-   赤: CPU を持つジョブの子には CONDUCTOR_IN_JOB=1 と、持っている鍵を CONDUCTOR_HELD_LOCKS で渡す
+   赤: CPU を持つジョブの子には SWITCHYARD_IN_JOB=1 と、持っている鍵を SWITCHYARD_HELD_LOCKS で渡す
 == W3 入れ子で何も要らなくてもデーモンに要求する | src/run/run.mjs | 赤 | tests 21 / fail 2 / cancelled 0 / pass 19
    壊した行: if (false) {
    赤: デーモンに届かず管理なしで走ったら、終了時に控えを 1 行足す。入れ子でそのまま走ったときは足さない
@@ -64,7 +64,7 @@
    赤: takeUnmanaged は rename と unlink の間で落ちて残った別名(.taking)も拾い、2 度は取り込まない
 == W11 鍵だけのジョブの子の要求に parent を載せない | src/run/run.mjs | 赤 | tests 21 / fail 1 / cancelled 0 / pass 20
    壊した行: const parent = null;
-   赤: buildRequest は、鍵だけのジョブの子(祖先の鍵があり CONDUCTOR_IN_JOB が無い)にだけ、親のジョブの id を parent として載せる(設計 §4.3 の 7)
+   赤: buildRequest は、鍵だけのジョブの子(祖先の鍵があり SWITCHYARD_IN_JOB が無い)にだけ、親のジョブの id を parent として載せる(設計 §4.3 の 7)
 全部の変異が赤になった
 ```
 
@@ -76,7 +76,7 @@
 
 ## 改善 3 で足した変異
 
-- **W11**: 鍵だけのジョブの子の要求に parent を載せない形。赤は「buildRequest は、鍵だけのジョブの子(祖先の鍵があり CONDUCTOR_IN_JOB が無い)にだけ、親のジョブの id を parent として載せる(設計 §4.3 の 7)」のテストだけ。
+- **W11**: 鍵だけのジョブの子の要求に parent を載せない形。赤は「buildRequest は、鍵だけのジョブの子(祖先の鍵があり SWITCHYARD_IN_JOB が無い)にだけ、親のジョブの id を parent として載せる(設計 §4.3 の 7)」のテストだけ。
 
 ## W8 が `cancelled` で赤になる理由
 

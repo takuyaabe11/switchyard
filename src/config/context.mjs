@@ -12,7 +12,7 @@ export function repoRoot(cwd) {
   }
 }
 
-/** 祖先のジョブが持つ鍵(CONDUCTOR_HELD_LOCKS のカンマ区切り。設計 §4.3 の 7) @param {NodeJS.ProcessEnv} env @returns {Set<string>} */
+/** 祖先のジョブが持つ鍵(SWITCHYARD_HELD_LOCKS のカンマ区切り。設計 §4.3 の 7) @param {NodeJS.ProcessEnv} env @returns {Set<string>} */
 export function heldLocks(env) {
-  return new Set((env.CONDUCTOR_HELD_LOCKS ?? '').split(',').filter((k) => k !== ''));
+  return new Set((env.SWITCHYARD_HELD_LOCKS ?? '').split(',').filter((k) => k !== ''));
 }

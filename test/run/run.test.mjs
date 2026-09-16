@@ -36,7 +36,7 @@ const noAutoStart = (o) => connectDaemon({ ...o, autoStart: false });
 /** @param {Record<string, unknown>} profiles */
 function project(profiles) {
   const dir = mkdtempSync(join(tmpdir(), 'cproj-'));
-  writeFileSync(join(dir, 'conductor.json'), JSON.stringify({ profiles }));
+  writeFileSync(join(dir, 'switchyard.json'), JSON.stringify({ profiles }));
   return dir;
 }
 
@@ -60,7 +60,7 @@ describe('buildRequest', () => {
     const zero = { min: 0, max: 0 };
     assert.throws(() => buildRequest({ argv: ['x'], flags: { cpus: zero, profile: 'nolock' }, env: {}, cwd }), (e) => e instanceof UsageError && /鍵が 1 本以上要る/.test(e.message));
     assert.deepEqual(buildRequest({ argv: ['x'], flags: { cpus: zero, profile: 'locked' }, env: {}, cwd }).job.locks, ['p']);
-    assert.deepEqual(buildRequest({ argv: ['x'], flags: { cpus: zero, profile: 'locked' }, env: { CONDUCTOR_HELD_LOCKS: 'p' }, cwd }).job.locks, []);
+    assert.deepEqual(buildRequest({ argv: ['x'], flags: { cpus: zero, profile: 'locked' }, env: { SWITCHYARD_HELD_LOCKS: 'p' }, cwd }).job.locks, []);
   });
 
   it('無い profile を指定したら投げる', () => {
@@ -75,7 +75,7 @@ describe('runJob', () => {
     /** @type {string[]} */
     const lines = [];
     const code = await runJob({
-      argv: [node, '-e', 'process.exit(Number(process.env.N) * 10 + Number(process.env.CONDUCTOR_CPUS))'],
+      argv: [node, '-e', 'process.exit(Number(process.env.N) * 10 + Number(process.env.SWITCHYARD_CPUS))'],
       flags: { profile: 'x' },
       home,
       cwd,
@@ -184,7 +184,7 @@ describe('runJob', () => {
       watchMs: 50,
     });
     assert.equal(code, 0);
-    assert.ok(lines.includes('[conductor] プロセスグループから抜けた子: perl ×1(信号と使用率の照合が届かない)'), lines.join('\n'));
+    assert.ok(lines.includes('[switchyard] プロセスグループから抜けた子: perl ×1(信号と使用率の照合が届かない)'), lines.join('\n'));
     await waitFor(() => readFileSync(pathsOf(home).events, 'utf8').includes('"kind":"escape"'));
   });
 
@@ -206,7 +206,7 @@ describe('runJob', () => {
     pgid = /** @type {number} */ (d.getState().leases[0].pgid);
     try {
       assert.equal(await running, 0);
-      assert.ok(lines.some((l) => /^\[conductor\] 終了後も生きている子: sleep\(pid \d+・グループ内\)$/.test(l)), lines.join('\n'));
+      assert.ok(lines.some((l) => /^\[switchyard\] 終了後も生きている子: sleep\(pid \d+・グループ内\)$/.test(l)), lines.join('\n'));
     } finally {
       killGroupLeftovers(pgid);
     }
@@ -346,7 +346,7 @@ describe('runJob', () => {
     /** @type {string[]} */
     const lines = [];
     const code = await runJob({
-      argv: [node, '-e', 'process.exit(Number(process.env.CONDUCTOR_CPUS))'],
+      argv: [node, '-e', 'process.exit(Number(process.env.SWITCHYARD_CPUS))'],
       flags: { cpus: { min: 2, max: 6 } },
       home: tempHome(),
       cwd: mkdtempSync(join(tmpdir(), 'cproj-')),

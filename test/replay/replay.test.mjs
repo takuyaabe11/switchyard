@@ -120,16 +120,16 @@ describe('judgeCall(PreToolUse と shim の分類器の実物で判定する)', 
   });
 
   it('走らせている側の環境(考える層の印・入れ子の印)で判定を変えない', () => {
-    const saved = { thinker: process.env.CONDUCTOR_THINKER, inJob: process.env.CONDUCTOR_IN_JOB };
-    process.env.CONDUCTOR_THINKER = '1';
-    process.env.CONDUCTOR_IN_JOB = '1';
+    const saved = { thinker: process.env.SWITCHYARD_THINKER, inJob: process.env.SWITCHYARD_IN_JOB };
+    process.env.SWITCHYARD_THINKER = '1';
+    process.env.SWITCHYARD_IN_JOB = '1';
     try {
       assert.deepEqual(judgeCall(call('npm test'), { profilesFor: defaults }), { hook: 'background', shims: [{ word: 'npm', answer: 'run default:batch' }] });
     } finally {
-      if (saved.thinker === undefined) delete process.env.CONDUCTOR_THINKER;
-      else process.env.CONDUCTOR_THINKER = saved.thinker;
-      if (saved.inJob === undefined) delete process.env.CONDUCTOR_IN_JOB;
-      else process.env.CONDUCTOR_IN_JOB = saved.inJob;
+      if (saved.thinker === undefined) delete process.env.SWITCHYARD_THINKER;
+      else process.env.SWITCHYARD_THINKER = saved.thinker;
+      if (saved.inJob === undefined) delete process.env.SWITCHYARD_IN_JOB;
+      else process.env.SWITCHYARD_IN_JOB = saved.inJob;
     }
   });
 });

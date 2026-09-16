@@ -25,7 +25,7 @@ async function capture(args, o = {}) {
   let out = '';
   let err = '';
   const code = await cli(args, {
-    env: o.env ?? { CONDUCTOR_HOME: mkdtempSync(join(tmpdir(), 'cd-')) },
+    env: o.env ?? { SWITCHYARD_HOME: mkdtempSync(join(tmpdir(), 'cd-')) },
     cwd: tmpdir(),
     stdout: (s) => (out += s),
     stderr: (s) => (err += s),
@@ -62,7 +62,7 @@ describe('parseArgs replay', () => {
   });
 
   it('使い方に replay が載る', () => {
-    assert.match(USAGE, /conductor replay \[--cwd 前方一致\] \[--since 日数d\] \[--config conductor\.json\] \[--examples 件数\] \[--dir 記録の根\]/);
+    assert.match(USAGE, /switchyard replay \[--cwd 前方一致\] \[--since 日数d\] \[--config switchyard\.json\] \[--examples 件数\] \[--dir 記録の根\]/);
   });
 });
 
@@ -86,14 +86,14 @@ describe('cli replay(設計 §9.2 の判定を、過去のセッション記録�
   it('--dir を省くと HOME の .claude/projects を読む', async () => {
     const home = mkdtempSync(join(tmpdir(), 'chome-'));
     records([line('a', 'npm test', '2026-09-10T00:00:00.000Z')], join(home, '.claude', 'projects'));
-    const r = await capture(['replay'], { env: { HOME: home, CONDUCTOR_HOME: mkdtempSync(join(tmpdir(), 'cd-')) } });
+    const r = await capture(['replay'], { env: { HOME: home, SWITCHYARD_HOME: mkdtempSync(join(tmpdir(), 'cd-')) } });
     assert.equal(r.code, 0, r.err);
     assert.match(r.out, /Bash の呼び出し 1 件/);
   });
 
   it('--config の profile で試算する', async () => {
     const root = records([line('a', 'npm run e2e', '2026-09-10T00:00:00.000Z')]);
-    const config = join(mkdtempSync(join(tmpdir(), 'ccfg-')), 'conductor.json');
+    const config = join(mkdtempSync(join(tmpdir(), 'ccfg-')), 'switchyard.json');
     writeFileSync(config, JSON.stringify({ profiles: { e2e: { match: ['npm run e2e*'], class: 'batch', locks: ['port:4173'] } } }));
     const plain = await capture(['replay', '--dir', root]);
     assert.match(plain.out, /背景へ書き換え: 0 件/);
@@ -108,7 +108,7 @@ describe('cli replay(設計 §9.2 の判定を、過去のセッション記録�
     assert.equal(missing.code, 1);
     assert.match(missing.err, /記録の置き場所が無い/);
     const root = records([line('a', 'npm test', '2026-09-10T00:00:00.000Z')]);
-    const broken = join(mkdtempSync(join(tmpdir(), 'ccfg-')), 'conductor.json');
+    const broken = join(mkdtempSync(join(tmpdir(), 'ccfg-')), 'switchyard.json');
     writeFileSync(broken, 'not json');
     const bad = await capture(['replay', '--dir', root, '--config', broken]);
     assert.equal(bad.code, 2);

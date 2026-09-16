@@ -63,11 +63,11 @@ describe('connectDaemon', () => {
         "import { renameSync, writeFileSync } from 'node:fs';",
         `const out = ${JSON.stringify(out)};`,
         "const pick = (k) => process.env[k] ?? null;",
-        "writeFileSync(out + '.tmp', JSON.stringify({ inJob: pick('CONDUCTOR_IN_JOB'), held: pick('CONDUCTOR_HELD_LOCKS'), job: pick('CONDUCTOR_JOB_ID'), home: pick('CONDUCTOR_HOME') }));",
+        "writeFileSync(out + '.tmp', JSON.stringify({ inJob: pick('SWITCHYARD_IN_JOB'), held: pick('SWITCHYARD_HELD_LOCKS'), job: pick('SWITCHYARD_JOB_ID'), home: pick('SWITCHYARD_HOME') }));",
         "renameSync(out + '.tmp', out);",
       ].join('\n'),
     );
-    const env = { ...process.env, CONDUCTOR_IN_JOB: '1', CONDUCTOR_HELD_LOCKS: 'a,b', CONDUCTOR_JOB_ID: 'jparent' };
+    const env = { ...process.env, SWITCHYARD_IN_JOB: '1', SWITCHYARD_HELD_LOCKS: 'a,b', SWITCHYARD_JOB_ID: 'jparent' };
     await assert.rejects(connectDaemon({ home, env, timeoutMs: 300, daemonEntry: entry }), DaemonUnavailableError);
     await waitFor(() => existsSync(out), 3_000);
     assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')), { inJob: null, held: null, job: null, home });

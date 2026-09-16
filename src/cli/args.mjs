@@ -22,13 +22,13 @@
 
 export const USAGE = [
   '使い方:',
-  '  conductor run [--profile 名前] [--why "目的"] [--class quick|batch|measure] [--cpus 最小..最大] [--lock 名前]... [--preempt pause|throttle|never] -- <コマンド...>',
-  '  conductor top',
-  '  conductor why <job>',
-  '  conductor ack <job> [--session <id>]',
-  '  conductor probe <秒> -- <コマンド...>',
-  '  conductor replay [--cwd 前方一致] [--since 日数d] [--config conductor.json] [--examples 件数] [--dir 記録の根]',
-  '  conductor report [--repo 前方一致] [--since 日数d]',
+  '  switchyard run [--profile 名前] [--why "目的"] [--class quick|batch|measure] [--cpus 最小..最大] [--lock 名前]... [--preempt pause|throttle|never] -- <コマンド...>',
+  '  switchyard top',
+  '  switchyard why <job>',
+  '  switchyard ack <job> [--session <id>]',
+  '  switchyard probe <秒> -- <コマンド...>',
+  '  switchyard replay [--cwd 前方一致] [--since 日数d] [--config switchyard.json] [--examples 件数] [--dir 記録の根]',
+  '  switchyard report [--repo 前方一致] [--since 日数d]',
 ].join('\n');
 
 export class UsageError extends Error {}

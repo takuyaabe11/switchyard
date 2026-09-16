@@ -53,7 +53,7 @@ export function renderTop(snap, nowWall) {
   }
   const sessions = Object.entries(snap.unacked).filter(([, list]) => list.length > 0);
   if (sessions.length > 0) {
-    lines.push('未確認(conductor ack <job> で確認済みにする):');
+    lines.push('未確認(switchyard ack <job> で確認済みにする):');
     for (const [session, list] of sessions) for (const u of list) lines.push(`  ${session}: ${u.jobId} ${unackedText(u)}`);
   }
   if (snap.badRecords > 0) lines.push(`記録の読めない行: ${snap.badRecords}`);
@@ -92,13 +92,13 @@ function whyText(snap, jobId, nowWall) {
   }
   for (const [session, list] of Object.entries(snap.unacked)) {
     const u = list.find((x) => x.jobId === jobId);
-    if (u !== undefined) return { text: `${jobId} は終わっている: ${unackedText(u)}(セッション ${session})。conductor ack ${jobId} で確認済みにする。\n`, found: true };
+    if (u !== undefined) return { text: `${jobId} は終わっている: ${unackedText(u)}(セッション ${session})。switchyard ack ${jobId} で確認済みにする。\n`, found: true };
   }
   return { text: `${jobId} は見つからない(正常に終わったか、確認済みか、存在しない)。\n`, found: false };
 }
 
 /**
- * conductor probe の結果の表示。
+ * switchyard probe の結果の表示。
  * @param {EscapeReport & { command: string, group: number }} r @returns {string}
  */
 export function renderProbe(r) {

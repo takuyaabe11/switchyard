@@ -2,7 +2,7 @@
 // 三者の判定の表(最後の全体レビューの Recommendation 1)。
 // 同じコマンド列について、次の 3 つを 1 行に並べて固定する。
 //   1. shim の分類器(src/shim/decide.mjs)が、bash が起こす shim の呼び出しに何と答えるか
-//   2. conductor run で包んだ部分を、包みがどの性格で要求するか(buildRequest)
+//   2. switchyard run で包んだ部分を、包みがどの性格で要求するか(buildRequest)
 //   3. PreToolUse が背景に回すか・拒否するか・何もしないか
 // 行ごとに「shim か包みが CPU を持つ重い走行を起こすのに、PreToolUse が前景のまま通す」形が無いことも、答えそのものから確かめる。
 import { describe, it } from 'node:test';
@@ -18,15 +18,15 @@ import { preToolUse } from '../../src/hooks/pretooluse.mjs';
 import { buildRequest } from '../../src/run/run.mjs';
 import { decideShim, formatAnswer } from '../../src/shim/decide.mjs';
 
-/** この repo の conductor の CLI の入口(bin/conductor は PATH の node でこれを起動する) */
-const CLI = realpathSync(fileURLToPath(new URL('../../bin/conductor.mjs', import.meta.url)));
+/** この repo の switchyard の CLI の入口(bin/switchyard は PATH の node でこれを起動する) */
+const CLI = realpathSync(fileURLToPath(new URL('../../bin/switchyard.mjs', import.meta.url)));
 
 /** git init 済みで、プロジェクトの profile を持つ作業場所 */
 function project() {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'cagree-')));
   execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
   writeFileSync(
-    join(dir, 'conductor.json'),
+    join(dir, 'switchyard.json'),
     JSON.stringify({
       profiles: {
         vitest: { match: ['*vitest run*'], class: 'batch' },
@@ -52,7 +52,7 @@ const HEREDOC_COMMIT = `git commit -m "$(cat <<'EOF'\n${MESSAGE}\nEOF\n)"`;
 /**
  * shims: bash が(shims を PATH の先頭に置き、ジョブの外で)このコマンドを走らせたときに起きる shim の呼び出しと、分類器の答え。
  *   パスや PATH で呼んだ node のスクリプト(`#!/usr/bin/env node`)は、env が PATH の node を引くので node の shim を通る。
- * run: conductor run の部分の `run` より後ろの引数と、包みが要求する性格。
+ * run: switchyard run の部分の `run` より後ろの引数と、包みが要求する性格。
  * hook: PreToolUse の答え。
  * @typedef {{ command: string, shims: Array<[string[], string]>, run?: [string[], string], hook: 'background' | 'deny' | null }} Row
  */
@@ -89,27 +89,27 @@ const ROWS = [
   // quick と管理外は前景のまま
   { command: 'npx eslint src', shims: [[['npx', 'eslint', 'src'], 'run lint']], hook: null },
   { command: 'npm install', shims: [[['npm', 'install'], 'pass']], hook: null },
-  // conductor run での出し直し: 拒否しない。包みが CPU を持つ性格なら背景に回す(I1)。conductor の CLI 自身は node の shim に包まれない(I2)
+  // switchyard run での出し直し: 拒否しない。包みが CPU を持つ性格なら背景に回す(I1)。switchyard の CLI 自身は node の shim に包まれない(I2)
   {
-    command: 'conductor run -- npx vitest run',
+    command: 'switchyard run -- npx vitest run',
     shims: [[['node', CLI, 'run', '--', 'npx', 'vitest', 'run'], 'pass']],
     run: [['--', 'npx', 'vitest', 'run'], 'batch'],
     hook: 'background',
   },
   {
-    command: 'conductor run --lock port:4173 -- node scripts/e2e.mjs',
+    command: 'switchyard run --lock port:4173 -- node scripts/e2e.mjs',
     shims: [[['node', CLI, 'run', '--lock', 'port:4173', '--', 'node', 'scripts/e2e.mjs'], 'pass']],
     run: [['--lock', 'port:4173', '--', 'node', 'scripts/e2e.mjs'], 'batch'],
     hook: 'background',
   },
   {
-    command: 'conductor run -- ./node_modules/.bin/vitest run',
+    command: 'switchyard run -- ./node_modules/.bin/vitest run',
     shims: [[['node', CLI, 'run', '--', './node_modules/.bin/vitest', 'run'], 'pass']],
     run: [['--', './node_modules/.bin/vitest', 'run'], 'batch'],
     hook: 'background',
   },
   {
-    command: 'conductor run --class quick -- ./node_modules/.bin/eslint src',
+    command: 'switchyard run --class quick -- ./node_modules/.bin/eslint src',
     shims: [[['node', CLI, 'run', '--class', 'quick', '--', './node_modules/.bin/eslint', 'src'], 'pass']],
     run: [['--class', 'quick', '--', './node_modules/.bin/eslint', 'src'], 'quick'],
     hook: null,
@@ -142,7 +142,7 @@ const ROWS = [
   { command: 'npm run bench', shims: [[['npm', 'run', 'bench'], 'run bench']], hook: 'background' },
   { command: 'node -e \'console.log("vitest run")\'', shims: [[['node', '-e', 'console.log("vitest run")'], 'pass']], hook: null },
   {
-    command: 'conductor run -- node -e \'console.log("measure-suite")\'',
+    command: 'switchyard run -- node -e \'console.log("measure-suite")\'',
     shims: [[['node', CLI, 'run', '--', 'node', '-e', 'console.log("measure-suite")'], 'pass']],
     run: [['--', 'node', '-e', 'console.log("measure-suite")'], 'batch'],
     hook: 'background',
@@ -160,7 +160,7 @@ function outcome(out) {
   return 'background';
 }
 
-describe('三者の判定の表(shim の分類器・conductor run の包み・PreToolUse)', () => {
+describe('三者の判定の表(shim の分類器・switchyard run の包み・PreToolUse)', () => {
   const dir = project();
   const lock = `lock git-index:${realpathSync(join(dir, '.git'))}`;
   const { profiles } = loadProfiles(dir);
@@ -169,7 +169,7 @@ describe('三者の判定の表(shim の分類器・conductor run の包み・Pr
 
   for (const row of ROWS) {
     // テスト名は置き場所に依らないようにする(変異の走行は一時ディレクトリの写しで走る)
-    it(JSON.stringify(row.command.split(CLI).join('<bin/conductor.mjs>')), () => {
+    it(JSON.stringify(row.command.split(CLI).join('<bin/switchyard.mjs>')), () => {
       const answers = row.shims.map(([argv]) => formatAnswer(decideShim({ word: argv[0], args: argv.slice(1), cwd: dir, env: {} })));
       assert.deepEqual(answers, row.shims.map(([, a]) => (a === LOCK ? lock : a)), '分類器の答え');
 

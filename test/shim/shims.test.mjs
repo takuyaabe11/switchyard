@@ -31,7 +31,7 @@ afterEach(async () => {
 /** 偽の npm と git を置いたディレクトリ。git は rev-parse だけ本物へ回す */
 function fakeBin() {
   const dir = mkdtempSync(join(tmpdir(), 'cfake-'));
-  const vars = 'job=${CONDUCTOR_JOB_ID:-none} in=${CONDUCTOR_IN_JOB:-none} held=${CONDUCTOR_HELD_LOCKS:-none}';
+  const vars = 'job=${SWITCHYARD_JOB_ID:-none} in=${SWITCHYARD_IN_JOB:-none} held=${SWITCHYARD_HELD_LOCKS:-none}';
   writeFileSync(join(dir, 'npm'), `#!/bin/sh\necho "fake-npm $* ${vars}"\n`);
   writeFileSync(join(dir, 'git'), `#!/bin/sh\ncase "$1" in rev-parse) exec ${REAL_GIT} "$@" ;; esac\necho "fake-git $* ${vars}"\n`);
   chmodSync(join(dir, 'npm'), 0o755);
@@ -57,7 +57,7 @@ function sh(command, { cwd, home, path, env = {} }) {
     execFile(
       '/bin/sh',
       ['-c', command],
-      { cwd, timeout: 15_000, killSignal: 'SIGKILL', env: { HOME: process.env.HOME ?? '', CONDUCTOR_HOME: home, PATH: path ?? `${SHIMS}:${fake}:${BASE_PATH}`, ...env } },
+      { cwd, timeout: 15_000, killSignal: 'SIGKILL', env: { HOME: process.env.HOME ?? '', SWITCHYARD_HOME: home, PATH: path ?? `${SHIMS}:${fake}:${BASE_PATH}`, ...env } },
       (err, stdout, stderr) => resolve({ code: err === null ? 0 : typeof err.code === 'number' ? err.code : -1, stdout, stderr }),
     );
   });
@@ -89,7 +89,7 @@ describe('shims(設計 §9.1)', () => {
     for (const word of SHIM_WORDS) assert.ok((statSync(join(SHIMS, word)).mode & 0o111) !== 0, word);
   });
 
-  it('管理対象(npm test)は conductor run に包まれ、子にジョブの印が渡る', async () => {
+  it('管理対象(npm test)は switchyard run に包まれ、子にジョブの印が渡る', async () => {
     const { home } = await daemon();
     const r = await sh('npm test', { cwd: plainDir(), home });
     assert.equal(r.code, 0, r.stderr);
@@ -104,9 +104,9 @@ describe('shims(設計 §9.1)', () => {
     assert.deepEqual(history(home), []);
   });
 
-  it('CONDUCTOR_IN_JOB=1 なら、ジョブを作らずに本物へ直行する', async () => {
+  it('SWITCHYARD_IN_JOB=1 なら、ジョブを作らずに本物へ直行する', async () => {
     const { home } = await daemon();
-    const r = await sh('npm test', { cwd: plainDir(), home, env: { CONDUCTOR_IN_JOB: '1' } });
+    const r = await sh('npm test', { cwd: plainDir(), home, env: { SWITCHYARD_IN_JOB: '1' } });
     assert.equal(r.stdout.trim(), 'fake-npm test job=none in=1 held=none');
     assert.deepEqual(history(home), []);
   });
@@ -149,7 +149,7 @@ describe('shims(設計 §9.1)', () => {
     const cwd = plainDir();
     execFileSync(REAL_GIT, ['init', '-q'], { cwd });
     const lock = `git-index:${realpathSync(join(cwd, '.git'))}`;
-    const r = await sh('git stash', { cwd, home, env: { CONDUCTOR_HELD_LOCKS: lock } });
+    const r = await sh('git stash', { cwd, home, env: { SWITCHYARD_HELD_LOCKS: lock } });
     assert.equal(r.stdout.trim(), `fake-git stash job=none in=none held=${lock}`);
     assert.deepEqual(history(home), []);
   });

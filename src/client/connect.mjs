@@ -11,7 +11,7 @@ import { createDecoder, encode } from '../protocol/ndjson.mjs';
 /** @typedef {import('node:net').Socket} Socket */
 /** @typedef {Record<string, unknown>} Msg */
 
-export const DAEMON_ENTRY = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin', 'conductord.mjs');
+export const DAEMON_ENTRY = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin', 'switchyardd.mjs');
 
 export class DaemonUnavailableError extends Error {}
 
@@ -44,10 +44,10 @@ export async function connectDaemon({ home, autoStart = true, timeoutMs = 2_000,
   const log = openSync(p.log, 'a');
   // 常駐するデーモンに、最初に接続したクライアントの入れ子の印を残さない
   /** @type {NodeJS.ProcessEnv} */
-  const daemonEnv = { ...env, CONDUCTOR_HOME: home };
-  delete daemonEnv.CONDUCTOR_IN_JOB;
-  delete daemonEnv.CONDUCTOR_HELD_LOCKS;
-  delete daemonEnv.CONDUCTOR_JOB_ID;
+  const daemonEnv = { ...env, SWITCHYARD_HOME: home };
+  delete daemonEnv.SWITCHYARD_IN_JOB;
+  delete daemonEnv.SWITCHYARD_HELD_LOCKS;
+  delete daemonEnv.SWITCHYARD_JOB_ID;
   const child = spawn(process.execPath, [daemonEntry], { detached: true, stdio: ['ignore', log, log], env: daemonEnv });
   child.unref();
   closeSync(log);

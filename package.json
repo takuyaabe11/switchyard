@@ -1,24 +1,24 @@
 {
-  "name": "conductor",
-  "version": "0.2.2",
+  "name": "switchyard",
+  "version": "0.3.0",
   "private": true,
   "description": "同じマシンの Claude Code セッションが重い走行を取り合わないように、CPU と排他の鍵を割り振る司令塔",
   "license": "MIT",
-  "homepage": "https://github.com/takuyaabe11/conductor#readme",
+  "homepage": "https://github.com/takuyaabe11/switchyard#readme",
   "repository": {
     "type": "git",
-    "url": "https://github.com/takuyaabe11/conductor.git"
+    "url": "https://github.com/takuyaabe11/switchyard.git"
   },
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "bin": {
-    "conductor": "bin/conductor.mjs",
-    "conductord": "bin/conductord.mjs"
+    "switchyard": "bin/switchyard.mjs",
+    "switchyardd": "bin/switchyardd.mjs"
   },
   "scripts": {
-    "test": "env -u CONDUCTOR_IN_JOB -u CONDUCTOR_HELD_LOCKS -u CONDUCTOR_JOB_ID CONDUCTOR_HOME=$(mktemp -d) node --test --test-reporter=spec",
+    "test": "env -u SWITCHYARD_IN_JOB -u SWITCHYARD_HELD_LOCKS -u SWITCHYARD_JOB_ID SWITCHYARD_HOME=$(mktemp -d) node --test --test-reporter=spec",
     "typecheck": "tsc -p .",
     "check": "npm run typecheck && npm test",
     "mutate:core": "node scripts/mutate.mjs core",

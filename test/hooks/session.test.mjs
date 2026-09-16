@@ -16,7 +16,7 @@ import { openClient } from '../../testkit/client.mjs';
 import { jobRequest } from '../../testkit/requests.mjs';
 import { tempHome } from '../../testkit/tmp.mjs';
 
-const HOOK_BIN = fileURLToPath(new URL('../../bin/conductor-hook.mjs', import.meta.url));
+const HOOK_BIN = fileURLToPath(new URL('../../bin/switchyard-hook.mjs', import.meta.url));
 
 /** @type {Array<() => Promise<unknown>>} */
 let cleanups = [];
@@ -62,7 +62,7 @@ describe('SessionStart(設計 §9.2)', () => {
   it('shims を PATH の先頭へ足す行を CLAUDE_ENV_FILE に 1 度だけ書き、知らせることが無ければ何も返さない', async () => {
     const { home } = await daemon();
     const file = envFileIn();
-    const env = { CONDUCTOR_HOME: home, CLAUDE_ENV_FILE: file };
+    const env = { SWITCHYARD_HOME: home, CLAUDE_ENV_FILE: file };
     assert.deepEqual(await sessionStart({ source: 'startup' }, { env, connect: noAutoStart, root: '/p/r' }), []);
     assert.deepEqual(await sessionStart({ source: 'compact' }, { env, connect: noAutoStart, root: '/p/r' }), []);
     assert.equal(readFileSync(file, 'utf8'), `export PATH='/p/r/shims':"$PATH"\n`);
@@ -77,7 +77,7 @@ describe('SessionStart(設計 §9.2)', () => {
 
   it('CLAUDE_ENV_FILE が無ければ、管理されないことを 1 行で知らせる', async () => {
     const { home } = await daemon();
-    const lines = await sessionStart({}, { env: { CONDUCTOR_HOME: home }, connect: noAutoStart });
+    const lines = await sessionStart({}, { env: { SWITCHYARD_HOME: home }, connect: noAutoStart });
     assert.ok(lines.some((l) => l.includes('CLAUDE_ENV_FILE が無い')), lines.join('\n'));
   });
 
@@ -87,13 +87,13 @@ describe('SessionStart(設計 §9.2)', () => {
     cleanups.push(() => c.close());
     c.send({ t: 'request', job: jobRequest({ class: 'measure', cmd: 'npm run bench' }) });
     await c.next((m) => m.t === 'grant');
-    const lines = await sessionStart({}, { env: { CONDUCTOR_HOME: home, CLAUDE_ENV_FILE: envFileIn() }, connect: noAutoStart });
+    const lines = await sessionStart({}, { env: { SWITCHYARD_HOME: home, CLAUDE_ENV_FILE: envFileIn() }, connect: noAutoStart });
     assert.ok(lines.some((l) => l.includes('計測') && l.includes('npm run bench')), lines.join('\n'));
   });
 
   it('デーモンの版が plugin の版と違えば知らせる', async () => {
     const { home } = await daemon();
-    const lines = await sessionStart({}, { env: { CONDUCTOR_HOME: home, CLAUDE_ENV_FILE: envFileIn() }, connect: noAutoStart, version: '0.0.0-other' });
+    const lines = await sessionStart({}, { env: { SWITCHYARD_HOME: home, CLAUDE_ENV_FILE: envFileIn() }, connect: noAutoStart, version: '0.0.0-other' });
     assert.ok(lines.some((l) => l.includes('plugin の版 0.0.0-other')), lines.join('\n'));
   });
 
@@ -115,19 +115,19 @@ describe('SessionStart(設計 §9.2)', () => {
           old.close(() => resolve(undefined));
         }),
     );
-    const lines = await sessionStart({}, { env: { CONDUCTOR_HOME: home, CLAUDE_ENV_FILE: envFileIn() }, connect: noAutoStart, version: '0.2.0' });
+    const lines = await sessionStart({}, { env: { SWITCHYARD_HOME: home, CLAUDE_ENV_FILE: envFileIn() }, connect: noAutoStart, version: '0.2.0' });
     assert.ok(lines.some((l) => l.includes('版 0.1.0 以前') && l.includes('plugin の版 0.2.0')), lines.join('\n'));
     assert.ok(!lines.some((l) => l.includes('undefined')), lines.join('\n'));
   });
 
   it('デーモンに届かなければ、管理なしで走ることを知らせる', async () => {
-    const lines = await sessionStart({}, { env: { CONDUCTOR_HOME: tempHome(), CLAUDE_ENV_FILE: envFileIn() }, connect: unavailable });
+    const lines = await sessionStart({}, { env: { SWITCHYARD_HOME: tempHome(), CLAUDE_ENV_FILE: envFileIn() }, connect: unavailable });
     assert.ok(lines.some((l) => l.includes('デーモンに届かない')), lines.join('\n'));
   });
 
-  it('CONDUCTOR_THINKER=1 なら何もしない(ファイルにも書かない)', async () => {
+  it('SWITCHYARD_THINKER=1 なら何もしない(ファイルにも書かない)', async () => {
     const file = envFileIn();
-    assert.deepEqual(await sessionStart({}, { env: { CONDUCTOR_THINKER: '1', CLAUDE_ENV_FILE: file }, connect: unavailable }), []);
+    assert.deepEqual(await sessionStart({}, { env: { SWITCHYARD_THINKER: '1', CLAUDE_ENV_FILE: file }, connect: unavailable }), []);
     assert.equal(existsSync(file), false);
   });
 });
@@ -136,26 +136,26 @@ describe('Stop(設計 §9.2)', () => {
   it('このセッションに ack されていない失敗があれば、decision: block で差し戻す', async () => {
     const { d, home } = await daemon();
     const jobId = await failedJob(d.sock);
-    const out = /** @type {any} */ (await stop({ session_id: 'sessStop-1234', stop_hook_active: false }, { env: { CONDUCTOR_HOME: home }, connect: noAutoStart }));
+    const out = /** @type {any} */ (await stop({ session_id: 'sessStop-1234', stop_hook_active: false }, { env: { SWITCHYARD_HOME: home }, connect: noAutoStart }));
     assert.equal(out.decision, 'block');
     assert.ok(out.reason.includes(`${jobId} 失敗(終了コード 1): npm test`), out.reason);
-    assert.ok(out.reason.includes('conductor ack <job>'), out.reason);
+    assert.ok(out.reason.includes('switchyard ack <job>'), out.reason);
   });
 
   it('stop_hook_active が true なら差し戻さない(2 度目の停止は通す)', async () => {
     const { d, home } = await daemon();
     await failedJob(d.sock);
-    assert.equal(await stop({ session_id: 'sessStop-1234', stop_hook_active: true }, { env: { CONDUCTOR_HOME: home }, connect: noAutoStart }), null);
+    assert.equal(await stop({ session_id: 'sessStop-1234', stop_hook_active: true }, { env: { SWITCHYARD_HOME: home }, connect: noAutoStart }), null);
   });
 
   it('他のセッションの失敗では差し戻さない', async () => {
     const { d, home } = await daemon();
     await failedJob(d.sock);
-    assert.equal(await stop({ session_id: 'otherSes-1234', stop_hook_active: false }, { env: { CONDUCTOR_HOME: home }, connect: noAutoStart }), null);
+    assert.equal(await stop({ session_id: 'otherSes-1234', stop_hook_active: false }, { env: { SWITCHYARD_HOME: home }, connect: noAutoStart }), null);
   });
 
   it('デーモンに届かなければ通す', async () => {
-    assert.equal(await stop({ session_id: 'sessStop-1234' }, { env: { CONDUCTOR_HOME: tempHome() }, connect: unavailable }), null);
+    assert.equal(await stop({ session_id: 'sessStop-1234' }, { env: { SWITCHYARD_HOME: tempHome() }, connect: unavailable }), null);
   });
 });
 
@@ -164,8 +164,8 @@ describe('hook の入口', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'cproj-'));
     /** @type {string[]} */
     const written = [];
-    // 記録の置き場所は一時のものを渡す(渡さないと実際の ~/.conductor/hooks.jsonl へ書く)
-    const opts = { write: (/** @type {string} */ s) => written.push(s), env: { CONDUCTOR_HOME: tempHome() } };
+    // 記録の置き場所は一時のものを渡す(渡さないと実際の ~/.switchyard/hooks.jsonl へ書く)
+    const opts = { write: (/** @type {string} */ s) => written.push(s), env: { SWITCHYARD_HOME: tempHome() } };
     await runHook('pre-tool-use', JSON.stringify({ tool_name: 'Bash', cwd, tool_input: { command: 'npm install' } }), opts);
     // deepEqual(written, []) だと型が空の配列に絞られ、次の push が型検査で通らない
     assert.equal(written.length, 0);
@@ -173,7 +173,7 @@ describe('hook の入口', () => {
     assert.equal(JSON.parse(written[0]).hookSpecificOutput.updatedInput.run_in_background, true);
   });
 
-  it('bin/conductor-hook.mjs は知らない hook で 1 行出して、止めない失敗(終了コード 1)で終わる', async () => {
+  it('bin/switchyard-hook.mjs は知らない hook で 1 行出して、止めない失敗(終了コード 1)で終わる', async () => {
     /** @type {{ code: unknown, stderr: string }} */
     const r = await new Promise((resolve) => {
       const child = execFile(process.execPath, [HOOK_BIN, 'nope'], (err, _stdout, stderr) => resolve({ code: err === null ? 0 : err.code, stderr }));

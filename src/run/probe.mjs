@@ -1,5 +1,5 @@
 // @ts-check
-// conductor probe: コマンドを別グループで起動し、決めた秒数だけ子孫を見てから SIGTERM を送り、
+// switchyard probe: コマンドを別グループで起動し、決めた秒数だけ子孫を見てから SIGTERM を送り、
 // グループから抜けた子と、その後も生きている子を報告する。生き残りは最後に SIGKILL で片付ける。
 import { readPgid, signalGroup, spawnInOwnGroup, verifiedGroup, waitGroupGone } from './group.mjs';
 import { createEscapeTracker } from './watch.mjs';

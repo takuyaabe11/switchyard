@@ -14,7 +14,7 @@ import { jobRequest } from '../../testkit/requests.mjs';
 import { tempHome } from '../../testkit/tmp.mjs';
 import { waitFor } from '../../testkit/wait.mjs';
 
-const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin', 'conductor.mjs');
+const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin', 'switchyard.mjs');
 
 /** @type {Array<() => Promise<unknown>>} */
 let cleanups = [];
@@ -33,7 +33,7 @@ async function capture(args, env) {
 
 describe('cli', () => {
   it('help は 0、引数の誤りは 2 で使い方を出す', async () => {
-    const env = { CONDUCTOR_HOME: tempHome() };
+    const env = { SWITCHYARD_HOME: tempHome() };
     assert.equal((await capture(['help'], env)).code, 0);
     const bad = await capture(['fly'], env);
     assert.equal(bad.code, 2);
@@ -42,7 +42,7 @@ describe('cli', () => {
 
   it('run --cpus 0 --profile <鍵の無い profile> は、走らせずに使い方の誤り(2)で終わり、デーモンも起動しない', async () => {
     const home = tempHome();
-    const r = await capture(['run', '--cpus', '0', '--profile', 'default:batch', '--', process.execPath, '-e', 'process.exit(9)'], { CONDUCTOR_HOME: home });
+    const r = await capture(['run', '--cpus', '0', '--profile', 'default:batch', '--', process.execPath, '-e', 'process.exit(9)'], { SWITCHYARD_HOME: home });
     assert.equal(r.code, 2, r.err);
     assert.match(r.err, /鍵が 1 本以上要る[\s\S]*使い方:/);
     assert.equal(existsSync(pathsOf(home).lock), false);
@@ -50,7 +50,7 @@ describe('cli', () => {
 
   it('デーモンが居なければ top はそう言い、デーモンを起動しない', async () => {
     const home = tempHome();
-    const r = await capture(['top'], { CONDUCTOR_HOME: home });
+    const r = await capture(['top'], { SWITCHYARD_HOME: home });
     assert.deepEqual([r.code, r.out], [0, 'デーモンは動いていない(走行も待ちも無い)\n']);
     assert.equal(existsSync(pathsOf(home).lock), false);
   });
@@ -64,11 +64,11 @@ describe('cli', () => {
     c.send({ t: 'request', job: jobRequest({ cmd: 'npm test' }) });
     const acc = await c.next((m) => m.t === 'accepted');
     await c.next((m) => m.t === 'grant');
-    const top = await capture(['top'], { CONDUCTOR_HOME: home });
+    const top = await capture(['top'], { SWITCHYARD_HOME: home });
     assert.match(top.out, /CPU 1 \/ 4 使用中/);
-    const why = await capture(['why', String(acc.jobId)], { CONDUCTOR_HOME: home });
+    const why = await capture(['why', String(acc.jobId)], { SWITCHYARD_HOME: home });
     assert.deepEqual([why.code, /は割り振り済みで/.test(why.out)], [0, true]);
-    assert.equal((await capture(['why', 'nope'], { CONDUCTOR_HOME: home })).code, 1);
+    assert.equal((await capture(['why', 'nope'], { SWITCHYARD_HOME: home })).code, 1);
   });
 
   it('ack: Claude のセッションは他のセッションのジョブを確認済みにできない', async () => {
@@ -82,16 +82,16 @@ describe('cli', () => {
     await c.next((m) => m.t === 'grant');
     c.send({ t: 'exit', jobId: acc.jobId, code: 1, killedByCaller: false, durationMs: 1 });
     await c.next((m) => m.t === 'ok');
-    const refused = await capture(['ack', String(acc.jobId), '--session', 'other123'], { CONDUCTOR_HOME: home, CLAUDE_CODE_SESSION_ID: 'mine5678xx' });
+    const refused = await capture(['ack', String(acc.jobId), '--session', 'other123'], { SWITCHYARD_HOME: home, CLAUDE_CODE_SESSION_ID: 'mine5678xx' });
     assert.equal(refused.code, 2);
     assert.equal(d.getState().unacked.other123?.length, 1);
-    const human = await capture(['ack', String(acc.jobId), '--session', 'other123'], { CONDUCTOR_HOME: home });
+    const human = await capture(['ack', String(acc.jobId), '--session', 'other123'], { SWITCHYARD_HOME: home });
     assert.equal(human.code, 0);
     assert.equal(d.getState().unacked.other123, undefined);
   });
 
   it('probe はグループから抜ける子を報告する', async () => {
-    const r = await capture(['probe', '0.5', '--', 'sh', '-c', 'perl -e "use POSIX; POSIX::setsid(); sleep 30" & sleep 30 & wait'], { CONDUCTOR_HOME: tempHome() });
+    const r = await capture(['probe', '0.5', '--', 'sh', '-c', 'perl -e "use POSIX; POSIX::setsid(); sleep 30" & sleep 30 & wait'], { SWITCHYARD_HOME: tempHome() });
     assert.equal(r.code, 0, r.err);
     assert.match(r.out, /グループから抜けた子: perl ×1/);
     assert.match(r.out, /SIGTERM の後も生きていた子: perl\(pid \d+・グループ外\)\(SIGKILL で片付けた\)/);
@@ -110,7 +110,7 @@ describe('cli', () => {
       await waitFor(() => !existsSync(lock), 3_000);
     });
     /** @type {NodeJS.ProcessEnv} */
-    const env = { ...process.env, CONDUCTOR_HOME: home };
+    const env = { ...process.env, SWITCHYARD_HOME: home };
     delete env.CLAUDE_CODE_SESSION_ID;
     const code = await new Promise((resolve) => {
       const p = execFile(process.execPath, [BIN, 'run', '--', process.execPath, '-e', 'process.exit(7)'], { env, cwd: mkdtempSync(join(tmpdir(), 'cproj-')) });

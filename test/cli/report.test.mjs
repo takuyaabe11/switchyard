@@ -24,7 +24,7 @@ function home(events, hooks = []) {
 async function capture(args, h) {
   let out = '';
   let err = '';
-  const code = await cli(args, { env: { CONDUCTOR_HOME: h }, cwd: tmpdir(), stdout: (s) => (out += s), stderr: (s) => (err += s) });
+  const code = await cli(args, { env: { SWITCHYARD_HOME: h }, cwd: tmpdir(), stdout: (s) => (out += s), stderr: (s) => (err += s) });
   return { code, out, err };
 }
 
@@ -43,7 +43,7 @@ describe('parseArgs report', () => {
   });
 });
 
-describe('conductor report', () => {
+describe('switchyard report', () => {
   it('events.jsonl と hooks.jsonl を読んで集計を出す', async () => {
     const h = home(
       [
