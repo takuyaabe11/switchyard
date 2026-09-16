@@ -137,8 +137,21 @@ export function schedule(input, now) {
       ordered = [oldest, ...ordered.filter((w) => w !== oldest)];
     }
   }
-  // 親の子(鍵だけのジョブの子)は、点数の順と計測の直後の優先より前に、到着の順で並べる(設計 §6.2)
-  const children = ordered.filter((w) => isLockChild(s, w.job)).sort((a, b) => a.arrivedAt - b.arrivedAt || (a.job.id < b.job.id ? -1 : 1));
+  // 親の子(鍵だけのジョブの子)は、点数の順と計測の直後の優先より前に、到着の順で並べる(設計 §6.2)。
+  // 同じ親の未着手の子が同時に待っていても、先頭へ回すのは到着が先の 1 本だけにする —
+  // isLockChild は親ごとに借りを 1 本までしか認めないが、ここで絞らないと 2 本目以降も
+  // 先頭へ回った位置のまま入場の枝で普通の扱いに落ちるだけになり、「2 本目以降は普通の要求として
+  // 並ぶ(先頭へ回らない)」(設計 §6.3 の 4)が崩れる(2026-09-16 最終レビュー再レビュー)。
+  /** @type {Set<string | null | undefined>} */
+  const seenParents = new Set();
+  const children = ordered
+    .filter((w) => isLockChild(s, w.job))
+    .sort((a, b) => a.arrivedAt - b.arrivedAt || (a.job.id < b.job.id ? -1 : 1))
+    .filter((w) => {
+      if (seenParents.has(w.job.parent)) return false;
+      seenParents.add(w.job.parent);
+      return true;
+    });
   ordered = [...children, ...ordered.filter((w) => !children.includes(w))];
 
   /** @param {Waiting} w @param {number} cpus @param {boolean} [lockChild] 親の子として入場する(設計 §6.3 の 4) */

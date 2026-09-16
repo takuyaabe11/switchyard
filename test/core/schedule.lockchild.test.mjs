@@ -110,4 +110,20 @@ describe('schedule: 鍵を持つ親の子(設計 §6.2・§6.3 の 4)', () => {
     const r = schedule({ ...s, waiting: [waiting(child('c2'))] }, 0);
     assert.deepEqual(grants(r.actions), [['c2', 1]]);
   });
+
+  it('同じ親の未着手の子が 2 本同時に待つとき、先頭へ回るのは 1 本目だけ', () => {
+    // 最終レビュー再レビュー: c1・c2 はどちらもまだリースを持たず同じ回で待っている。並べ替えで
+    // 親ごとに 1 本(到着が先の c1)へ絞らないと、c2 も先頭へ回ってしまい、c1 が借りた後の残り
+    // 容量を、点数の高い普通のジョブ b より先に c2 が奪ってしまう(grants が [c1, c2] になり b が
+    // 入場できない)。正しくは c1 が借りた後、残りの空きは b が取り、c2 はその後(入場できない)。
+    const r = schedule(
+      state({
+        capacity: 2,
+        leases: [parentLease()],
+        waiting: [waiting(child('c1'), 0), waiting(child('c2'), 0), waiting({ id: 'b', class: 'quick' }, 0)],
+      }),
+      0,
+    );
+    assert.deepEqual(grants(r.actions), [['c1', 1], ['b', 1]]);
+  });
 });

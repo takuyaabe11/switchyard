@@ -130,6 +130,13 @@ const SUITES = {
         from: 'if (s.leases.some((l) => l.lockChild === true && l.job.parent === parent)) return false;',
         to: '',
       },
+      {
+        // 最終レビュー再レビュー: children の並べ替えで親ごとに 1 本へ絞らない(2 本目以降も先頭へ回ってしまう)
+        name: 'M17 親の子の並べ替えで親ごとに 1 本へ絞らない',
+        file: 'src/core/schedule.mjs',
+        from: 'if (seenParents.has(w.job.parent)) return false;',
+        to: '',
+      },
     ],
   },
   escape: {
