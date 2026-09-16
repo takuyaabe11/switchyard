@@ -116,6 +116,20 @@ const SUITES = {
         from: 'if (lease.lockChild === true) continue;',
         to: '',
       },
+      {
+        // 改善 3・最終レビュー I-2: usedCpus が親の子の借りを数えない(二重に貸さないという性質そのものを壊す)
+        name: 'M15 usedCpus が親の子の借りを数えない',
+        file: 'src/core/schedule.mjs',
+        from: 'return s.leases.reduce((n, l) => n + l.cpus, 0);',
+        to: 'return s.leases.reduce((n, l) => n + (l.lockChild === true ? 0 : l.cpus), 0);',
+      },
+      {
+        // 改善 3・最終レビュー I-1(オーナー決定): 親ごとの借りの上限(1 本まで)を外す
+        name: 'M16 親ごとの借りの上限を外す',
+        file: 'src/core/schedule.mjs',
+        from: 'if (s.leases.some((l) => l.lockChild === true && l.job.parent === parent)) return false;',
+        to: '',
+      },
     ],
   },
   escape: {

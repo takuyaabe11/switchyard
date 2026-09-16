@@ -67,10 +67,12 @@ describe('schedule: 鍵を持つ親の子(設計 §6.2・§6.3 の 4)', () => {
   });
 
   it('借りが返るまで、CPU を持つ普通のジョブは入場しない', () => {
+    // レビュー I-2: x を cpus 1 にする(容量 2・x が 1・借り c が 1 → 空き 0)。借りを空きの計算に数えなければ
+    // 空きが 1 に見えて b が入場してしまうので、この形で「借りも数える」ことを実際に検出する。
     const r = schedule(
       state({
         capacity: 2,
-        leases: [parentLease(), lease({ id: 'x', cpus: { min: 2, max: 2 } }, { cpus: 2 }), lease(child('c'), { cpus: 1, lockChild: true })],
+        leases: [parentLease(), lease({ id: 'x' }, { cpus: 1 }), lease(child('c'), { cpus: 1, lockChild: true })],
         waiting: [waiting({ id: 'b' })],
       }),
       0,
@@ -90,5 +92,22 @@ describe('schedule: 鍵を持つ親の子(設計 §6.2・§6.3 の 4)', () => {
     );
     assert.deepEqual(grants(r.actions), [['c', 1]]);
     assert.equal(r.state.favorNonMeasure, true);
+  });
+
+  it('同じ親の 2 本目の子は借りず、普通の待ちとして並ぶ', () => {
+    // レビュー I-1(オーナー決定): 親 1 つにつき借りは 1 本まで。c1 が容量いっぱい(2)を借りている状態では、
+    // 同じ親の c2 は isLockChild が偽に落ち、空きから cpus.min を取れないので入場しない。
+    const s = state({ capacity: 2, leases: [parentLease(), lease(child('c1'), { cpus: 2, lockChild: true })] });
+    assert.equal(isLockChild(s, job(child('c2'))), false);
+    const r = schedule({ ...s, waiting: [waiting(child('c2'))] }, 0);
+    assert.deepEqual(grants(r.actions), []);
+  });
+
+  it('1 本目が終われば、次の子がまた借りられる', () => {
+    // c1 のリースが外れた(終わった)状態では、同じ親の c2 が再び isLockChild = true で借りて入場する。
+    const s = state({ capacity: 2, leases: [parentLease(), lease({ id: 'x' }, { cpus: 1 })] });
+    assert.equal(isLockChild(s, job(child('c2'))), true);
+    const r = schedule({ ...s, waiting: [waiting(child('c2'))] }, 0);
+    assert.deepEqual(grants(r.actions), [['c2', 1]]);
   });
 });

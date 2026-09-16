@@ -1,19 +1,19 @@
 # 規則層の門番の検出力(conductor 1a・1b・改善 3)
 
 - 実行: `npm run mutate:core`(原本は触らず、一時ディレクトリの写しに 1 つずつ入れる)
-- 日時と環境: Wed Sep 16 08:15:59 JST 2026 / Darwin 25.6.0 / Node v24.16.0(修正の報告 1: M10 のテストを順序依存の形へ直した後の再走行)
+- 日時と環境: Wed Sep 16 09:08:12 JST 2026 / Darwin 25.6.0 / Node v24.16.0(修正の報告 2: 最終レビュー I-1・I-2 を直した後の再走行)
 - 復元後の原本: `npm test` の `ℹ tests` / `ℹ pass` / `ℹ fail` の 3 行を貼る
 
 ```
-ℹ tests 361
-ℹ pass 361
+ℹ tests 363
+ℹ pass 363
 ℹ fail 0
 ```
 
 ## 変異ごとの結果
 
 ```
-== M1 鍵の空き判定を緩める | src/core/schedule.mjs | 赤 | tests 84 / fail 9 / cancelled 0 / pass 75
+== M1 鍵の空き判定を緩める | src/core/schedule.mjs | 赤 | tests 86 / fail 9 / cancelled 0 / pass 77
    壊した行: return locks.every((k) => holders(s, k).length <= capOf(s, k));
    赤: 子がまだ生きていれば孤児として資源を持たせたまま、未確認に積む
    赤: 孤児でないリースに orphanGone が来ても資源を返さない
@@ -24,7 +24,7 @@
    赤: 入場を待つ間に、他の鍵を抱え込まない(一括取得)
    赤: 鍵の空く見込み時刻も数える
    赤: 鍵が埋まっていれば待ち、理由に保持者を出す
-== M2 計測の単独実行を外す | src/core/schedule.mjs | 赤 | tests 84 / fail 8 / cancelled 0 / pass 76
+== M2 計測の単独実行を外す | src/core/schedule.mjs | 赤 | tests 86 / fail 8 / cancelled 0 / pass 78
    壊した行: if (head === null && locksFree(s, job.locks)) {
    赤: 計測が終わったら、計測以外を先に入れる
    赤: どんな到着の列でも I1〜I3・I6 を破らず、全ジョブが上限時刻までに終わる(I5)
@@ -34,7 +34,7 @@
    赤: 計測の入場待ちの間も、鍵だけのジョブは入場する
    赤: 走行中のジョブがあれば計測は待ち、後ろのジョブも入場しない
    赤: 計測の直後は、一番長く待っている計測以外のジョブを先に入れる
-== M3 CPU の空き判定を 1 つ緩める | src/core/schedule.mjs | 赤 | tests 84 / fail 12 / cancelled 0 / pass 72
+== M3 CPU の空き判定を 1 つ緩める | src/core/schedule.mjs | 赤 | tests 86 / fail 14 / cancelled 0 / pass 72
    壊した行: const fits = free + 1 >= job.cpus.min && locksFree(s, job.locks);
    赤: どんな到着の列でも I1〜I3・I6 を破らず、全ジョブが上限時刻までに終わる(I5)
    赤: 同じ入力なら入場の順番は毎回同じ(決定的)
@@ -45,54 +45,63 @@
    赤: 先頭が必要な資源を持つジョブに見込みが無ければ、後ろ詰めしない
    赤: 親の子は、先に待つ batch を追い越して入場する
    赤: 親が居ない・親が鍵だけでない・別のセッションの親なら、普通の要求として並ぶ
+   赤: 借りが返るまで、CPU を持つ普通のジョブは入場しない
+   赤: 同じ親の 2 本目の子は借りず、普通の待ちとして並ぶ
    赤: 前に居て入場できないジョブが要る鍵は、鍵だけのジョブも追い越さない
    赤: 鍵だけのジョブの入場では、計測の直後の優先の印を外さない
    赤: 先頭が入場できなければ、計測は後ろ詰めしない
-== M4 計測の直後の優先を外す | src/core/schedule.mjs | 赤 | tests 84 / fail 3 / cancelled 0 / pass 81
+== M4 計測の直後の優先を外す | src/core/schedule.mjs | 赤 | tests 86 / fail 3 / cancelled 0 / pass 83
    壊した行: if (false) {
    赤: 計測が終わったら、計測以外を先に入れる
    赤: 計測の直後は、一番長く待っている計測以外のジョブを先に入れる
    赤: 計測以外が待っていなければ、印を外して計測を入れる
-== M5 exit でリースを返さない | src/core/decide.mjs | 赤 | tests 84 / fail 4 / cancelled 0 / pass 80
+== M5 exit でリースを返さない | src/core/decide.mjs | 赤 | tests 86 / fail 4 / cancelled 0 / pass 82
    壊した行: extra.push(
    赤: exit 0 でリースを返し、所要を history に出し、空いた資源で次を入れる
    赤: 計測が終わったら、計測以外を先に入れる
    赤: どんな到着の列でも I1〜I3・I6 を破らず、全ジョブが上限時刻までに終わる(I5)
    赤: 同じ入力なら入場の順番は毎回同じ(決定的)
-== M6 後ろ詰めの時刻条件を外す | src/core/schedule.mjs | 赤 | tests 84 / fail 4 / cancelled 0 / pass 80
+== M6 後ろ詰めの時刻条件を外す | src/core/schedule.mjs | 赤 | tests 86 / fail 4 / cancelled 0 / pass 82
    壊した行: const endsBeforeHead = true;
    赤: 先頭の見込み時刻を越えるジョブは入れない
    赤: 見込みの無いジョブは後ろ詰めしない
    赤: 先頭が必要な資源を持つジョブに見込みが無ければ、後ろ詰めしない
    赤: 鍵の空く見込み時刻も数える
-== M7 CPU 0 のリースも計測の単独に数える | src/core/schedule.mjs | 赤 | tests 84 / fail 1 / cancelled 0 / pass 83
+== M7 CPU 0 のリースも計測の単独に数える | src/core/schedule.mjs | 赤 | tests 86 / fail 1 / cancelled 0 / pass 85
    壊した行: if (head === null && s.leases.length === 0 && locksFree(s, job.locks)) {
    赤: 鍵だけのリースが走っていても、計測は単独で入場する
-== M8 鍵だけのジョブも計測の走行中は止める | src/core/schedule.mjs | 赤 | tests 84 / fail 1 / cancelled 0 / pass 83
+== M8 鍵だけのジョブも計測の走行中は止める | src/core/schedule.mjs | 赤 | tests 86 / fail 1 / cancelled 0 / pass 85
    壊した行: if (isLockOnly(job) && gate === null) {
    赤: 計測の走行中でも、鍵が空いていれば CPU 0 で入場する
-== M9 鍵だけのジョブが前で止まっている鍵を追い越す | src/core/schedule.mjs | 赤 | tests 84 / fail 1 / cancelled 0 / pass 83
+== M9 鍵だけのジョブが前で止まっている鍵を追い越す | src/core/schedule.mjs | 赤 | tests 86 / fail 1 / cancelled 0 / pass 85
    壊した行: const ahead = undefined;
    赤: 前に居て入場できないジョブが要る鍵は、鍵だけのジョブも追い越さない
-== M10 親の子を先頭に並べない | src/core/schedule.mjs | 赤 | tests 84 / fail 2 / cancelled 0 / pass 82
+== M10 親の子を先頭に並べない | src/core/schedule.mjs | 赤 | tests 86 / fail 2 / cancelled 0 / pass 84
    壊した行: (行を消した)
    赤: 親の子は、先に待つ batch を追い越して入場する
    赤: 計測の入場待ち(先頭が measure)より前に入る
-== M11 親の子に容量を超えた借りを許さない | src/core/schedule.mjs | 赤 | tests 84 / fail 2 / cancelled 0 / pass 82
+== M11 親の子に容量を超えた借りを許さない | src/core/schedule.mjs | 赤 | tests 86 / fail 2 / cancelled 0 / pass 84
    壊した行: if (measuring === undefined && locksFree(s, job.locks) && s.capacity - usedCpus(s) >= job.cpus.min) {
    赤: 容量いっぱいでも、cpus.min で入場する(容量を超えて借りる)。借りたリースは I1 の合計から除く
    赤: 親の子の入場では、計測の直後の優先の印を外さない
-== M12 計測の走行中も親の子を入場させる | src/core/schedule.mjs | 赤 | tests 84 / fail 2 / cancelled 0 / pass 82
+== M12 計測の走行中も親の子を入場させる | src/core/schedule.mjs | 赤 | tests 86 / fail 1 / cancelled 0 / pass 85
    壊した行: if (locksFree(s, job.locks)) {
-   赤: どんな到着の列でも I1〜I3・I6 を破らず、全ジョブが上限時刻までに終わる(I5)
    赤: 計測の走行中は入場しない(計測を汚さない)
-== M13 別のセッションの親でも親の子として扱う | src/core/schedule.mjs | 赤 | tests 84 / fail 2 / cancelled 0 / pass 82
+== M13 別のセッションの親でも親の子として扱う | src/core/schedule.mjs | 赤 | tests 86 / fail 2 / cancelled 0 / pass 84
    壊した行: );
    赤: isLockChild は、親のリースが今あり・鍵だけ・同じセッション・計測でないときだけ真
    赤: 親が居ない・親が鍵だけでない・別のセッションの親なら、普通の要求として並ぶ
-== M14 親の子のリースにも余りを配る | src/core/schedule.mjs | 赤 | tests 84 / fail 1 / cancelled 0 / pass 83
+== M14 親の子のリースにも余りを配る | src/core/schedule.mjs | 赤 | tests 86 / fail 1 / cancelled 0 / pass 85
    壊した行: (行を消した)
    赤: 親の子のリースには余りを配らない
+== M15 usedCpus が親の子の借りを数えない | src/core/schedule.mjs | 赤 | tests 86 / fail 3 / cancelled 0 / pass 83
+   壊した行: return s.leases.reduce((n, l) => n + (l.lockChild === true ? 0 : l.cpus), 0);
+   赤: 親の子は、先に待つ batch を追い越して入場する
+   赤: 借りが返るまで、CPU を持つ普通のジョブは入場しない
+   赤: 同じ親の 2 本目の子は借りず、普通の待ちとして並ぶ
+== M16 親ごとの借りの上限を外す | src/core/schedule.mjs | 赤 | tests 86 / fail 1 / cancelled 0 / pass 85
+   壊した行: (行を消した)
+   赤: 同じ親の 2 本目の子は借りず、普通の待ちとして並ぶ
 全部の変異が赤になった
 ```
 
@@ -111,8 +120,7 @@
   `容量いっぱいでも、cpus.min で入場する(容量を超えて借りる)。借りたリースは I1 の合計から除く`・
   `親の子の入場では、計測の直後の優先の印を外さない`。
 - **M12 計測の走行中も親の子を入場させる**: 親の子の入場条件から `measuring === undefined &&` を外し、計測が
-  走っていても親の子を入場させる(I3 を破りうる)。赤: `同じ入力なら入場の順番は毎回同じ(決定的)`・
-  `計測の走行中は入場しない(計測を汚さない)`。
+  走っていても親の子を入場させる(I3 を破りうる)。赤: `計測の走行中は入場しない(計測を汚さない)`。
 - **M13 別のセッションの親でも親の子として扱う**: `isLockChild` の `l.job.session === job.session` 条件を外し、
   別セッションの鍵だけのジョブでも親と認める。赤:
   `isLockChild は、親のリースが今あり・鍵だけ・同じセッション・計測でないときだけ真`・
@@ -120,13 +128,32 @@
 - **M14 親の子のリースにも余りを配る**: 余り配布ループの `if (lease.lockChild === true) continue;` を削除し、
   親の子のリースにも max まで余りを配ってしまう。赤: `親の子のリースには余りを配らない`。
 
+## 最終レビュー(2026-09-16)で足した変異 — I-1・I-2 の是正
+
+`docs/superpowers/specs/2026-09-16-conductor-lockchild/final-review.md` の Important 2 件を受け、
+`isLockChild`(親ごとの借りの上限を 1 本までに閉じる)と `test/core/schedule.lockchild.test.mjs` の
+「借りが返るまで、CPU を持つ普通のジョブは入場しない」(fixture の `x` を `cpus 1` にして、借りが空きの
+計算に入らなければ結果が変わる形へ直す)を修正した。この 2 件が実際に検出力を持つことを、新しい変異
+M15・M16 で確かめた。
+
+- **M15 usedCpus が親の子の借りを数えない**(レビュー I-2 の是正): `usedCpus`(`src/core/schedule.mjs`)の本文を
+  `n + (l.lockChild === true ? 0 : l.cpus)` へ変え、借りを空きの計算から除く(=「二重に貸さない」性質そのものを壊す)。
+  赤: `親の子は、先に待つ batch を追い越して入場する`・`借りが返るまで、CPU を持つ普通のジョブは入場しない`
+  (このテストが fixture の変更により初めて検出力を持った。レビュー実測では変異前は緑のままだった)・
+  `同じ親の 2 本目の子は借りず、普通の待ちとして並ぶ`。
+- **M16 親ごとの借りの上限を外す**(レビュー I-1 の是正・オーナー決定): `isLockChild` に足した 5 つ目の判定
+  (`if (s.leases.some((l) => l.lockChild === true && l.job.parent === parent)) return false;`)を削除し、
+  1 つの親が子を何本でも借りさせられる状態へ戻す。赤: `同じ親の 2 本目の子は借りず、普通の待ちとして並ぶ`
+  (新設のテスト)。
+
 ## 性質テストが捕まえない変異
 
 - M4・M6: 到着が有限の模擬実行では飢えが起きないため。単体テストが捕まえる。
 - M7〜M9: 性質テストは鍵だけのジョブを混ぜても不変条件の破れしか見ないので、「鍵だけのジョブを計測の間に止める」(M8)や
   「前の待ちを追い越す」(M9)は、不変条件を破らない限り捕まえない。M7 も同様に、CPU 0 のリースを計測の単独実行の
   判定に含めてしまう誤りは不変条件を破らず、単体テストだけが捕まえる。
-- M10〜M14(改善 3): 性質テストの到着列には親の子(`parentPick`)を混ぜてあるが、`isLockChild` の per-job 判定
-  (`if (isLockChild(s, job)) { ... }`)自体は M10 の並べ替えを外しても残るため、親の子は多くの並びで結局は
-  入場できてしまい、不変条件(I1〜I3・I6)は破れにくい。M10〜M14 は主に単体テスト(`schedule.lockchild.test.mjs`)
-  と I1 の検出力テスト(`invariants.property.test.mjs`)が捕まえる。
+- M10〜M16(改善 3・最終レビュー是正): 性質テストの到着列には親の子(`parentPick`)を混ぜてあるが、`isLockChild` の
+  per-job 判定自体は M10 の並べ替えを外しても残るため、親の子は多くの並びで結局は入場できてしまい、不変条件
+  (I1〜I3・I6)は破れにくい。M15(借りを数えない)・M16(借りの上限を外す)も、容量を超えた借りそのものは
+  I1 が親の子のリースを除外するため不変条件としては現れない。M10〜M16 は主に単体テスト
+  (`schedule.lockchild.test.mjs`)と I1 の検出力テスト(`invariants.property.test.mjs`)が捕まえる。

@@ -19,13 +19,14 @@ export function isLockOnly(job) {
 }
 
 /**
- * 親の子か(設計 §6.2): parent のリースが今あり、鍵だけのジョブで、同じセッション。
- * 計測は親の子として扱わない(先に入れると計測の単独実行を崩す)。
+ * 親の子か(設計 §6.2・§6.3 の 4): parent のリースが今あり、鍵だけのジョブで、同じセッション、子が計測でなく、
+ * その親の子として既に入場しているリースが無い(親 1 つにつき借りて入場する子は 1 本まで。2 本目以降は普通の要求)。
  * @param {State} s @param {JobSpec} job @returns {boolean}
  */
 export function isLockChild(s, job) {
   const parent = job.parent;
   if (isLockOnly(job) || job.class === 'measure' || parent === undefined || parent === null) return false;
+  if (s.leases.some((l) => l.lockChild === true && l.job.parent === parent)) return false;
   return s.leases.some((l) => l.job.id === parent && isLockOnly(l.job) && l.job.session === job.session);
 }
 
