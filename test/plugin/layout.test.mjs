@@ -62,8 +62,8 @@ describe('plugin の形(設計 §9・§9.6)', () => {
     assert.match(text, /^---\nname: switchyard\ndescription: .+\n---\n/);
   });
 
-  it('コマンド /switchyard は説明を持ち、状態の 3 つ(統治下か・走行と待ち・直近の集計)を指す', () => {
-    const text = readFileSync(join(ROOT, 'commands/switchyard.md'), 'utf8');
+  it('コマンド /switchyard:status は説明を持ち、状態の 3 つ(統治下か・走行と待ち・直近の集計)を指す', () => {
+    const text = readFileSync(join(ROOT, 'commands/status.md'), 'utf8');
     assert.match(text, /^---\ndescription: .+\n---\n/);
     // 表示の文言ではなく、実際に走らせる口を指しているか(どれかが欠けると状態が分からない)
     for (const needle of ['which npm', 'switchyard top', 'switchyard report']) assert.ok(text.includes(needle), needle);
