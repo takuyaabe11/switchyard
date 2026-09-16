@@ -61,3 +61,30 @@
   「複数の profile に当たったら measure > batch > quick の順で重い方を採る」は、**部分をまたいだときだけ**そうなっている。
   IRC の `conductor.json` では、同じコマンドを 2 つの profile に書かない形で回避した(`npm run e2e` は計測の側だけに置く)。
   設計書の文言を実体に合わせるか、実装を重い方優先へ変えるかは、次の改善で決める。
+
+## 導入の当日に踏んだ不具合と、その直し(2026-09-16)
+
+plugin を入れて IRC の unit 全件を 1 本通した直後、`~/.conductor/hooks.jsonl` が **142 KB・864 行**になっていた。
+中身を数えると、`cwd` は `/repo`(258 行)・`/w/irc`(54 行)・一時ディレクトリ(`cagree-*` / `cproj-*`)で、
+**すべてテストと `conductor replay` の試算**だった。原因は、判断の記録を判定そのもの(`preToolUse`)の中に置いたこと:
+
+- `conductor replay` は記録の全コマンドを `preToolUse` に流す(空回し)ので、流した数だけ本物の記録へ書く。
+- `test/hooks/*` の多くは `env: {}` で呼ぶため、`conductorHome({})` が**実際のホーム**を指し、テストが `~/.conductor/` を汚す
+  (全タスク共通の制約「テストは実際のホームの `~/.conductor/` を作らない」に違反していた)。
+
+直し: **記録を hook の入口 `runHook`(`src/hooks/main.mjs`)へ移し、`preToolUse` は何も書かない純粋な関数に戻した**。
+汚れた `hooks.jsonl` は消した(本物のセッションの行は 1 行も無かった)。門番は次の 3 本で、いずれも赤を実測した。
+
+```
+== H21 hook の判断を記録しない | src/hooks/main.mjs | 赤 | tests 81 / fail 1 / cancelled 0 / pass 80
+== H22 拒否を背景として記録する | src/hooks/main.mjs | 赤 | tests 81 / fail 1 / cancelled 0 / pass 80
+== H23 何もしなかった分まで記録しようとする | src/hooks/main.mjs | 赤 | tests 81 / fail 2 / cancelled 0 / pass 79
+全部の変異が赤になった
+```
+
+新しいテストは `test/hooks/main.test.mjs`(入口が記録する / 判定は何も書かない / 記録に書けなくても判断は返す)。
+全件は `ℹ tests 383` / `ℹ pass 383` / `ℹ fail 0`、`npx tsc -p .` は終了コード 0。
+
+★ 教訓: **記録は「決めたところ」ではなく「実際に効かせるところ」に置く。** 判定を純粋に保てば、空回し(replay)と
+テストが本物の記録を汚さない。これは設計 §4.4 の replay(「記録は読むだけで、何も書き出さない」)と同じ規律で、
+今回はその規律を hook 側で破っていた。
