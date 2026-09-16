@@ -137,6 +137,49 @@ const SUITES = {
         from: 'if (seenParents.has(w.job.parent)) return false;',
         to: '',
       },
+      {
+        // 記録: 借りて入場したことを grant に載せない(記録から借りの回数を数えられなくなる)
+        name: 'M18 grant に借りの印を載せない',
+        file: 'src/core/schedule.mjs',
+        from: '...(l.lockChild === true ? { lockChild: true } : {})',
+        to: '',
+      },
+    ],
+  },
+  report: {
+    tests: ['test/report/report.test.mjs', 'test/cli/report.test.mjs'],
+    mutations: [
+      {
+        // 待たせた理由の種別を取り違える(計測待ちが「その他」に落ちる)
+        name: 'R1 計測の理由を見ない',
+        file: 'src/report/report.mjs',
+        from: "if (reason.includes('計測')) return 'measure';",
+        to: '',
+      },
+      {
+        name: 'R2 借りて入場した件数を数えない',
+        file: 'src/report/report.mjs',
+        from: 'if (d.lockChild === true) borrows += 1;',
+        to: '',
+      },
+      {
+        name: 'R3 中央値の代わりに平均を出す',
+        file: 'src/report/report.mjs',
+        from: 'return sorted[Math.floor((sorted.length - 1) / 2)];',
+        to: 'return sorted.reduce((a, b) => a + b, 0) / sorted.length;',
+      },
+      {
+        name: 'R4 repo と期間の絞り込みを外す',
+        file: 'src/report/report.mjs',
+        from: '(repoPrefix === null || repo.startsWith(repoPrefix)) && (since === null || (at !== null && at >= since))',
+        to: 'true',
+      },
+      {
+        name: 'R5 待ち時間を常に 0 とする',
+        file: 'src/report/report.mjs',
+        from: 'Math.max(0, (at ?? req.at) - req.at)',
+        to: '0',
+      },
     ],
   },
   escape: {
@@ -165,6 +208,13 @@ const SUITES = {
         name: 'E4 デーモンが抜けた子の名前を覚えない',
         file: 'src/daemon/server.mjs',
         from: 'for (const e of escape.escaped) names.add(e.comm);',
+        to: '',
+      },
+      {
+        // 記録: 入場と待たせた理由を events.jsonl に残さない(後から待ち時間と理由を数えられなくなる)
+        name: 'E5 決定(grant / queued)を記録しない',
+        file: 'src/daemon/server.mjs',
+        from: "appendRecord(p.events, { at: wallNow(), kind: 'decision', decision: a });",
         to: '',
       },
     ],
@@ -433,6 +483,20 @@ const SUITES = {
         file: 'src/hooks/session.mjs',
         from: 'if (snap.version !== version) {',
         to: 'if (false) {',
+      },
+      {
+        // 記録: 背景へ回した判断を hooks.jsonl に残さない
+        name: 'H21 背景へ回した判断を記録しない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "    record('background');\n",
+        to: '',
+      },
+      {
+        // 記録: 拒否した判断を hooks.jsonl に残さない
+        name: 'H22 拒否した判断を記録しない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "    record('deny');\n",
+        to: '',
       },
     ],
   },

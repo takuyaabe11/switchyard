@@ -262,7 +262,8 @@ export function schedule(input, now) {
 
   /** @type {Action[]} */
   const actions = [];
-  for (const l of granted) actions.push({ type: 'grant', jobId: l.job.id, cpus: l.cpus });
+  // 容量を超えて借りた親の子だけ印を載せる(記録から借りの回数を数えるため。項目は該当するときだけ足す)
+  for (const l of granted) actions.push({ type: 'grant', jobId: l.job.id, cpus: l.cpus, ...(l.lockChild === true ? { lockChild: true } : {}) });
   for (const n of Object.values(s.notes)) {
     const prev = input.notes[n.jobId];
     const changed = prev === undefined || prev.position !== n.position || prev.reason !== n.reason || prev.etaAt !== n.etaAt;

@@ -73,7 +73,7 @@
 
 /**
  * @typedef {(
- *   { type: 'grant', jobId: string, cpus: number } |
+ *   { type: 'grant', jobId: string, cpus: number, lockChild?: boolean } |
  *   { type: 'queued', jobId: string, position: number, reason: string, etaAt: number | null } |
  *   { type: 'history', repo: string, profile: string, class: JobClass, cpus: number, durationMs: number, code: number | null }
  * )} Action

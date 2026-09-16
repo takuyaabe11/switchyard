@@ -19,7 +19,8 @@
     "mutate:wrap": "node scripts/mutate.mjs wrap",
     "mutate:group": "node scripts/mutate.mjs group",
     "mutate:shim": "node scripts/mutate.mjs shim",
-    "mutate:hooks": "node scripts/mutate.mjs hooks"
+    "mutate:hooks": "node scripts/mutate.mjs hooks",
+    "mutate:report": "node scripts/mutate.mjs report"
   },
   "devDependencies": {
     "@types/node": "^26.5.1",

@@ -14,6 +14,7 @@ describe('paths', () => {
   it('CONDUCTOR_HOME があればそれを使う', () => {
     assert.equal(conductorHome({ CONDUCTOR_HOME: '/x/y' }), '/x/y');
     assert.equal(pathsOf('/x/y').sock, '/x/y/conductord.sock');
+    assert.equal(pathsOf('/x/y').hooks, '/x/y/hooks.jsonl');
   });
 });
 

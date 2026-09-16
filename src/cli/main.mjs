@@ -7,8 +7,10 @@ import { ask, connectDaemon, DaemonUnavailableError } from '../client/connect.mj
 import { isClaudeSession, sessionId } from '../client/session.mjs';
 import { repoRoot } from '../config/context.mjs';
 import { loadProfiles, loadProfilesFile } from '../config/profiles.mjs';
-import { conductorHome } from '../daemon/paths.mjs';
+import { conductorHome, pathsOf } from '../daemon/paths.mjs';
+import { readRecords } from '../daemon/store.mjs';
 import { formatReport, replay } from '../replay/replay.mjs';
+import { formatReport as formatSummary, summarize } from '../report/report.mjs';
 import { probe } from '../run/probe.mjs';
 import { runJob } from '../run/run.mjs';
 import { parseArgs, UsageError, USAGE } from './args.mjs';
@@ -141,6 +143,14 @@ export async function cli(args, opts = {}) {
       const since = command.sinceDays === null ? null : now() - command.sinceDays * 86_400_000;
       const report = await replay({ dir, cwdPrefix: command.cwdPrefix, since, profilesFor, examples: command.examples });
       stdout(formatReport(report, { cwdPrefix: command.cwdPrefix, sinceDays: command.sinceDays, examples: command.examples }));
+      return 0;
+    }
+    case 'report': {
+      // 記録(events.jsonl と hooks.jsonl)を読むだけ。デーモンが動いていなくても出る
+      const p = pathsOf(home);
+      const since = command.sinceDays === null ? null : now() - command.sinceDays * 86_400_000;
+      const s = summarize({ events: readRecords(p.events).records, hooks: readRecords(p.hooks).records, repoPrefix: command.repoPrefix, since });
+      stdout(formatSummary(s, { repoPrefix: command.repoPrefix, sinceDays: command.sinceDays }));
       return 0;
     }
     case 'probe': {

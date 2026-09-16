@@ -126,4 +126,15 @@ describe('schedule: 鍵を持つ親の子(設計 §6.2・§6.3 の 4)', () => {
     );
     assert.deepEqual(grants(r.actions), [['c1', 1], ['b', 1]]);
   });
+
+  it('借りて入場した親の子の grant には、借りの印が載る', () => {
+    // 記録(events.jsonl)から「容量を超えて借りた回数」を後から数えられるようにする。
+    const r = schedule(state({ capacity: 2, leases: [parentLease(), lease({ id: 'x', cpus: { min: 2, max: 2 } }, { cpus: 2 })], waiting: [waiting(child('c'))] }), 0);
+    assert.deepEqual(r.actions.filter((a) => a.type === 'grant'), [{ type: 'grant', jobId: 'c', cpus: 1, lockChild: true }]);
+  });
+
+  it('普通の入場の grant には、借りの印を載せない', () => {
+    const r = schedule(state({ capacity: 2, waiting: [waiting({ id: 'b', cpus: { min: 1, max: 1 } })] }), 0);
+    assert.deepEqual(r.actions.filter((a) => a.type === 'grant'), [{ type: 'grant', jobId: 'b', cpus: 1 }]);
+  });
 });
