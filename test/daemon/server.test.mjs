@@ -257,7 +257,7 @@ describe('daemon server', () => {
     assert.equal(existsSync(d2.sock), true);
   });
 
-  it('出来事を events.jsonl に記録し、tick は記録しない', async () => {
+  it('出来事と決定を events.jsonl に記録し、tick は記録しない', async () => {
     const { d, home } = await daemon({ tickMs: 10 });
     const c = await client(d.sock);
     c.send({ t: 'request', job: jobRequest() });
@@ -267,8 +267,28 @@ describe('daemon server', () => {
       .trim()
       .split('\n')
       .map((l) => JSON.parse(l))
-      .map((r) => (r.kind === 'event' ? r.event.type : r.kind));
-    assert.deepEqual(kinds, ['request']);
+      .map((r) => (r.kind === 'event' ? r.event.type : r.kind === 'decision' ? `decision:${r.decision.type}` : r.kind));
+    assert.deepEqual(kinds, ['request', 'decision:grant']);
+  });
+
+  it('待たせた決定(queued)も、理由と順番つきで events.jsonl に記録する', async () => {
+    // 「なぜ・どれだけ待ったか」を後から数えるための記録(改善: conductor report)
+    const { d, home } = await daemon({ capacity: 1, tickMs: 10 });
+    const a = await client(d.sock);
+    a.send({ t: 'request', job: jobRequest({ cpus: { min: 1, max: 1 } }) });
+    const accA = await a.next((m) => m.t === 'accepted');
+    await a.next((m) => m.t === 'grant');
+    a.send({ t: 'started', jobId: accA.jobId, pid: process.pid, pgid: null });
+    const b = await client(d.sock);
+    b.send({ t: 'request', job: jobRequest({ cpus: { min: 1, max: 1 } }) });
+    const accB = await b.next((m) => m.t === 'accepted');
+    await b.next((m) => m.t === 'queued');
+    const queued = readFileSync(pathsOf(home).events, 'utf8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l))
+      .filter((r) => r.kind === 'decision' && r.decision.type === 'queued');
+    assert.deepEqual(queued.map((r) => [r.decision.jobId, r.decision.position, typeof r.decision.reason, typeof r.at]), [[accB.jobId, 1, 'string', 'number']]);
   });
 
   it('exit に付いた抜けた子を記録し、同じ repo と profile の後の要求に表示し、再起動しても覚えている', async () => {

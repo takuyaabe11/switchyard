@@ -115,6 +115,9 @@ export async function startDaemon(opts) {
       appendRecord(p.events, { at: wallNow(), kind: 'history', repo: a.repo, profile: a.profile, class: a.class, cpus: a.cpus, durationMs: a.durationMs, code: a.code });
       return;
     }
+    // 決定(入場と、待たせた順番・理由)も記録に残す。包みが繋がっていなくても残すので、
+    // 後から「なぜ・どれだけ待ったか」「容量を超えて借りたか」を数えられる(conductor report)
+    appendRecord(p.events, { at: wallNow(), kind: 'decision', decision: a });
     const conn = wrappers.get(a.jobId);
     if (conn === undefined) return;
     if (a.type === 'grant') {

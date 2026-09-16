@@ -9,6 +9,8 @@ import { basename } from 'node:path';
 import { parseArgs } from '../cli/args.mjs';
 import { repoRoot } from '../config/context.mjs';
 import { classifiableCommand, classify, globMatch, loadProfiles } from '../config/profiles.mjs';
+import { conductorHome, pathsOf } from '../daemon/paths.mjs';
+import { appendRecord } from '../daemon/store.mjs';
 import { GIT_LOCK_SUBCOMMANDS } from '../shim/decide.mjs';
 import { simpleCommands } from './shell.mjs';
 
@@ -196,7 +198,28 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
 
   for (const words of simpleCommands(command)) visit(words, false);
 
+  /**
+   * 判断を hooks.jsonl に残す(何をどれだけ背景へ回し、何を拒否したかを後から数えるため)。
+   * 書けなくても判断は返す(記録は補助で、失敗で作業を止めない)。
+   * @param {'background' | 'deny'} decision
+   */
+  const record = (decision) => {
+    try {
+      appendRecord(pathsOf(conductorHome(env)).hooks, {
+        at: Date.now(),
+        kind: 'hook',
+        decision,
+        session: typeof input.session_id === 'string' ? input.session_id : '',
+        cwd: typeof input.cwd === 'string' ? input.cwd : '',
+        cmd: command,
+      });
+    } catch {
+      /* 記録できないときは黙って進む */
+    }
+  };
+
   if (unshimmed.length > 0) {
+    record('deny');
     return {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
@@ -208,6 +231,7 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
     };
   }
   if (found.heavy && ti.run_in_background !== true) {
+    record('background');
     // 決定(permissionDecision)は付けない。allow は権限の確認を飛ばすので使わない(設計 §12)
     return { hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { ...ti, run_in_background: true } } };
   }

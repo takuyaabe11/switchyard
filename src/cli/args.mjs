@@ -13,10 +13,12 @@
  *   { cmd: 'ack', jobId: string, session: string | null } |
  *   { cmd: 'probe', seconds: number, argv: string[] } |
  *   ReplayCommand |
+ *   ReportCommand |
  *   { cmd: 'help' }
  * )} Command
  */
 /** @typedef {{ cmd: 'replay', cwdPrefix: string | null, sinceDays: number | null, config: string | null, examples: number, dir: string | null }} ReplayCommand */
+/** @typedef {{ cmd: 'report', repoPrefix: string | null, sinceDays: number | null }} ReportCommand */
 
 export const USAGE = [
   '使い方:',
@@ -26,6 +28,7 @@ export const USAGE = [
   '  conductor ack <job> [--session <id>]',
   '  conductor probe <秒> -- <コマンド...>',
   '  conductor replay [--cwd 前方一致] [--since 日数d] [--config conductor.json] [--examples 件数] [--dir 記録の根]',
+  '  conductor report [--repo 前方一致] [--since 日数d]',
 ].join('\n');
 
 export class UsageError extends Error {}
@@ -135,6 +138,25 @@ function parseReplay(rest) {
   return out;
 }
 
+/** @param {string[]} rest @returns {ReportCommand} */
+function parseReport(rest) {
+  /** @type {ReportCommand} */
+  const out = { cmd: 'report', repoPrefix: null, sinceDays: null };
+  for (let i = 0; i < rest.length; i += 1) {
+    const name = rest[i];
+    const value = rest[i + 1];
+    if (value === undefined) throw new UsageError(`${name} に値が無い`);
+    i += 1;
+    if (name === '--repo') out.repoPrefix = value;
+    else if (name === '--since') {
+      const m = /^([1-9][0-9]*)d$/.exec(value);
+      if (m === null) throw new UsageError(`--since は 14d の形(1 以上の日数): ${value}`);
+      out.sinceDays = Number(m[1]);
+    } else throw new UsageError(`知らないオプション: ${name}`);
+  }
+  return out;
+}
+
 /** @param {string[]} args @returns {Command} */
 export function parseArgs(args) {
   const [cmd, ...rest] = args;
@@ -148,6 +170,8 @@ export function parseArgs(args) {
       return parseRun(rest);
     case 'replay':
       return parseReplay(rest);
+    case 'report':
+      return parseReport(rest);
     case 'top':
       if (rest.length > 0) throw new UsageError('top は引数を取らない');
       return { cmd: 'top' };
