@@ -1,11 +1,7 @@
 // @ts-check
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import { DEFAULT_PROFILES } from '../../src/config/profiles.mjs';
-import { pathsOf } from '../../src/daemon/paths.mjs';
 import { headWord, preToolUse } from '../../src/hooks/pretooluse.mjs';
 
 /** @type {import('../../src/config/profiles.mjs').NamedProfile[]} */
@@ -120,20 +116,4 @@ describe('preToolUse(設計 §9.2)', () => {
     assert.equal(preToolUse({ ...bash('npm test'), tool_name: 'Read' }, opts), null);
   });
 
-  it('背景へ回した判断と拒否を hooks.jsonl に記録し、何もしなかった分は書かない', () => {
-    // 改善のための記録: 背景化と拒否が実際に何件出ているかを、後から数えられるようにする
-    const home = mkdtempSync(join(tmpdir(), 'chook-'));
-    const o = { ...opts, env: { CONDUCTOR_HOME: home } };
-    assert.equal(outcome(preToolUse(bash('npm test'), o)), 'background');
-    assert.equal(outcome(preToolUse(bash('/usr/local/bin/npm run build'), o)), 'deny');
-    assert.equal(preToolUse(bash('echo hi'), o), null);
-    const rows = readFileSync(pathsOf(home).hooks, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-    assert.deepEqual(
-      rows.map((r) => [r.kind, r.decision, r.cmd, r.session, r.cwd, typeof r.at]),
-      [
-        ['hook', 'background', 'npm test', 's', '/repo', 'number'],
-        ['hook', 'deny', '/usr/local/bin/npm run build', 's', '/repo', 'number'],
-      ],
-    );
-  });
 });

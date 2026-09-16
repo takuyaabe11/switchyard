@@ -350,7 +350,7 @@ const SUITES = {
     ],
   },
   hooks: {
-    tests: ['test/hooks/pretooluse.test.mjs', 'test/hooks/session.test.mjs', 'test/hooks/agreement.test.mjs', 'test/hooks/shell.test.mjs'],
+    tests: ['test/hooks/pretooluse.test.mjs', 'test/hooks/main.test.mjs', 'test/hooks/session.test.mjs', 'test/hooks/agreement.test.mjs', 'test/hooks/shell.test.mjs'],
     mutations: [
       {
         name: 'H1 既に背景でも書き換える',
@@ -486,16 +486,23 @@ const SUITES = {
       },
       {
         // 記録: 背景へ回した判断を hooks.jsonl に残さない
-        name: 'H21 背景へ回した判断を記録しない',
-        file: 'src/hooks/pretooluse.mjs',
-        from: "    record('background');\n",
+        name: 'H21 hook の判断を記録しない',
+        file: 'src/hooks/main.mjs',
+        from: '  recordPreToolUse(input, out, env);\n',
         to: '',
       },
       {
-        // 記録: 拒否した判断を hooks.jsonl に残さない
-        name: 'H22 拒否した判断を記録しない',
-        file: 'src/hooks/pretooluse.mjs',
-        from: "    record('deny');\n",
+        // 記録: 拒否も背景として記録する(種別が読めなくなる)
+        name: 'H22 拒否を背景として記録する',
+        file: 'src/hooks/main.mjs',
+        from: "const decision = h.permissionDecision === 'deny' ? 'deny' : 'background';",
+        to: "const decision = 'background';",
+      },
+      {
+        // 記録: 何もしなかった分(out が null)まで書こうとする
+        name: 'H23 何もしなかった分まで記録しようとする',
+        file: 'src/hooks/main.mjs',
+        from: '  if (out === null) return;\n',
         to: '',
       },
     ],
