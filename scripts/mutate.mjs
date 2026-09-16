@@ -538,7 +538,9 @@ const TEST_TIMEOUT_MS = 180_000;
  */
 function runTests(dir, tests) {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, ['--test', '--test-reporter=spec', ...tests], { cwd: dir, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    // CONDUCTOR_HOME は写しの中へ向ける(env を渡さないと、テストの試算が実際の ~/.conductor/ を汚す)
+    const env = { ...process.env, CONDUCTOR_HOME: join(dir, '.conductor-home') };
+    const child = spawn(process.execPath, ['--test', '--test-reporter=spec', ...tests], { cwd: dir, env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     let timedOut = false;
