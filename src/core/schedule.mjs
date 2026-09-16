@@ -18,6 +18,18 @@ export function isLockOnly(job) {
   return job.cpus.max === 0;
 }
 
+/**
+ * 親の子か(設計 §6.2・§6.3 の 4): parent のリースが今あり、鍵だけのジョブで、同じセッション、子が計測でなく、
+ * その親の子として既に入場しているリースが無い(親 1 つにつき借りて入場する子は 1 本まで。2 本目以降は普通の要求)。
+ * @param {State} s @param {JobSpec} job @returns {boolean}
+ */
+export function isLockChild(s, job) {
+  const parent = job.parent;
+  if (isLockOnly(job) || job.class === 'measure' || parent === undefined || parent === null) return false;
+  if (s.leases.some((l) => l.lockChild === true && l.job.parent === parent)) return false;
+  return s.leases.some((l) => l.job.id === parent && isLockOnly(l.job) && l.job.session === job.session);
+}
+
 /** CPU を持つリース(計測の単独実行はこれだけで数える。設計 §6.5) @param {State} s @returns {Lease[]} */
 function cpuLeases(s) {
   return s.leases.filter((l) => l.cpus > 0);
@@ -125,12 +137,28 @@ export function schedule(input, now) {
       ordered = [oldest, ...ordered.filter((w) => w !== oldest)];
     }
   }
+  // 親の子(鍵だけのジョブの子)は、点数の順と計測の直後の優先より前に、到着の順で並べる(設計 §6.2)。
+  // 同じ親の未着手の子が同時に待っていても、先頭へ回すのは到着が先の 1 本だけにする —
+  // isLockChild は親ごとに借りを 1 本までしか認めないが、ここで絞らないと 2 本目以降も
+  // 先頭へ回った位置のまま入場の枝で普通の扱いに落ちるだけになり、「2 本目以降は普通の要求として
+  // 並ぶ(先頭へ回らない)」(設計 §6.3 の 4)が崩れる(2026-09-16 最終レビュー再レビュー)。
+  /** @type {Set<string | null | undefined>} */
+  const seenParents = new Set();
+  const children = ordered
+    .filter((w) => isLockChild(s, w.job))
+    .sort((a, b) => a.arrivedAt - b.arrivedAt || (a.job.id < b.job.id ? -1 : 1))
+    .filter((w) => {
+      if (seenParents.has(w.job.parent)) return false;
+      seenParents.add(w.job.parent);
+      return true;
+    });
+  ordered = [...children, ...ordered.filter((w) => !children.includes(w))];
 
-  /** @param {Waiting} w @param {number} cpus */
-  const admit = (w, cpus) => {
+  /** @param {Waiting} w @param {number} cpus @param {boolean} [lockChild] 親の子として入場する(設計 §6.3 の 4) */
+  const admit = (w, cpus, lockChild = false) => {
     s.waiting = s.waiting.filter((x) => x !== w);
     /** @type {Lease} */
-    const lease = { job: w.job, cpus, grantedAt: now, phase: 'granted', pid: null, pgid: null, recovering: false };
+    const lease = { job: w.job, cpus, grantedAt: now, phase: 'granted', pid: null, pgid: null, recovering: false, ...(lockChild ? { lockChild: true } : {}) };
     s.leases = [...s.leases, lease];
     granted.push(lease);
   };
@@ -160,6 +188,19 @@ export function schedule(input, now) {
         admit(w, 0);
       } else {
         note(ahead !== undefined ? `鍵 ${ahead} を先に待つジョブがいる` : blockReason(s, job), null);
+        block(job);
+      }
+      continue;
+    }
+    if (isLockChild(s, job)) {
+      // 親の子: 計測のリースが無ければ、空きが cpus.min に足りなくても min で入場する(容量を超えて借りる。設計 §6.3 の 4)。
+      // 計測の入場待ち(gate)より前に入る。計測のリースがあれば待つ(計測を汚さない。I3)。
+      // 計測の有無は今のリースで見る(同じ回で先に計測が入場したあとに、鍵だけの親が入場して子が親の子になる形がある)
+      const measuring = s.leases.find((l) => l.job.class === 'measure');
+      if (measuring === undefined && locksFree(s, job.locks)) {
+        admit(w, job.cpus.min, true);
+      } else {
+        note(measuring !== undefined ? `計測 ${measuring.job.id} の走行中は入場しない` : blockReason(s, job), null);
         block(job);
       }
       continue;
@@ -205,11 +246,13 @@ export function schedule(input, now) {
   }
 
   // 計測の直後の優先は、CPU を持つ計測以外のジョブが入場したときに外す(鍵だけのジョブでは外さない)
-  if (granted.some((l) => l.job.class !== 'measure' && l.cpus > 0)) s.favorNonMeasure = false;
+  if (granted.some((l) => l.job.class !== 'measure' && l.cpus > 0 && l.lockChild !== true)) s.favorNonMeasure = false;
 
   // 余った CPU を、この回に入場したジョブへ順に max まで配る(走行中のジョブは増やさない)
   let free = s.capacity - usedCpus(s);
   for (const lease of granted) {
+    // 親の子のリースは容量を超えて借りうるので、余りを配らない(設計 §6.3 の 4)
+    if (lease.lockChild === true) continue;
     const add = Math.min(lease.job.cpus.max - lease.cpus, free);
     if (add > 0) {
       lease.cpus += add;

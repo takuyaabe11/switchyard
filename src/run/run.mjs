@@ -71,6 +71,9 @@ export function buildRequest({ argv, flags, env, cwd }) {
   if (flags.cpus?.max === 0 && declaredLocks.length === 0) {
     throw new UsageError(`--cpus 0..0(鍵だけのジョブ)には鍵が 1 本以上要る(--lock も、profile ${flags.profile ?? '(指定なし)'} の locks も無い)`);
   }
+  // 鍵だけのジョブの子(祖先の鍵があり、CPU を持つジョブの中ではない)は、親のジョブの id を載せる。
+  // 規則層が親のリースの実在を確かめてから先に入れ、容量を超えて借りさせる(設計 §4.3 の 7・§6.2・§6.3 の 4)
+  const parent = held.size > 0 && env.CONDUCTOR_IN_JOB !== '1' && env.CONDUCTOR_JOB_ID ? env.CONDUCTOR_JOB_ID : null;
   return {
     job: {
       session: sessionId(env),
@@ -83,6 +86,7 @@ export function buildRequest({ argv, flags, env, cwd }) {
       locks: declaredLocks.filter((k) => !held.has(k)),
       preempt: flags.preempt ?? base?.preempt ?? 'throttle',
       why: flags.why ?? null,
+      ...(parent !== null ? { parent } : {}),
     },
     profile: base,
     configError: error,

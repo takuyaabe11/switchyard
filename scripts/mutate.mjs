@@ -21,6 +21,7 @@ const SUITES = {
       'test/core/recovery.test.mjs',
       'test/core/schedule.admission.test.mjs',
       'test/core/schedule.backfill.test.mjs',
+      'test/core/schedule.lockchild.test.mjs',
       'test/core/schedule.lockonly.test.mjs',
       'test/core/schedule.measure.test.mjs',
       'test/core/score.test.mjs',
@@ -79,6 +80,62 @@ const SUITES = {
         file: 'src/core/schedule.mjs',
         from: 'const ahead = job.locks.find((k) => blocked.has(k));',
         to: 'const ahead = undefined;',
+      },
+      {
+        // 改善 3: 親の子を点数の順より前に並べない
+        name: 'M10 親の子を先頭に並べない',
+        file: 'src/core/schedule.mjs',
+        from: 'ordered = [...children, ...ordered.filter((w) => !children.includes(w))];',
+        to: '',
+      },
+      {
+        // 改善 3: 空きが cpus.min に足りなければ親の子も待たせる(借りを許さない)
+        name: 'M11 親の子に容量を超えた借りを許さない',
+        file: 'src/core/schedule.mjs',
+        from: 'if (measuring === undefined && locksFree(s, job.locks)) {',
+        to: 'if (measuring === undefined && locksFree(s, job.locks) && s.capacity - usedCpus(s) >= job.cpus.min) {',
+      },
+      {
+        // 改善 3: 計測の走行中も親の子を入場させる(I3 を破る)
+        name: 'M12 計測の走行中も親の子を入場させる',
+        file: 'src/core/schedule.mjs',
+        from: 'if (measuring === undefined && locksFree(s, job.locks)) {',
+        to: 'if (locksFree(s, job.locks)) {',
+      },
+      {
+        // 改善 3: 別のセッションの鍵だけのジョブを親として認める(自己申告で列を飛ばせる)
+        name: 'M13 別のセッションの親でも親の子として扱う',
+        file: 'src/core/schedule.mjs',
+        from: ' && l.job.session === job.session);',
+        to: ');',
+      },
+      {
+        // 改善 3: 親の子のリースにも余りを配る
+        name: 'M14 親の子のリースにも余りを配る',
+        file: 'src/core/schedule.mjs',
+        from: 'if (lease.lockChild === true) continue;',
+        to: '',
+      },
+      {
+        // 改善 3・最終レビュー I-2: usedCpus が親の子の借りを数えない(二重に貸さないという性質そのものを壊す)
+        name: 'M15 usedCpus が親の子の借りを数えない',
+        file: 'src/core/schedule.mjs',
+        from: 'return s.leases.reduce((n, l) => n + l.cpus, 0);',
+        to: 'return s.leases.reduce((n, l) => n + (l.lockChild === true ? 0 : l.cpus), 0);',
+      },
+      {
+        // 改善 3・最終レビュー I-1(オーナー決定): 親ごとの借りの上限(1 本まで)を外す
+        name: 'M16 親ごとの借りの上限を外す',
+        file: 'src/core/schedule.mjs',
+        from: 'if (s.leases.some((l) => l.lockChild === true && l.job.parent === parent)) return false;',
+        to: '',
+      },
+      {
+        // 最終レビュー再レビュー: children の並べ替えで親ごとに 1 本へ絞らない(2 本目以降も先頭へ回ってしまう)
+        name: 'M17 親の子の並べ替えで親ごとに 1 本へ絞らない',
+        file: 'src/core/schedule.mjs',
+        from: 'if (seenParents.has(w.job.parent)) return false;',
+        to: '',
       },
     ],
   },
@@ -176,6 +233,13 @@ const SUITES = {
         file: 'src/daemon/store.mjs',
         from: ".filter((name) => name.startsWith(prefix) && name.endsWith('.taking'))",
         to: '.filter(() => false)',
+      },
+      {
+        // 改善 3: 鍵だけのジョブの子の要求に、親のジョブの id を載せない(規則層が親の子として先に入れられない)
+        name: 'W11 鍵だけのジョブの子の要求に parent を載せない',
+        file: 'src/run/run.mjs',
+        from: "const parent = held.size > 0 && env.CONDUCTOR_IN_JOB !== '1' && env.CONDUCTOR_JOB_ID ? env.CONDUCTOR_JOB_ID : null;",
+        to: 'const parent = null;',
       },
     ],
   },

@@ -18,7 +18,8 @@
  *   locks: string[],
  *   preempt: Preempt,
  *   why: string | null,
- *   expectedMs: number | null
+ *   expectedMs: number | null,
+ *   parent?: string | null
  * }} JobSpec
  */
 
@@ -34,7 +35,8 @@
  *   phase: LeasePhase,
  *   pid: number | null,
  *   pgid: number | null,
- *   recovering: boolean
+ *   recovering: boolean,
+ *   lockChild?: boolean
  * }} Lease
  */
 
