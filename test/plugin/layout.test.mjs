@@ -28,6 +28,12 @@ describe('plugin の形(設計 §9・§9.6)', () => {
     assert.deepEqual([market.plugins[0].name, market.plugins[0].version, market.plugins[0].source], [plugin.name, version, './']);
   });
 
+  it('package-lock.json の版も package.json とそろう(npm ci が食い違わない)', () => {
+    const lock = json('package-lock.json');
+    const version = json('package.json').version;
+    assert.deepEqual([lock.name, lock.version, lock.packages[''].version], ['switchyard', version, version]);
+  });
+
   it('hooks.json は SessionStart・PreToolUse(Bash)・Stop だけを、plugin の hook の入口へつなぐ', () => {
     const hooks = json('hooks/hooks.json').hooks;
     assert.deepEqual(Object.keys(hooks).sort(), ['PreToolUse', 'SessionStart', 'Stop']);

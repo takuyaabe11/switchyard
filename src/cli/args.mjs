@@ -9,6 +9,8 @@
  * @typedef {(
  *   { cmd: 'run', flags: RunFlags, argv: string[] } |
  *   { cmd: 'top' } |
+ *   { cmd: 'stop' } |
+ *   { cmd: 'restart' } |
  *   { cmd: 'why', jobId: string } |
  *   { cmd: 'ack', jobId: string, session: string | null } |
  *   { cmd: 'probe', seconds: number, argv: string[] } |
@@ -24,6 +26,8 @@ export const USAGE = [
   '使い方:',
   '  switchyard run [--profile 名前] [--why "目的"] [--class quick|batch|measure] [--cpus 最小..最大] [--lock 名前]... [--preempt pause|throttle|never] -- <コマンド...>',
   '  switchyard top',
+  '  switchyard stop',
+  '  switchyard restart',
   '  switchyard why <job>',
   '  switchyard ack <job> [--session <id>]',
   '  switchyard probe <秒> -- <コマンド...>',
@@ -175,6 +179,12 @@ export function parseArgs(args) {
     case 'top':
       if (rest.length > 0) throw new UsageError('top は引数を取らない');
       return { cmd: 'top' };
+    case 'stop':
+      if (rest.length > 0) throw new UsageError('stop は引数を取らない');
+      return { cmd: 'stop' };
+    case 'restart':
+      if (rest.length > 0) throw new UsageError('restart は引数を取らない');
+      return { cmd: 'restart' };
     case 'why':
       if (rest.length !== 1) throw new UsageError('why にはジョブの id を 1 つ渡す');
       return { cmd: 'why', jobId: rest[0] };

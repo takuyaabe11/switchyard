@@ -1,6 +1,6 @@
 ---
 name: switchyard
-description: 同じマシンの複数セッションで重い走行(テスト全件・build・e2e・ベンチ)を回すときに読む。switchyard が順番待ちや背景実行に回した理由の読み方、失敗の確認のしかた、してはいけない抜け道
+description: Read when heavy runs (full test suites, builds, e2e, benchmarks) go through switchyard on a shared machine - how to read why a run was queued or moved to the background, how to clear a failed job, and which bypasses are forbidden. 同じマシンの複数セッションで重い走行を回すときに読む。順番待ちや背景実行に回された理由の読み方、失敗の確認のしかた、してはいけない抜け道
 ---
 
 # switchyard の使い方
@@ -19,6 +19,7 @@ switchyard は、同じマシンで動く Claude Code のセッションが重�
 - 出力に `[switchyard] 待機 N 番目: 理由(見込み HH:MM)` が出る。待ちの間に同じコマンドを打ち直さない(列に二重に並ぶ)。
 - 全体は `switchyard top`、1 本の理由は `switchyard why <job>` で読む。
 - 計測(ベンチなど)が走っている間は、重い走行は計測が終わるまで待ちになる。
+- `[switchyard] 計測に道を譲るため止まる(SIGSTOP)` と出たら、そのジョブは計測が終わるまで進まない。待つ。自分で `SIGCONT` を送らない(switchyard が戻す)。止まるのは `switchyard.json` で `preempt: pause` / `throttle` を宣言したジョブだけで、既定では止まらない。
 
 ## 止まろうとして差し戻されたとき
 

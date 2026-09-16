@@ -2,7 +2,7 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,7 +11,7 @@ import { connectDaemon, DaemonUnavailableError } from '../../src/client/connect.
 import { pathsOf } from '../../src/daemon/paths.mjs';
 import { startDaemon } from '../../src/daemon/server.mjs';
 import { runHook } from '../../src/hooks/main.mjs';
-import { pathExportLine, sessionStart, stop } from '../../src/hooks/session.mjs';
+import { deadShimPaths, pathExportLine, pruneShimLines, sessionStart, stop } from '../../src/hooks/session.mjs';
 import { openClient } from '../../testkit/client.mjs';
 import { jobRequest } from '../../testkit/requests.mjs';
 import { tempHome } from '../../testkit/tmp.mjs';
@@ -57,6 +57,73 @@ async function failedJob(sock) {
   await c.next((m) => m.t === 'ok');
   return String(acc.jobId);
 }
+
+describe('deadShimPaths(PATH に残った死んだ shims)', () => {
+  it('指す先が無い shims の行だけを挙げる', () => {
+    const live = pathExportLine(fileURLToPath(new URL('../../', import.meta.url)));
+    const text = [live, "export PATH='/nowhere/dev/conductor/shims':\"$PATH\"", 'export PATH=/usr/bin:"$PATH"', ''].join('\n');
+    assert.deepEqual(deadShimPaths(text), ['/nowhere/dev/conductor/shims']);
+  });
+
+  it('同じ行が 2 度あっても 1 つだけ挙げる', () => {
+    const line = "export PATH='/nowhere/x/shims':\"$PATH\"";
+    assert.deepEqual(deadShimPaths([line, line].join('\n')), ['/nowhere/x/shims']);
+  });
+
+  it('shims の行が無ければ空', () => {
+    assert.deepEqual(deadShimPaths('export FOO=1\n'), []);
+  });
+});
+
+describe('pruneShimLines', () => {
+  it('挙げた shims の行だけを外し、他の行は 1 文字も変えない', () => {
+    const other = "export PATH='/other/plugin/shims':\"$PATH\"";
+    const text = ["export FOO=1", "export PATH='/dead/shims':\"$PATH\"", other, ''].join('\n');
+    assert.equal(pruneShimLines(text, ['/dead/shims']), ['export FOO=1', other, ''].join('\n'));
+  });
+});
+
+describe('sessionStart の PATH の知らせ', () => {
+  it('死んだ shims の行を env ファイルから外し、そう知らせる', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'switchyard-env-'));
+    const envFile = join(dir, 'env.sh');
+    const keep = 'export OTHER=1';
+    writeFileSync(envFile, `export PATH='/nowhere/dev/conductor/shims':"$PATH"\n${keep}\n`);
+    const lines = await sessionStart({}, {
+      env: { CLAUDE_ENV_FILE: envFile, SWITCHYARD_HOME: dir },
+      connect: () => Promise.reject(new DaemonUnavailableError('居ない')),
+    });
+    assert.ok(lines.some((l) => l.includes('もう無い shims') && l.includes('/nowhere/dev/conductor/shims')), lines.join('\n'));
+    const after = readFileSync(envFile, 'utf8');
+    assert.equal(after.includes('/nowhere/dev/conductor/shims'), false, '死んだ行は消える');
+    assert.ok(after.includes(keep), '他の行は残る');
+    assert.ok(after.includes(pathExportLine(fileURLToPath(new URL('../../', import.meta.url)))), 'いまの shims の行は足される');
+  });
+
+  it('版が上がって置き場が変わっても、行が積み上がらない', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'switchyard-env-'));
+    const envFile = join(dir, 'env.sh');
+    // 消えた古い版の置き場を 3 世代ぶん
+    writeFileSync(envFile, ['0.1.0', '0.2.0', '0.3.0'].map((v) => `export PATH='/gone/cache/switchyard/${v}/shims':"$PATH"`).join('\n') + '\n');
+    await sessionStart({}, {
+      env: { CLAUDE_ENV_FILE: envFile, SWITCHYARD_HOME: dir },
+      connect: () => Promise.reject(new DaemonUnavailableError('居ない')),
+    });
+    const shimLines = readFileSync(envFile, 'utf8').split('\n').filter((l) => l.includes('/shims'));
+    assert.equal(shimLines.length, 1, `shims の行は 1 本だけ残る: ${shimLines.join(' | ')}`);
+  });
+
+  it('生きている行だけなら知らせない', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'switchyard-env-'));
+    const envFile = join(dir, 'env.sh');
+    writeFileSync(envFile, `${pathExportLine(fileURLToPath(new URL('../../', import.meta.url)))}\n`);
+    const lines = await sessionStart({}, {
+      env: { CLAUDE_ENV_FILE: envFile, SWITCHYARD_HOME: dir },
+      connect: () => Promise.reject(new DaemonUnavailableError('居ない')),
+    });
+    assert.equal(lines.some((l) => l.includes('もう無い shims')), false, lines.join('\n'));
+  });
+});
 
 describe('SessionStart(設計 §9.2)', () => {
   it('shims を PATH の先頭へ足す行を CLAUDE_ENV_FILE に 1 度だけ書き、知らせることが無ければ何も返さない', async () => {

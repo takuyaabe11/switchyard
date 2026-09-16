@@ -1,8 +1,8 @@
 {
   "name": "switchyard",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
-  "description": "同じマシンの Claude Code セッションが重い走行を取り合わないように、CPU と排他の鍵を割り振る司令塔",
+  "description": "Keeps Claude Code sessions on one machine from fighting over heavy runs, by handing out CPU shares and exclusive locks.",
   "license": "MIT",
   "homepage": "https://github.com/takuyaabe11/switchyard#readme",
   "repository": {

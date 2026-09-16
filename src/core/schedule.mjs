@@ -8,9 +8,12 @@ import { sortWaiting } from './score.mjs';
 /** @typedef {import('./types.mjs').JobSpec} JobSpec */
 /** @typedef {import('./types.mjs').Action} Action */
 
+/** 止めた / 降格したリース(設計 §6.7)。計測に CPU を譲っているので、容量にも単独判定にも数えない @param {Lease} l */
+const isHeld = (l) => l.held !== undefined;
+
 /** @param {State} s @returns {number} */
 export function usedCpus(s) {
-  return s.leases.reduce((n, l) => n + l.cpus, 0);
+  return s.leases.reduce((n, l) => n + (isHeld(l) ? 0 : l.cpus), 0);
 }
 
 /** 鍵だけのジョブか(CPU を使わない。設計 §5.2) @param {JobSpec} job @returns {boolean} */
@@ -30,9 +33,20 @@ export function isLockChild(s, job) {
   return s.leases.some((l) => l.job.id === parent && isLockOnly(l.job) && l.job.session === job.session);
 }
 
-/** CPU を持つリース(計測の単独実行はこれだけで数える。設計 §6.5) @param {State} s @returns {Lease[]} */
+/** CPU を持つリース(計測の単独実行はこれだけで数える。設計 §6.5)。止めたものは数えない(設計 §6.7) @param {State} s @returns {Lease[]} */
 function cpuLeases(s) {
-  return s.leases.filter((l) => l.cpus > 0);
+  return s.leases.filter((l) => l.cpus > 0 && !isHeld(l));
+}
+
+/**
+ * 計測に道を譲らせるリース(設計 §6.7)。CPU を持ち、まだ止めておらず、`preempt` が never でなく、
+ * 計測と鍵が重ならないもの。鍵が重なる相手を止めると、鍵が返らないまま計測が永久に入れない。
+ * @param {State} s @param {JobSpec} measure @returns {Lease[]}
+ */
+function holdable(s, measure) {
+  return s.leases.filter(
+    (l) => l.cpus > 0 && !isHeld(l) && l.job.preempt !== 'never' && l.job.class !== 'measure' && !l.job.locks.some((k) => measure.locks.includes(k)),
+  );
 }
 
 /** @param {State} s @param {string} key @returns {number} */
@@ -164,6 +178,34 @@ export function schedule(input, now) {
   };
 
   const runningMeasure = s.leases.find((l) => l.job.class === 'measure');
+
+  // preempt(設計 §6.7): 計測が待ち列の先頭に立ったら、宣言したジョブに道を譲らせる。
+  // 止めた / 降格したリースは容量にも単独判定にも数えないので、計測はこの回に入場できる。
+  // 譲らせるのは計測が先頭のときだけ — 容量が足りないだけの待ちでは止めない(止めても待ちは縮まない)。
+  /** @type {Action[]} */
+  const holdActions = [];
+  const headMeasure = runningMeasure === undefined && ordered.length > 0 && ordered[0].job.class === 'measure' ? ordered[0].job : null;
+  if (headMeasure !== null) {
+    const targets = holdable(s, headMeasure);
+    if (targets.length > 0) {
+      const ids = new Set(targets.map((l) => l.job.id));
+      s.leases = s.leases.map((l) => (ids.has(l.job.id) ? { ...l, held: l.job.preempt === 'pause' ? 'pause' : 'throttle' } : l));
+      for (const l of targets) holdActions.push({ type: 'hold', jobId: l.job.id, mode: l.job.preempt === 'pause' ? 'pause' : 'throttle' });
+    }
+  } else if (runningMeasure === undefined) {
+    // 計測が居なくなった(入場した後に終わった・取り消された)。止めたものを戻す
+    const releases = s.leases.filter(isHeld);
+    if (releases.length > 0) {
+      s.leases = s.leases.map((l) => {
+        if (!isHeld(l)) return l;
+        const copy = { ...l };
+        delete copy.held;
+        return copy;
+      });
+      for (const l of releases) holdActions.push({ type: 'unhold', jobId: l.job.id });
+    }
+  }
+
   /** @type {string | null} 入場を止めている理由 */
   let gate = runningMeasure ? `計測 ${runningMeasure.job.id} の走行中は入場しない` : null;
   /** @type {{ id: string, etaAt: number | null } | null} 入場できなかった最初のジョブ */
@@ -261,7 +303,8 @@ export function schedule(input, now) {
   }
 
   /** @type {Action[]} */
-  const actions = [];
+  // 止める処置は入場より先に出す(計測が走り出す前に、相手が止まっているようにする)
+  const actions = [...holdActions];
   // 容量を超えて借りた親の子だけ印を載せる(記録から借りの回数を数えるため。項目は該当するときだけ足す)
   for (const l of granted) actions.push({ type: 'grant', jobId: l.job.id, cpus: l.cpus, ...(l.lockChild === true ? { lockChild: true } : {}) });
   for (const n of Object.values(s.notes)) {

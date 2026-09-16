@@ -51,7 +51,19 @@ const baseName = (comm) => {
 };
 
 /**
+ * 見張りの次の間隔。子孫の顔ぶれが変わらない間は倍にして伸ばし、変わったら最初へ戻す。
+ * ps はプロセス表を全部読むので 1 回が安くない(実測 29ms・555 行)。走行の間ずっと 2 秒ごとに読むと、
+ * 10 分のジョブで CPU を 8.7 秒使い、そのたびに包みのイベントループ(心拍・信号の転送)が止まる。
+ * 代わりに、二重 fork で親を離れるのを見つける窓は広がる(設計 §13 V6 の限界が緩む)。
+ * @param {number} current @param {boolean} changed @param {number} baseMs @param {number} maxMs @returns {number}
+ */
+export function nextWatchMs(current, changed, baseMs, maxMs) {
+  return changed ? baseMs : Math.min(current * 2, maxMs);
+}
+
+/**
  * 子孫の追跡器。sample() を定期的に呼び、終わったら report() で結果を得る。
+ * sample() は、子孫の顔ぶれかグループが前回から変わったかを返す(見張りの間隔を決めるのに使う)。
  * 親子関係(ppid)で子孫をたどる。親が先に終わって親子関係が切れた子(ppid 1)も、
  * 前に見た開始時刻(lstart)と一致するときだけ追い続ける(名前の一致では使い回された pid を取り違える。I2)。
  * 限界: sample() の間隔より速く二重 fork して親を離れたプロセスは見逃しうる。
@@ -61,14 +73,16 @@ export function createEscapeTracker({ rootPid, pgid, list = processTable }) {
   /** @type {Map<number, { pgid: number, comm: string, started: string }>} */
   const seen = new Map();
 
+  /** @returns {boolean} 子孫の顔ぶれかグループが前回から変わったか */
   const sample = () => {
     /** @type {ProcRow[]} */
     let rows;
     try {
       rows = list();
     } catch {
-      return; // ps が一時的に失敗しても、追跡は続ける
+      return false; // ps が一時的に失敗しても、追跡は続ける(変化なしとして扱う)
     }
+    let changed = false;
     const tree = new Set([rootPid]);
     let grew = true;
     while (grew) {
@@ -85,8 +99,11 @@ export function createEscapeTracker({ rootPid, pgid, list = processTable }) {
       const known = seen.get(r.pid);
       // 親子関係が切れた子は、開始時刻が前に見たものと一致するときだけ同じプロセスとみなす(名前の一致はやめる。使い回された pid を取り違えない)
       const orphanedSame = known !== undefined && r.ppid === 1 && known.started === r.started;
-      if (tree.has(r.pid) || orphanedSame) seen.set(r.pid, { pgid: r.pgid, comm, started: r.started });
+      if (!(tree.has(r.pid) || orphanedSame)) continue;
+      if (known === undefined || known.pgid !== r.pgid || known.comm !== comm) changed = true;
+      seen.set(r.pid, { pgid: r.pgid, comm, started: r.started });
     }
+    return changed;
   };
 
   /** @returns {EscapeReport} */

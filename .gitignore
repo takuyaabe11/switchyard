@@ -1,1 +1,4 @@
 node_modules/
+
+# 設計と計画の内部文書は repo の外で管理する(公開する repo に入れない)
+docs/superpowers/

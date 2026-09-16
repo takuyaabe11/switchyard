@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { join } from 'node:path';
+import { commandLooksLikeSwitchyardd } from './control.mjs';
 import { switchyardHome, pathsOf } from './paths.mjs';
 import { startDaemon } from './server.mjs';
 import { readJson } from './store.mjs';
@@ -42,6 +43,9 @@ export function lockCapsFrom(config) {
   return out;
 }
 
+// 既存の呼び出し元とテストのために、ここからも読めるようにしておく
+export { commandLooksLikeSwitchyardd };
+
 /** @param {number} pid */
 function pidAlive(pid) {
   try {
@@ -50,23 +54,6 @@ function pidAlive(pid) {
   } catch (e) {
     return /** @type {NodeJS.ErrnoException} */ (e).code === 'EPERM';
   }
-}
-
-/**
- * ps の command 文字列が、いま switchyardd を走らせているプロセスを指しているか。
- * package.json の bin(`switchyardd` という名前の symlink)から起動すると、command は
- * `/usr/bin/env node …/switchyardd` になり `switchyardd.mjs` を含まない(実測)。
- * 空白で区切った語のどれかの basename が `switchyardd` か `switchyardd.mjs` であれば、そうとみなす。
- * @param {string} command @returns {boolean}
- */
-export function commandLooksLikeSwitchyardd(command) {
-  return command
-    .trim()
-    .split(/\s+/)
-    .some((word) => {
-      const base = word.split('/').pop() ?? word;
-      return base === 'switchyardd' || base === 'switchyardd.mjs';
-    });
 }
 
 /**
@@ -128,6 +115,8 @@ export async function main(env = process.env) {
     return;
   }
   const config = readJson(join(home, 'config.json'));
+  /** @type {(() => Promise<void>) | null} 起動が終わるまでは呼べない */
+  let shutdown = null;
   try {
     const d = await startDaemon({
       home,
@@ -136,6 +125,11 @@ export async function main(env = process.env) {
       tickMs: positiveInt(env.SWITCHYARD_TICK_MS),
       heartbeatTimeoutMs: positiveInt(env.SWITCHYARD_HEARTBEAT_TIMEOUT_MS),
       recoveryGraceMs: positiveInt(env.SWITCHYARD_RECOVERY_GRACE_MS),
+      idleExitMs: env.SWITCHYARD_IDLE_EXIT_MS === '0' ? null : positiveInt(env.SWITCHYARD_IDLE_EXIT_MS),
+      // 一度も仕事をしないまま静かなら、自分で終わる(次の要求で自動起動する)
+      onIdleExit: () => {
+        void shutdown?.();
+      },
     });
     const stop = async () => {
       await d.close();
@@ -146,6 +140,7 @@ export async function main(env = process.env) {
       }
       process.exit(0);
     };
+    shutdown = stop;
     process.on('SIGTERM', stop);
     process.on('SIGINT', stop);
   } catch (e) {

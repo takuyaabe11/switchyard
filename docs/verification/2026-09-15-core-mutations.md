@@ -139,7 +139,7 @@
 
 ## 最終レビュー(2026-09-16)で足した変異 — I-1・I-2 の是正
 
-`docs/superpowers/specs/2026-09-16-switchyard-lockchild/final-review.md` の Important 2 件を受け、
+最終レビュー(設計の記録は repo の外で管理)の Important 2 件を受け、
 `isLockChild`(親ごとの借りの上限を 1 本までに閉じる)と `test/core/schedule.lockchild.test.mjs` の
 「借りが返るまで、CPU を持つ普通のジョブは入場しない」(fixture の `x` を `cpus 1` にして、借りが空きの
 計算に入らなければ結果が変わる形へ直す)を修正した。この 2 件が実際に検出力を持つことを、新しい変異
@@ -158,7 +158,7 @@ M15・M16 で確かめた。
 
 ## 最終レビュー再レビュー(2026-09-16・修正の報告 3)で足した変異 — children 並べ替えの不整合の是正
 
-`docs/superpowers/specs/2026-09-16-switchyard-lockchild/final-rereview.md`「修正が新しく持ち込んだ問題」の
+最終レビューの再レビュー(同上)「修正が新しく持ち込んだ問題」の
 Important 1 件を受けた。`isLockChild` の 5 つ目の判定(親ごとに借りは 1 本まで)は入場の枝では毎回効くが、
 `children` の並べ替え(ループの外で 1 回だけ評価)は、同じ親の未着手の子が同じ回に 2 本以上待っていると
 **両方**を先頭へ回してしまう(どちらもまだリースを持たないので、並べ替えの時点ではどちらも `isLockChild` が
