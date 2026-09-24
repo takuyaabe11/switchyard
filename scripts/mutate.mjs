@@ -48,10 +48,16 @@ const SUITES = {
         to: 'if (cores === null || job.cpus.max === 0) return job;',
       },
       {
-        name: 'M43 失敗した走行も使い方に数える',
+        name: 'M43 すぐ落ちた失敗も使い方に数える',
         file: 'src/core/usage.mjs',
-        from: 'if (code !== 0 || cpuMs === null || cpus <= 0 || durationMs < USAGE_MIN_DURATION_MS) return;',
-        to: 'if (cpuMs === null || cpus <= 0 || durationMs < USAGE_MIN_DURATION_MS) return;',
+        from: 'durationMs < (code === 0 ? USAGE_MIN_DURATION_MS : USAGE_MIN_FAILED_DURATION_MS)',
+        to: 'durationMs < USAGE_MIN_DURATION_MS',
+      },
+      {
+        name: 'M44 長く走った失敗を使い方に数えない',
+        file: 'src/core/usage.mjs',
+        from: 'durationMs < (code === 0 ? USAGE_MIN_DURATION_MS : USAGE_MIN_FAILED_DURATION_MS)',
+        to: 'code !== 0 || durationMs < USAGE_MIN_DURATION_MS',
       },
       {
         name: 'M30 後の成功で前の失敗を片付けない',
@@ -464,9 +470,27 @@ const SUITES = {
         to: 'return true;',
       },
       {
+        name: 'H23 shim から見えない重い形を拒否しない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: 'if (invisible.length > 0) {',
+        to: 'if (false) {',
+      },
+      {
+        name: 'H24 仮想環境を有効にした後の走行を見逃す',
+        file: 'src/hooks/pretooluse.mjs',
+        from: '(isVenvPath(head) || (activated && !pathHead))',
+        to: 'isVenvPath(head)',
+      },
+      {
+        name: 'H22 待ちの見込みに、実測で縮めた要求を使わない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "const min = cores === undefined ? h.cpusMin : rightSize({ class: h.jobClass, cpus: { min: h.cpusMin, max: h.cpusMin } }, cores).cpus.min;",
+        to: 'const min = h.cpusMin;',
+      },
+      {
         name: 'H21 auto の方針でもデーモンの盤面を見ない',
         file: 'src/hooks/main.mjs',
-        from: "out = preToolUse(input, { ...base, shouldBackground: (heavy) => snap !== null && waitExpected(snap, heavy) });",
+        from: "out = preToolUse(input, { ...base, shouldBackground: (heavy) => snap !== null && waitExpected(snap, heavy, repo) });",
         to: '',
       },
       {
@@ -486,7 +510,7 @@ const SUITES = {
         // 改善 2: 直す前の形。shim の語でないものをパスで呼ぶ形(scripts/probe-run.sh)と shim の無い語も拒否する
         name: 'H10 shim の語でないものをパスで呼ぶ形・shim の無い語も拒否へ戻す',
         file: 'src/hooks/pretooluse.mjs',
-        from: "if (!wrapped && hit !== null && launches && hit.profile.class !== 'quick') heavy.push(needOf(hit.profile));",
+        from: "if (!wrapped && hit !== null && launches && hit.profile.class !== 'quick') heavy.push(needOf(hit.profile, hit.name));",
         to: 'if (!wrapped && hit !== null && launches) unshimmed.push(text);',
       },
       {

@@ -75,6 +75,15 @@ describe('背景へ回す方針(SWITCHYARD_BACKGROUND)', () => {
     assert.equal(waitExpected({ ...empty, used: 1, leases: [leaseView({ cpus: 1 })] }, [{ jobClass: 'measure', cpusMin: 1, locks: [] }]), true, '計測は単独');
   });
 
+  it('waitExpected: デーモンが実測で縮める profile は、縮めた要求で見積もる(同じ repo の同じ profile だけ)', () => {
+    const busy = { ...empty, used: 2, leases: [leaseView({ cpus: 2 })], sized: { [JSON.stringify(['/r', 'unit'])]: 0.8 } };
+    const unit = { jobClass: /** @type {const} */ ('batch'), cpusMin: 4, locks: [], profile: 'unit' };
+    assert.equal(waitExpected(busy, [unit], '/r'), false, '宣言は 4 コアだが、実測で 1 コアに縮めて入る');
+    assert.equal(waitExpected(busy, [unit], '/other'), true, '別の repo は宣言どおり');
+    assert.equal(waitExpected(busy, [{ ...unit, profile: 'e2e' }], '/r'), true, '別の profile は宣言どおり');
+    assert.equal(waitExpected(busy, [unit]), true, 'repo が分からなければ宣言どおり');
+  });
+
   it('auto(既定): デーモンが居ない・空いているなら前景のまま、容量が埋まっていれば背景へ回す。never は回さない', async () => {
     const home = mkdtempSync(join(tmpdir(), 'chook-'));
     /** @type {string[]} */

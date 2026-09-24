@@ -3,6 +3,25 @@
 All notable changes to switchyard. Versions follow `plugin.json`; Claude Code only offers an update when that
 version goes up.
 
+## 0.8.0
+
+### Security
+- `~/.switchyard` is created readable by its owner only (0700, logs 0600). The logs hold full command lines, arguments
+  included, and were readable by other users on the machine. Existing directories and logs are tightened when the
+  daemon starts.
+
+### Changed
+- `PreToolUse` refuses heavy runs that no shim can see — `./gradlew test`, `./mvnw verify`, tools inside a Python
+  virtualenv (`.venv/bin/pytest`), and `pytest` or `python -m pytest` after `source .venv/bin/activate` — and asks for
+  `switchyard run -- <command>`, which puts them in the queue.
+- Whether to send a run to the background now uses the share the daemon will actually give it (sized to measured use),
+  not the declared one.
+- CPU use is learned from failed runs too when they ran for 5 seconds or more, so a profile gets sized while its
+  tests are still red.
+
+### Fixed
+- A daemon test with a 150 ms heartbeat window failed under CI load.
+
 ## 0.7.0
 
 ### Added

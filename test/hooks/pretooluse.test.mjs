@@ -93,9 +93,36 @@ describe('preToolUse(設計 §9.2)', () => {
     assert.equal(decision('SWITCHYARD_IN_JOB=1 git status'), null);
   });
 
-  it('仮想環境・node_modules/.bin の実行ファイルは、shim の語でもパスで呼んでよい(プロジェクトの道具を選んでいる)', () => {
-    const decision = (/** @type {string} */ c) => /** @type {any} */ (preToolUse(bash(c), { profilesFor: () => DEFAULT_PROFILES }))?.hookSpecificOutput?.permissionDecision ?? null;
-    for (const c of ['.venv/bin/pytest -x', '/home/u/p/.venv/bin/python -m pytest', 'venv/bin/python3 -m pytest', '.tox/py312/bin/pytest']) assert.notEqual(decision(c), 'deny', c);
+  it('shim から見えない重い形(仮想環境の実行ファイル・activate の後・./gradlew・./mvnw)は拒否し、switchyard run で包むよう案内する', () => {
+    /** @param {string} c */
+    const out = (c) => /** @type {any} */ (preToolUse(bash(c), { profilesFor: () => DEFAULT_PROFILES }))?.hookSpecificOutput ?? null;
+    const decision = (/** @type {string} */ c) => out(c)?.permissionDecision ?? null;
+    for (const c of [
+      '.venv/bin/pytest -x',
+      '/home/u/p/.venv/bin/python -m pytest',
+      '.tox/py312/bin/pytest',
+      'source .venv/bin/activate && pytest -x',
+      '. venv/bin/activate; python -m pytest',
+      './gradlew test',
+      './gradlew :app:test --info',
+      '../mvnw -q verify',
+    ]) {
+      assert.equal(decision(c), 'deny', c);
+      assert.match(out(c).permissionDecisionReason, /switchyard run --/, c);
+    }
+    // 包めば通る。軽い形・node_modules/.bin(node の shim を通る)・activate の前の走行は拒否しない
+    for (const c of [
+      'switchyard run -- ./gradlew test',
+      'switchyard run -- .venv/bin/pytest -x',
+      './gradlew --version',
+      './gradlew tasks',
+      '.venv/bin/python script.py',
+      'source .venv/bin/activate && python script.py',
+      'pytest -x && source .venv/bin/activate',
+      './node_modules/.bin/vitest run',
+    ]) {
+      assert.notEqual(decision(c), 'deny', c);
+    }
     assert.equal(decision('/usr/bin/python3 -m pytest'), 'deny');
     assert.equal(decision('/usr/local/bin/mvn test'), 'deny');
   });

@@ -2,7 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "switchyard",
   "displayName": "switchyard",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "Keeps Claude Code sessions on one machine from fighting over heavy runs, by handing out CPU shares and exclusive locks.",
   "author": {
     "name": "twoyearsold",

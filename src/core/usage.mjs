@@ -12,6 +12,11 @@ export const USAGE_WINDOW = 10;
 export const USAGE_MIN_SAMPLES = 3;
 /** 測り方が粗い短い走行は数えない(ms) */
 export const USAGE_MIN_DURATION_MS = 2_000;
+/**
+ * 失敗した走行は、これより長く走ったものだけを数える(ms)。CPU の使い方は成否でほとんど変わらないので、
+ * テストが赤い間も学べるようにする。途中ですぐ落ちた走行(起動の失敗・最初の数件で止まる)は、使い方を小さく見せるので数えない。
+ */
+export const USAGE_MIN_FAILED_DURATION_MS = 5_000;
 /** 割り振られた量に対する使用の割合がこれ未満の走行だけを「使い切らない」とみなす */
 export const UNDERUSE_RATIO = 0.5;
 
@@ -24,7 +29,7 @@ function median(xs) {
   return s.length % 2 === 1 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
 
-/** repo × profile ごとの、成功した走行の CPU の使い方 */
+/** repo × profile ごとの CPU の使い方(成功した走行と、長く走ってから失敗した走行) */
 export class UsageBook {
   /** @type {Map<string, UsageSample[]>} */
   #byKey = new Map();
@@ -34,9 +39,9 @@ export class UsageBook {
    * @param {{ durationMs: number, cpuMs: number | null, cpus: number, code: number | null }} run
    */
   record(repo, profile, { durationMs, cpuMs, cpus, code }) {
-    if (code !== 0 || cpuMs === null || cpus <= 0 || durationMs < USAGE_MIN_DURATION_MS) return;
+    if (cpuMs === null || cpus <= 0 || durationMs < (code === 0 ? USAGE_MIN_DURATION_MS : USAGE_MIN_FAILED_DURATION_MS)) return;
     const cores = cpuMs / durationMs;
-    const k = JSON.stringify([repo, profile]);
+    const k = usageKey(repo, profile);
     const list = this.#byKey.get(k) ?? [];
     list.push({ cores, ratio: cores / cpus });
     if (list.length > USAGE_WINDOW) list.splice(0, list.length - USAGE_WINDOW);
@@ -48,12 +53,30 @@ export class UsageBook {
    * @param {string} repo @param {string} profile @returns {number | null}
    */
   cores(repo, profile) {
-    const list = this.#byKey.get(JSON.stringify([repo, profile])) ?? [];
+    return this.#coresOf(this.#byKey.get(usageKey(repo, profile)) ?? []);
+  }
+
+  /** 縮めてよい全ての repo × profile と、その使用コア数(盤面に載せ、PreToolUse が待ちの見込みに使う) @returns {Record<string, number>} */
+  sizedAll() {
+    /** @type {Record<string, number>} */
+    const out = {};
+    for (const [k, list] of this.#byKey) {
+      const c = this.#coresOf(list);
+      if (c !== null) out[k] = c;
+    }
+    return out;
+  }
+
+  /** @param {UsageSample[]} list @returns {number | null} */
+  #coresOf(list) {
     if (list.length < USAGE_MIN_SAMPLES) return null;
     if (median(list.map((x) => x.ratio)) >= UNDERUSE_RATIO) return null;
     return median(list.map((x) => x.cores));
   }
 }
+
+/** repo × profile の鍵(盤面の sized の鍵と同じ) @param {string} repo @param {string} profile */
+export const usageKey = (repo, profile) => JSON.stringify([repo, profile]);
 
 /**
  * 実測の使用コア数に合わせて、batch の要求を小さくする(大きくはしない)。計測・鍵だけのジョブ・入れ子で 0 のジョブは変えない。

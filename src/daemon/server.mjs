@@ -10,7 +10,7 @@ import { numOrNull, parseEscape, parseJobRequest } from '../protocol/messages.mj
 import { createDecoder, encode } from '../protocol/ndjson.mjs';
 import { groupHasLiveMembers } from '../run/group.mjs';
 import { VERSION } from '../version.mjs';
-import { pathsOf, SOCKET_PATH_LIMIT } from './paths.mjs';
+import { ensurePrivateDir, pathsOf, SOCKET_PATH_LIMIT, tightenFiles } from './paths.mjs';
 import { rightSize } from '../core/usage.mjs';
 import { appendRecord, createStateWriter, loadEscapes, loadEstimates, loadUsage, parseState, readJournal, readJson, rotateRecords, takeUnmanaged } from './store.mjs';
 import { t } from '../i18n.mjs';
@@ -91,7 +91,9 @@ export async function startDaemon(opts) {
   const p = pathsOf(home);
   const sockBytes = Buffer.byteLength(p.sock);
   if (sockBytes > SOCKET_PATH_LIMIT) throw new Error(t(`socket のパスが長すぎる(${sockBytes} バイト > ${SOCKET_PATH_LIMIT}): ${p.sock}`, `socket path too long (${sockBytes} bytes > ${SOCKET_PATH_LIMIT}): ${p.sock}`));
-  mkdirSync(home, { recursive: true });
+  ensurePrivateDir(home);
+  // 0.7.0 以前に他のユーザーからも読める権限で作った記録を締め直す
+  tightenFiles(home);
   await removeStaleSocket(p.sock);
 
   // 回した 1 世代前も含めて読んでから、上限を超えていれば回す(見込みの帳簿を切らさない)
@@ -212,6 +214,8 @@ export async function startDaemon(opts) {
       badRecords: journal.bad,
       // 起動したときの版。plugin を更新した後も古いデーモンが走り続けるので、SessionStart が食い違いを知らせる(設計 §9.6)
       version: VERSION,
+      // 実測で要求を縮める repo × profile と使用コア数。PreToolUse が「待たされるか」の見込みに使う
+      sized: adaptive ? usage.sizedAll() : {},
     };
   };
 

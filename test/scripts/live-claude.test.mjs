@@ -11,19 +11,29 @@ import { tempHome } from '../../testkit/tmp.mjs';
 const SCRIPT = fileURLToPath(new URL('../../scripts/live-claude.mjs', import.meta.url));
 
 describe('live-claude(設計 §15)', () => {
-  it('stream-json から、背景に回ったこと・Stop の差し戻し・結果・費用を取り出す', () => {
+  it('stream-json から、背景に回ったか・前景の出力・Stop の差し戻し・拒否・結果・費用を取り出す', () => {
     const lines = [
       JSON.stringify({ type: 'system', subtype: 'init' }),
-      JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'Command running in background with ID: b1' }] } }),
+      JSON.stringify({ type: 'system', subtype: 'task_started', is_backgrounded: false }),
+      JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: '[switchyard] started j1 (CPU 2)\nLIVE_JOB=j1' }] } }),
       '壊れた行',
-      JSON.stringify({ type: 'user', message: { content: '[switchyard] このセッションのジョブに、まだ確認されていない終わり方がある:' } }),
-      JSON.stringify({ type: 'result', result: 'LIVE_JOB=j123', total_cost_usd: 0.012 }),
+      JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: '[switchyard] the shims cannot see this, so it would skip the queue: ./gradlew test.' }] } }),
+      JSON.stringify({ type: 'system', subtype: 'hook_response', output: '[switchyard] jobs in this session ended in a way nobody has looked at yet:' }),
+      JSON.stringify({ type: 'result', result: 'LIVE_JOB=j1', total_cost_usd: 0.012 }),
     ];
-    assert.deepEqual(analyzeStream(lines.join('\n')), { background: true, blockedStop: true, result: 'LIVE_JOB=j123', costUsd: 0.012 });
+    const a = analyzeStream(lines.join('\n'));
+    assert.deepEqual([a.background, a.foregroundOutput, a.blockedStop, a.denied, a.result, a.costUsd], [false, true, true, true, 'LIVE_JOB=j1', 0.012]);
+    assert.match(a.toolText, /\[switchyard\] started/);
+  });
+
+  it('背景に回ったことは、task_started の is_backgrounded と、背景に回ったと告げる tool_result の両方で見る', () => {
+    assert.equal(analyzeStream(JSON.stringify({ type: 'system', subtype: 'task_started', is_backgrounded: true })).background, true);
+    const msg = JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', content: 'Command running in background with ID: b1' }] } });
+    assert.deepEqual([analyzeStream(msg).background, analyzeStream(msg).foregroundOutput], [true, false]);
   });
 
   it('何も無ければすべて偽', () => {
-    assert.deepEqual(analyzeStream(''), { background: false, blockedStop: false, result: '', costUsd: null });
+    assert.deepEqual(analyzeStream(''), { background: false, foregroundOutput: false, blockedStop: false, denied: false, toolText: '', result: '', costUsd: null });
   });
 
   it('後始末: daemon.lock の pid が既に居なければ、何もせずに終わる(投げない)', () => {

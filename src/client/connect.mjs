@@ -5,7 +5,7 @@ import { closeSync, mkdirSync, openSync } from 'node:fs';
 import { connect } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pathsOf } from '../daemon/paths.mjs';
+import { ensurePrivateDir, pathsOf, PRIVATE_FILE_MODE } from '../daemon/paths.mjs';
 import { createDecoder, encode } from '../protocol/ndjson.mjs';
 import { t } from '../i18n.mjs';
 
@@ -41,8 +41,8 @@ export async function connectDaemon({ home, autoStart = true, timeoutMs = 2_000,
   } catch (e) {
     if (!autoStart) throw new DaemonUnavailableError(t(`デーモンに届かない: ${e instanceof Error ? e.message : String(e)}`, `cannot reach the daemon: ${e instanceof Error ? e.message : String(e)}`));
   }
-  mkdirSync(home, { recursive: true });
-  const log = openSync(p.log, 'a');
+  ensurePrivateDir(home);
+  const log = openSync(p.log, 'a', PRIVATE_FILE_MODE);
   // 常駐するデーモンに、最初に接続したクライアントの入れ子の印を残さない
   /** @type {NodeJS.ProcessEnv} */
   const daemonEnv = { ...env, SWITCHYARD_HOME: home };
