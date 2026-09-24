@@ -284,8 +284,50 @@ const SUITES = {
     ],
   },
   report: {
-    tests: ['test/report/report.test.mjs', 'test/cli/report.test.mjs'],
+    tests: ['test/report/report.test.mjs', 'test/cli/report.test.mjs', 'test/report/share.test.mjs'],
     mutations: [
+      {
+        name: 'R8 --share が switchyard.json の profile 名を出す',
+        file: 'src/report/share.mjs',
+        from: "if (p.profile.startsWith('default:')) {",
+        to: 'if (true) {',
+      },
+      {
+        name: 'R9 --share が設定の値をそのまま出す',
+        file: 'src/report/share.mjs',
+        from: "/^[A-Za-z0-9_.-]{1,12}$/.test(v) ? v : 'set'",
+        to: 'v',
+      },
+      {
+        name: 'R10 --share が決めた設定以外の SWITCHYARD_ 変数(SWITCHYARD_HOME のパス)も出す',
+        file: 'src/report/share.mjs',
+        from: '  for (const k of SHARED_SETTINGS) {',
+        to: "  for (const k of Object.keys(env).filter((x) => x.startsWith('SWITCHYARD_'))) {",
+      },
+      {
+        name: 'R11 セッションの数を数えない',
+        file: 'src/report/report.mjs',
+        from: "      if (str(job, 'session') !== '') sessions.add(str(job, 'session'));\n",
+        to: '',
+      },
+      {
+        name: 'R12 承認を求めた件数を数えない',
+        file: 'src/report/report.mjs',
+        from: "    else if (r.decision === 'ask') hookCount.ask += 1;\n",
+        to: '',
+      },
+      {
+        name: 'R14 --share が profile の無い走行の名前(コマンドの語)を出す',
+        file: 'src/report/share.mjs',
+        from: "    if (p.profile.startsWith('cmd:')) {\n      unclassifiedRuns += p.count;\n    } else if",
+        to: '    if',
+      },
+      {
+        name: 'R13 report --share が普段の集計を出す',
+        file: 'src/cli/main.mjs',
+        from: '      if (command.share) {',
+        to: '      if (false) {',
+      },
       {
         // 待たせた理由の種別を取り違える(計測待ちが「その他」に落ちる)
         name: 'R1 計測の理由を見ない',

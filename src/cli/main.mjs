@@ -1,7 +1,7 @@
 // @ts-check
 // サブコマンドの振り分け。
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { availableParallelism, homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ask, connectDaemon, DaemonUnavailableError } from '../client/connect.mjs';
 import { isClaudeSession, sessionId } from '../client/session.mjs';
@@ -14,6 +14,8 @@ import { formatReport, replay } from '../replay/replay.mjs';
 import { foregroundCalls, formatInit, merged, suggest, writeConfig } from '../init/init.mjs';
 import { formatReport as formatSummary, summarize } from '../report/report.mjs';
 import { formatObserved, summarizeObserved } from '../report/observe.mjs';
+import { formatShare, sharedSettings } from '../report/share.mjs';
+import { VERSION } from '../version.mjs';
 import { cleanUp, formatUninstall } from './uninstall.mjs';
 import { PLUGIN_ROOT } from '../hooks/session.mjs';
 import { probe } from '../run/probe.mjs';
@@ -208,9 +210,25 @@ export async function cli(args, opts = {}) {
       const since = command.sinceDays === null ? null : now() - command.sinceDays * 86_400_000;
       // 回した 1 世代前も数に入れる(switchyard report が回転の前後で飛ばない)
       const s = summarize({ events: readJournal(p.events).records, hooks: readJournal(p.hooks).records, repoPrefix: command.repoPrefix, since });
+      const observed = readJournal(p.observed).records;
+      if (command.share) {
+        // 公開の場に貼れる形: 数だけ(repo・パス・コマンド・profile の名前は出さない)
+        const meta = {
+          version: VERSION,
+          node: process.versions.node,
+          platform: process.platform,
+          arch: process.arch,
+          cores: availableParallelism(),
+          // デーモンの側の関数は、--share のときだけ読み込む(CLI の起動を重くしない)
+          memoryGb: Math.round((await import('../daemon/server.mjs')).totalMbOfMachine() / 1024),
+          settings: sharedSettings(env),
+        };
+        const obs = observed.length > 0 ? summarizeObserved({ observed, hooks: readJournal(p.hooks).records, repoPrefix: command.repoPrefix, since }) : null;
+        stdout(formatShare({ summary: s, observed: obs, meta }));
+        return 0;
+      }
       stdout(formatSummary(s, { repoPrefix: command.repoPrefix, sinceDays: command.sinceDays }));
       // 観察だけのモードの記録があれば、入れていれば何が起きたかも出す
-      const observed = readJournal(p.observed).records;
       if (observed.length > 0) stdout(formatObserved(summarizeObserved({ observed, hooks: readJournal(p.hooks).records, repoPrefix: command.repoPrefix, since })));
       return 0;
     }
