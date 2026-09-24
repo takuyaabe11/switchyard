@@ -25,7 +25,16 @@ Measured on a 4-core machine ([details](docs/verification/2026-09-24-effect.md))
   profile whose runs keep using less than half of what they were given is admitted with a smaller share from then on
   (never a larger one). Three copies of a suite that averages 0.78 cores took 25 s through switchyard when it took
   their declared 2 cores at face value, and 18 s once it had learned (16 s side by side without switchyard). A run
-  that uses all it is given is never sized down. `SWITCHYARD_ADAPTIVE=0` keeps the declared shares.
+  that uses all it is given is never sized down, and two runs are enough to learn. `SWITCHYARD_ADAPTIVE=0` keeps the
+  declared shares.
+- **Idle cores are not left idle.** The daemon samples how busy the machine really is once a second. When the queue
+  head does not fit in the declared free CPU but the measured spare does, it is let in anyway, one run at a time,
+  after the running jobs have had a moment to start. Three copies of the same wait-heavy suite, before anything was
+  learned, finished on average in 24.4 s instead of 29.7 s ([details](docs/verification/2026-09-24-throughput.md)).
+  Beside CPU-bound runs there is no spare, so nothing is packed in. `SWITCHYARD_OVERCOMMIT=0` turns it off.
+- **Heavy runs are not stacked into swap.** The daemon records each run's peak memory. A run whose usual peak would
+  push free memory below a floor (10% of total by default, `SWITCHYARD_MEM_FLOOR_MB`) waits until something ends. With
+  nothing running, a run always starts. `SWITCHYARD_MEMORY=0` turns it off.
 
 ## Install
 
@@ -47,7 +56,7 @@ Once installed, every new Claude Code session gets three hooks:
 | Hook | What it does |
 |---|---|
 | `SessionStart` | Puts `shims/` at the front of `PATH` for the session |
-| `PreToolUse` (Bash) | Sends a CPU-holding run to the background when it would have to wait (a queue, a measurement, a held lock, not enough free CPU); rejects bypasses that call the real binary by path. `SWITCHYARD_BACKGROUND=always` sends every heavy run to the background, `never` sends none |
+| `PreToolUse` (Bash) | Sends a CPU-holding run to the background when it would have to wait (a queue, a measurement, a held lock, not enough free CPU); rejects bypasses that call the real binary by path. `SWITCHYARD_BACKGROUND=always` sends every heavy run to the background, `never` sends none. A small `sh`/`awk` sieve answers commands that name no heavy tool (`ls`, `git status`, `node -e`) in about 4 ms without starting Node |
 | `Stop` | Holds the session back if one of its jobs ended in a way nobody has looked at |
 
 ## Commands
@@ -245,7 +254,14 @@ switchyard は操車場のこと。重い走行を 1 本ずつ、正しい線路
 - **待ちが中心の走行は、並ばせずに取り分を縮める。** switchyard は走行ごとに実際の CPU の使用量を測る。割り振られた量の
   半分も使わない走行が続く profile は、次から小さい取り分で入場させる(大きくはしない)。平均 0.78 コアの全件を 3 本同時に
   走らせると、宣言どおり 2 コアずつ取っていた間は 25 秒、学んだ後は 18 秒だった(switchyard なしで同時に走らせて 16 秒)。
-  割り振りを使い切る走行は縮めない。`SWITCHYARD_ADAPTIVE=0` で宣言どおりに並べる。
+  割り振りを使い切る走行は縮めない。学ぶのに要るのは 2 回。`SWITCHYARD_ADAPTIVE=0` で宣言どおりに並べる。
+- **空いているコアを遊ばせない。** デーモンは機械が実際にどれだけ忙しいかを 1 秒ごとに測る。待ち列の先頭が宣言の空きに
+  入らなくても、実測の空きに入れば、走行中のジョブが立ち上がるのを待ってから 1 本ずつ入れる。学ぶ前の、待ちが中心の
+  全件を 3 本同時に走らせると、平均の完了が 29.7 秒から 24.4 秒になった([詳細](docs/verification/2026-09-24-throughput.md))。
+  CPU を使い切る走行の横では空きが出ないので入れない。`SWITCHYARD_OVERCOMMIT=0` で止める。
+- **重い走行を重ねてスワップさせない。** デーモンは走行ごとのピークのメモリを記録する。いつものピークを足すと空きメモリが
+  下限(既定は全体の 10%・`SWITCHYARD_MEM_FLOOR_MB`)を割る走行は、何かが終わるまで待たせる。何も走っていなければ必ず入れる。
+  `SWITCHYARD_MEMORY=0` で止める。
 
 ## 導入
 
@@ -266,7 +282,7 @@ switchyard は操車場のこと。重い走行を 1 本ずつ、正しい線路
 | Hook | すること |
 |---|---|
 | `SessionStart` | そのセッションの `PATH` の先頭に `shims/` を足す |
-| `PreToolUse` (Bash) | CPU を持つ走行が待たされる見込み(待ち列・計測・使われている鍵・CPU の空き不足)のときだけ背景実行に回す。本物の実行ファイルをパスで直に呼ぶ抜け道を拒否する。`SWITCHYARD_BACKGROUND=always` で重い走行を必ず背景へ、`never` で回さない |
+| `PreToolUse` (Bash) | CPU を持つ走行が待たされる見込み(待ち列・計測・使われている鍵・CPU の空き不足)のときだけ背景実行に回す。本物の実行ファイルをパスで直に呼ぶ抜け道を拒否する。`SWITCHYARD_BACKGROUND=always` で重い走行を必ず背景へ、`never` で回さない。重い道具の名前を含まないコマンド(`ls`・`git status`・`node -e`)は、`sh`/`awk` のふるいが Node を起動せずに約 4ms で通す |
 | `Stop` | そのセッションのジョブに、まだ誰も確かめていない終わり方があれば止まるのを差し戻す |
 
 ## コマンド
