@@ -12,7 +12,7 @@ import { decideShim } from '../shim/decide.mjs';
 import { maskSecrets } from '../redact.mjs';
 import { t } from '../i18n.mjs';
 import { duration } from '../cli/render.mjs';
-import { countSession, emptyReruns, intervalsOf, stepsOf, timingOf } from './reruns.mjs';
+import { countMishaps, countSession, emptyMishaps, emptyReruns, intervalsOf, stepsOf, timingOf } from './reruns.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
 /** @typedef {{ id: string, command: string, runInBackground: boolean, cwd: string, timestamp: string }} BashCall */
@@ -30,7 +30,8 @@ import { countSession, emptyReruns, intervalsOf, stepsOf, timingOf } from './rer
  *   shim: { run: Record<string, number>, lock: number, pass: number },
  *   examples: { deny: Example[], wrap: Example[], background: Example[] },
  *   reruns: import('./reruns.mjs').Reruns,
- *   timing: import('./reruns.mjs').Timing
+ *   timing: import('./reruns.mjs').Timing,
+ *   mishaps: import('./reruns.mjs').Mishaps
  * }} Report
  */
 
@@ -143,7 +144,9 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
     examples: { deny: [], wrap: [], background: [] },
     reruns: emptyReruns(),
     timing: timingOf([], 0),
+    mishaps: emptyMishaps(),
   };
+  const mishapByCommand = { timeouts: new Map(), portInUse: new Map() };
   /** @type {import('./reruns.mjs').Interval[]} */
   const intervals = [];
   let backgroundRuns = 0;
@@ -240,6 +243,8 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
       }
     }
     countSession(steps, isHeavy, report.reruns, rerunByCommand);
+    // 時間切れ・ポートの失敗は、重い走行に限らずすべての Bash を見る(cwd の絞り込みだけは効かせる)
+    countMishaps(cwdPrefix === null ? steps : steps.filter((st) => st.kind !== 'bash' || st.cwd.startsWith(cwdPrefix)), isHeavy, report.mishaps, mishapByCommand);
     const got = intervalsOf(steps, isHeavy, files.indexOf(file));
     for (const iv of got.intervals) intervals.push(iv);
     backgroundRuns += got.background;
@@ -249,6 +254,14 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
     .map(([key, v]) => ({ command: key.slice(key.indexOf('\u0000') + 1), count: v.count, ms: v.ms }))
     .sort((a, b) => b.count - a.count || b.ms - a.ms)
     .slice(0, examples);
+
+  const topOf = (/** @type {Map<string, { count: number, ms: number }>} */ m) =>
+    [...m]
+      .map(([key, v]) => ({ command: key.slice(key.indexOf('\u0000') + 1), count: v.count, ms: v.ms }))
+      .sort((a, b) => b.count - a.count || b.ms - a.ms)
+      .slice(0, examples);
+  report.mishaps.timeouts.top = topOf(mishapByCommand.timeouts);
+  report.mishaps.portInUse.top = topOf(mishapByCommand.portInUse);
 
   const newest = (/** @type {Example[]} */ xs) => [...xs].sort((a, b) => (a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : 0)).slice(0, examples);
   report.examples = { deny: newest(all.deny), wrap: newest(all.wrap), background: newest(all.background) };
@@ -331,6 +344,20 @@ export function formatReport(r, { cwdPrefix, sinceDays, examples }) {
       lines.push(t(`  Claude が結果を待った時間の合計: ${duration(tm.totalMs)}`, `  total time Claude waited for results: ${duration(tm.totalMs)}`));
       lines.push(t(`  セッションをまたいだ重なり: 他と重なった走行 ${tm.overlappedRuns} 本(${tp(tm.overlappedRuns)}%)・2 本以上が同時に走っていた時間 ${duration(tm.overlapMs)}(待った時間の合計の ${mp(tm.overlapMs)}%)・最大同時 ${tm.maxConcurrent} 本`, `  overlap across sessions: ${tm.overlappedRuns} runs overlapped another (${tp(tm.overlappedRuns)}%); 2 or more ran at once for ${duration(tm.overlapMs)} (${mp(tm.overlapMs)}% of the total wait); at most ${tm.maxConcurrent} at once`));
     }
+    const mt = r.mishaps.timeouts;
+    lines.push(
+      t(
+        `Bash の時間切れ: ${mt.count} 件(うち重い走行 ${mt.heavy} 件・既定の時間切れ ${mt.atDefault} 件)・切れるまで待った時間の合計 ${duration(mt.ms)}`,
+        `Bash timeouts: ${mt.count} (${mt.heavy} heavy runs, ${mt.atDefault} at the default limit), ${duration(mt.ms)} waited before the cut`,
+      ),
+    );
+    if (mt.count > 0) {
+      lines.push(t(`  その後に同じコマンドを走り直した: ${mt.rerun} 件(うち背景で ${mt.rerunBackground} 件)`, `  the same command was run again afterwards: ${mt.rerun} (${mt.rerunBackground} in the background)`));
+      for (const x of mt.top) lines.push(t(`    ${x.count} 回・${duration(x.ms)}  ${oneLine(maskSecrets(x.command))}`, `    ${x.count}x, ${duration(x.ms)}  ${oneLine(maskSecrets(x.command))}`));
+    }
+    const mp2 = r.mishaps.portInUse;
+    lines.push(t(`ポートが使用中で落ちた Bash: ${mp2.count} 件(うち重い走行 ${mp2.heavy} 件)`, `Bash calls that failed on a port already in use: ${mp2.count} (${mp2.heavy} heavy runs)`));
+    for (const x of mp2.top) lines.push(t(`    ${x.count} 回  ${oneLine(maskSecrets(x.command))}`, `    ${x.count}x  ${oneLine(maskSecrets(x.command))}`));
 
     for (const [label, xs] of /** @type {Array<[string, Example[]]>} */ ([
       [t('拒否', 'Refused'), r.examples.deny],
