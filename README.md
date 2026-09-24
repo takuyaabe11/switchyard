@@ -28,8 +28,8 @@ shows how many of your past commands it would have treated as heavy runs and put
 have refused. It also counts re-runs with nothing changed: the same heavy command run again in the same place with no
 file edited in between, and how long those runs took. That is the work a cache of results could have saved. And it shows
 how long heavy runs take and how often runs from different sessions actually ran at the same time, which is what
-switchyard can sort out. For a single session it counts the Bash calls that hit the tool's time limit (and whether
-the same command was then run again) and the ones that failed on a port already in use. It needs nothing installed and
+switchyard can sort out. For a single session it counts the Bash calls that hit the tool's time limit (sorted into
+loops waiting in the foreground, heavy runs and the rest, and whether the same command was then run again) and the ones that failed on a port already in use. It needs nothing installed and
 writes nothing:
 
 ```
@@ -436,7 +436,7 @@ switchyard が効くのは、重い走行が重なりそうなときだけ。振
 コマンドのうち何本を重い走行として順番待ちに乗せ、どれを拒否していたかを出す。変更なしの走り直し(間にファイルを書き換えずに、
 同じ場所で同じ重いコマンドをもう一度)の本数と所要も数える。結果を使い回せていれば省けた仕事の量になる。重い走行 1 本の所要と、
 別のセッションの走行が実際にどれだけ同時に走っていたか(switchyard が並べ替えられる量)も出す。セッションが 1 本でも起きることとして、
-Bash ツールの時間切れで切られた呼び出し(その後に同じコマンドを走り直したか)と、ポートが使用中で落ちた呼び出しも数える。
+Bash ツールの時間切れで切られた呼び出し(前景で待つループ・重い走行・その他に分け、その後に同じコマンドを走り直したかも)と、ポートが使用中で落ちた呼び出しも数える。
 入れなくても動き、何も書かない:
 
 ```

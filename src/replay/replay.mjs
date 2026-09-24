@@ -260,7 +260,10 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
       .map(([key, v]) => ({ command: key.slice(key.indexOf('\u0000') + 1), count: v.count, ms: v.ms }))
       .sort((a, b) => b.count - a.count || b.ms - a.ms)
       .slice(0, examples);
-  report.mishaps.timeouts.top = topOf(mishapByCommand.timeouts);
+  // 時間切れは種類ごとに上位を出す(待つループが多くても、その他の中身が見えるように)
+  report.mishaps.timeouts.top = /** @type {const} */ (['wait', 'heavy', 'other']).flatMap((kind) =>
+    topOf(new Map([...mishapByCommand.timeouts].filter(([key]) => key.startsWith(`${kind}\u0001`)))).map((x) => ({ ...x, kind })),
+  );
   report.mishaps.portInUse.top = topOf(mishapByCommand.portInUse);
 
   const newest = (/** @type {Example[]} */ xs) => [...xs].sort((a, b) => (a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : 0)).slice(0, examples);
@@ -352,8 +355,16 @@ export function formatReport(r, { cwdPrefix, sinceDays, examples }) {
       ),
     );
     if (mt.count > 0) {
+      const k = mt.kinds;
+      lines.push(
+        t(
+          `  種類: 前景で待つループ(sleep を含む until / while・tail -f など)${k.wait.count} 件・${duration(k.wait.ms)} / 重い走行 ${k.heavy.count} 件・${duration(k.heavy.ms)} / その他 ${k.other.count} 件・${duration(k.other.ms)}`,
+          `  kinds: waiting loops in the foreground (until / while with sleep, tail -f, ...) ${k.wait.count}, ${duration(k.wait.ms)}; heavy runs ${k.heavy.count}, ${duration(k.heavy.ms)}; other ${k.other.count}, ${duration(k.other.ms)}`,
+        ),
+      );
       lines.push(t(`  その後に同じコマンドを走り直した: ${mt.rerun} 件(うち背景で ${mt.rerunBackground} 件)`, `  the same command was run again afterwards: ${mt.rerun} (${mt.rerunBackground} in the background)`));
-      for (const x of mt.top) lines.push(t(`    ${x.count} 回・${duration(x.ms)}  ${oneLine(maskSecrets(x.command))}`, `    ${x.count}x, ${duration(x.ms)}  ${oneLine(maskSecrets(x.command))}`));
+      const label = (/** @type {string | undefined} */ k) => (k === 'wait' ? t('待つ', 'wait') : k === 'heavy' ? t('重い', 'heavy') : t('他', 'other'));
+      for (const x of mt.top) lines.push(t(`    [${label(x.kind)}] ${x.count} 回・${duration(x.ms)}  ${oneLine(maskSecrets(x.command))}`, `    [${label(x.kind)}] ${x.count}x, ${duration(x.ms)}  ${oneLine(maskSecrets(x.command))}`));
     }
     const mp2 = r.mishaps.portInUse;
     lines.push(t(`ポートが使用中で落ちた Bash: ${mp2.count} 件(うち重い走行 ${mp2.heavy} 件)`, `Bash calls that failed on a port already in use: ${mp2.count} (${mp2.heavy} heavy runs)`));
