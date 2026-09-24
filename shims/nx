@@ -1,0 +1,3 @@
+#!/bin/sh
+name=nx
+. "${0%/*}/_shim.sh"

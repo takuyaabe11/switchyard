@@ -19,10 +19,11 @@ import { isOff } from './off.mjs';
 /** @typedef {import('../core/types.mjs').JobClass} JobClass */
 /** @typedef {import('../run/run.mjs').RunFlags} RunFlags */
 
-/** shim を置く語(設計 §9.1)。shims/ の実物と同じ 21 語 */
+/** shim を置く語(設計 §9.1)。shims/ の実物と同じ 26 語 */
 export const SHIM_WORDS = [
   'npm', 'npx', 'node', 'cargo', 'pytest', 'go', 'make', 'git', 'yarn', 'pnpm', 'bun',
   'python', 'python3', 'uv', 'poetry', 'mvn', 'gradle', 'dotnet', 'bundle', 'rspec', 'deno',
+  'xcodebuild', 'bazel', 'bazelisk', 'nx', 'turbo',
 ];
 
 /**
