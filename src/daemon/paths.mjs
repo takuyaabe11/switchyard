@@ -61,6 +61,8 @@ export function pathsOf(home) {
     state: join(home, 'state.json'),
     events: join(home, 'events.jsonl'),
     unmanaged: join(home, 'unmanaged.jsonl'),
+    // 観察だけのモード(SWITCHYARD_OBSERVE=1)で走った重い走行の始まりと終わり
+    observed: join(home, 'observed.jsonl'),
     // PreToolUse が背景へ回した・拒否した判断の記録(デーモンを通らないので events.jsonl とは別)
     hooks: join(home, 'hooks.jsonl'),
     log: join(home, 'switchyardd.log'),

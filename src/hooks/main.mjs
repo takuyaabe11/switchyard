@@ -16,8 +16,9 @@ import { t } from '../i18n.mjs';
  * PreToolUse の判断を hooks.jsonl へ 1 行残す。何もしなかった分(out が null)は書かない。
  * 書けなくても hook の判断はそのまま返す(記録は補助で、失敗で作業を止めない)。
  * @param {Record<string, unknown>} input @param {Record<string, unknown> | null} out @param {NodeJS.ProcessEnv} env
+ * @param {boolean} [observe] 観察だけのモードの判断(実際にはしていない)
  */
-function recordPreToolUse(input, out, env) {
+function recordPreToolUse(input, out, env, observe = false) {
   if (out === null) return;
   const h = /** @type {Record<string, unknown>} */ (typeof out.hookSpecificOutput === 'object' && out.hookSpecificOutput !== null ? out.hookSpecificOutput : {});
   const decision = h.permissionDecision === 'deny' ? 'deny' : 'background';
@@ -30,6 +31,7 @@ function recordPreToolUse(input, out, env) {
       session: typeof input.session_id === 'string' ? input.session_id : '',
       cwd: typeof input.cwd === 'string' ? input.cwd : '',
       cmd: typeof ti.command === 'string' ? ti.command : '',
+      ...(observe ? { observe: true } : {}),
     });
   } catch {
     /* 記録できないときは黙って進む */
@@ -73,6 +75,11 @@ export async function runHook(event, raw, { write = (s) => process.stdout.write(
   switch (event) {
     case 'pre-tool-use': {
       const base = { env, ...(profilesFor === undefined ? {} : { profilesFor }) };
+      if (env.SWITCHYARD_OBSERVE === '1') {
+        // 観察だけのモード: 判断を記録するだけで、拒否も背景化もしない(重い走行はすべて「背景の候補」として数える)
+        recordPreToolUse(input, preToolUse(input, base), env, true);
+        return;
+      }
       let out = preToolUse(input, base);
       // 背景へ回す判定が出たときだけ、デーモンの盤面を見て、待ちが見込まれなければ前景のまま走らせる。
       // 普段の Bash の呼び出しにはデーモンへの問い合わせを足さない
@@ -93,6 +100,8 @@ export async function runHook(event, raw, { write = (s) => process.stdout.write(
       return;
     }
     case 'stop': {
+      // 観察だけのモードでは差し戻さない(走行はデーモンを通っていないので、確認待ちも無い)
+      if (env.SWITCHYARD_OBSERVE === '1') return;
       const out = await stop(input);
       if (out !== null) write(JSON.stringify(out));
       return;

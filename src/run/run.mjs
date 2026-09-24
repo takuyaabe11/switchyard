@@ -186,6 +186,8 @@ export function runJob(opts) {
     let killedByCaller = false;
     /** デーモンの管理の外で走った(届かなかった・見失われた)。終わったら控える(設計 §4.3 の 8) */
     let unmanaged = false;
+    /** 観察だけのモード(SWITCHYARD_OBSERVE=1)で走った。並べずに走らせ、始まりと終わりだけを残す */
+    let observed = false;
     let lastNote = '';
     let finished = false;
     /** @type {NodeJS.Timeout | null} */
@@ -242,7 +244,16 @@ export function runJob(opts) {
       phase = 'done';
       if (killTimer !== null) clearTimeout(killTimer);
       if (escape !== null) for (const line of escapeLines(escape)) out(line);
-      if (unmanaged) {
+      if (observed) {
+        try {
+          appendRecord(pathsOf(home).observed, {
+            kind: 'observed', start: childStartedAt, end: Date.now(), session: job.session, repo: job.repo, profile: job.profile,
+            class: job.class, locks: job.locks, cmd: job.cmd, code, cpuMs,
+          });
+        } catch {
+          // 観察の記録が書けなくても、走行の結果はそのまま返す
+        }
+      } else if (unmanaged) {
         // デーモンの次の起動で取り込まれ、失敗なら持ち主の Stop に出る(設計 §4.2)
         try {
           appendRecord(pathsOf(home).unmanaged, { at: Date.now(), session: job.session, repo: job.repo, profile: job.profile, cmd: job.cmd, code, durationMs: Date.now() - childStartedAt });
@@ -481,6 +492,13 @@ export function runJob(opts) {
         }
       }
     };
+
+    if (env.SWITCHYARD_OBSERVE === '1') {
+      // 観察だけのモード: デーモンに要求を出さず、すぐに走らせる。入れ子の印は普段どおり立てる(中の走行を二重に数えない)
+      observed = true;
+      startChild(job.cpus.max === 0 ? 0 : job.cpus.min, false);
+      return;
+    }
 
     if (job.cpus.max === 0 && job.locks.length === 0) {
       // 入れ子で CPU も鍵も要らなくなった: デーモンに要求を出さず、そのまま走らせる(設計 §4.3 の 7)

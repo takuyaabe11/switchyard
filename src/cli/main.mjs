@@ -13,6 +13,7 @@ import { readJournal } from '../daemon/store.mjs';
 import { formatReport, replay } from '../replay/replay.mjs';
 import { foregroundCalls, formatInit, merged, suggest, writeConfig } from '../init/init.mjs';
 import { formatReport as formatSummary, summarize } from '../report/report.mjs';
+import { formatObserved, summarizeObserved } from '../report/observe.mjs';
 import { probe } from '../run/probe.mjs';
 import { runJob } from '../run/run.mjs';
 import { parseArgs, UsageError, USAGE } from './args.mjs';
@@ -196,6 +197,9 @@ export async function cli(args, opts = {}) {
       // 回した 1 世代前も数に入れる(switchyard report が回転の前後で飛ばない)
       const s = summarize({ events: readJournal(p.events).records, hooks: readJournal(p.hooks).records, repoPrefix: command.repoPrefix, since });
       stdout(formatSummary(s, { repoPrefix: command.repoPrefix, sinceDays: command.sinceDays }));
+      // 観察だけのモードの記録があれば、入れていれば何が起きたかも出す
+      const observed = readJournal(p.observed).records;
+      if (observed.length > 0) stdout(formatObserved(summarizeObserved({ observed, hooks: readJournal(p.hooks).records, repoPrefix: command.repoPrefix, since })));
       return 0;
     }
     case 'init': {
