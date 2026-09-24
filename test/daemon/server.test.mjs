@@ -165,7 +165,7 @@ describe('daemon server', () => {
     await a.next((m) => m.t === 'ok');
     const q = await client(d.sock);
     q.send({ t: 'unacked', session: 'sX' });
-    assert.deepEqual((await q.next((m) => m.t === 'unacked')).jobs, [{ jobId: acc.jobId, kind: 'failed', code: 1, cmd: 'npm test' }]);
+    assert.deepEqual((await q.next((m) => m.t === 'unacked')).jobs, [{ jobId: acc.jobId, kind: 'failed', code: 1, cmd: 'npm test', repo: '/repo', profile: 'p' }]);
     q.send({ t: 'ack', session: 'sX', jobId: acc.jobId });
     await q.next((m) => m.t === 'ok');
     q.send({ t: 'unacked', session: 'sX' });

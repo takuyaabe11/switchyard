@@ -56,13 +56,42 @@ describe('decide: 走行と終了', () => {
   it('失敗した終了は、持ち主のセッションの未確認に積む', () => {
     const s = state({ leases: [lease({ id: 'a', session: 's1', cmd: 'npm test' })] });
     const r = decide(s, { type: 'exit', now: 0, jobId: 'a', code: 1, killedByCaller: false, durationMs: 1 });
-    assert.deepEqual(r.state.unacked, { s1: [{ jobId: 'a', kind: 'failed', code: 1, cmd: 'npm test' }] });
+    assert.deepEqual(r.state.unacked, { s1: [{ jobId: 'a', kind: 'failed', code: 1, cmd: 'npm test', repo: '/repo', profile: 'p' }] });
   });
 
   it('呼び出し元に殺された終了は killed として積む', () => {
     const s = state({ leases: [lease({ id: 'a', session: 's1', cmd: 'npm test' })] });
     const r = decide(s, { type: 'exit', now: 0, jobId: 'a', code: 143, killedByCaller: true, durationMs: 1 });
-    assert.deepEqual(r.state.unacked, { s1: [{ jobId: 'a', kind: 'killed', code: 143, cmd: 'npm test' }] });
+    assert.deepEqual(r.state.unacked, { s1: [{ jobId: 'a', kind: 'killed', code: 143, cmd: 'npm test', repo: '/repo', profile: 'p' }] });
+  });
+
+  it('同じセッションで同じ走行が後で成功したら、前の失敗・呼び出し元の終了を確認済みにする(orphan と他の走行は残す)', () => {
+    const f = (/** @type {string} */ id, /** @type {any} */ kind, /** @type {Partial<import('../../src/core/types.mjs').Unacked>} */ over = {}) => ({ jobId: id, kind, code: 1, cmd: 'npm test', repo: '/repo', profile: 'p', ...over });
+    const s = state({
+      leases: [lease({ id: 'ok', session: 's1', cmd: 'npm test' })],
+      unacked: {
+        s1: [f('a', 'failed'), f('b', 'killed'), f('c', 'orphan'), f('d', 'failed', { profile: 'e2e' }), f('e', 'failed', { repo: '/other' }), { jobId: 'old', kind: 'failed', code: 1, cmd: 'npm test' }],
+        s2: [f('x', 'failed')],
+      },
+    });
+    const r = decide(s, { type: 'exit', now: 0, jobId: 'ok', code: 0, killedByCaller: false, durationMs: 1 });
+    assert.deepEqual(r.state.unacked.s1.map((u) => u.jobId), ['c', 'd', 'e', 'old'], 'orphan・別の profile・別の repo・手がかりの無い古い記録は残す');
+    assert.deepEqual(r.state.unacked.s2.map((u) => u.jobId), ['x'], '他のセッションは触らない');
+  });
+
+  it('分類されなかった走行(cmd:…)は、同じコマンド文字列の成功でだけ確認済みにする', () => {
+    const u = (/** @type {string} */ id, /** @type {string} */ cmd) => ({ jobId: id, kind: /** @type {const} */ ('failed'), code: 1, cmd, repo: '/repo', profile: 'cmd:sh -c' });
+    const s = state({ leases: [lease({ id: 'ok', profile: 'cmd:sh -c', cmd: 'sh -c B' })], unacked: { s1: [u('a', 'sh -c A'), u('b', 'sh -c B')] } });
+    const r = decide(s, { type: 'exit', now: 0, jobId: 'ok', code: 0, killedByCaller: false, durationMs: 1 });
+    assert.deepEqual(r.state.unacked.s1.map((x) => x.jobId), ['a']);
+  });
+
+  it('管理なしで走った成功も、同じ走行の前の失敗を確認済みにする。最後の 1 件ならセッションの欄ごと消す', () => {
+    const s = state({ unacked: { s1: [{ jobId: 'a', kind: 'failed', code: 1, cmd: 'npm test', repo: '/repo', profile: 'p' }] } });
+    const r = decide(s, { type: 'unmanagedExit', now: 0, session: 's1', jobId: 'u1', code: 0, cmd: 'npm test', repo: '/repo', profile: 'p' });
+    assert.deepEqual(r.state.unacked, {});
+    const failed = decide(state(), { type: 'unmanagedExit', now: 0, session: 's1', jobId: 'u2', code: 2, cmd: 'npm test', repo: '/repo', profile: 'p' });
+    assert.deepEqual(failed.state.unacked, { s1: [{ jobId: 'u2', kind: 'failed', code: 2, cmd: 'npm test', repo: '/repo', profile: 'p' }] });
   });
 
   it('計測が終わったら、計測以外を先に入れる', () => {
@@ -91,14 +120,14 @@ describe('decide: 包みを見失ったとき', () => {
     const r = decide(s, { type: 'heartbeatLost', now: 0, jobId: 'a', alive: true });
     assert.equal(r.state.leases[0].phase, 'orphan');
     assert.deepEqual(grants(r.actions), []);
-    assert.deepEqual(r.state.unacked.s1, [{ jobId: 'a', kind: 'orphan', code: null, cmd: 'c' }]);
+    assert.deepEqual(r.state.unacked.s1, [{ jobId: 'a', kind: 'orphan', code: null, cmd: 'c', repo: '/repo', profile: 'p' }]);
   });
 
   it('子も消えていれば資源を返し、lost として積む', () => {
     const s = state({ leases: [lease({ id: 'a', session: 's1', cmd: 'c', locks: ['p'] })], waiting: [waiting({ id: 'b', locks: ['p'] })] });
     const r = decide(s, { type: 'heartbeatLost', now: 0, jobId: 'a', alive: false });
     assert.deepEqual(grants(r.actions), [['b', 1]]);
-    assert.deepEqual(r.state.unacked.s1, [{ jobId: 'a', kind: 'lost', code: null, cmd: 'c' }]);
+    assert.deepEqual(r.state.unacked.s1, [{ jobId: 'a', kind: 'lost', code: null, cmd: 'c', repo: '/repo', profile: 'p' }]);
   });
 
   it('孤児の子が消えたら資源を返す', () => {

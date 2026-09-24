@@ -171,7 +171,7 @@ export async function startDaemon(opts) {
     for (const u of takeUnmanaged(p.unmanaged)) {
       const jobId = `u${u.at.toString(36)}${(unmanagedSeq++).toString(36)}`;
       appendRecord(p.events, { kind: 'unmanaged', jobId, ...u });
-      if (u.code !== 0) apply({ type: 'unmanagedExit', now: monoNow(), session: u.session, jobId, code: u.code, cmd: u.cmd });
+      apply({ type: 'unmanagedExit', now: monoNow(), session: u.session, jobId, code: u.code, cmd: u.cmd, repo: u.repo, profile: u.profile });
     }
   };
   ingestUnmanaged();

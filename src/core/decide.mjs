@@ -43,7 +43,27 @@ const mapLease = (s, id, f) => ({ ...s, leases: s.leases.map((l) => (l.job.id ==
 /** @param {State} s @param {Lease} l @param {UnackedKind} kind @param {number | null} code @returns {State} */
 function addUnacked(s, l, kind, code) {
   const list = s.unacked[l.job.session] ?? [];
-  return { ...s, unacked: { ...s.unacked, [l.job.session]: [...list, { jobId: l.job.id, kind, code, cmd: l.job.cmd }] } };
+  return { ...s, unacked: { ...s.unacked, [l.job.session]: [...list, { jobId: l.job.id, kind, code, cmd: l.job.cmd, repo: l.job.repo, profile: l.job.profile }] } };
+}
+
+/** 後の成功で片付く終わり方。orphan は子がまだ走っているので片付けない */
+const RESOLVED_BY_SUCCESS = new Set(['failed', 'killed', 'lost']);
+
+/**
+ * 同じセッションで同じ走行(同じ repo と profile。分類されなかった cmd:… の profile は同じコマンド文字列)が成功したら、
+ * その前の失敗は確かめ終えたとみなして消す。失敗してから直して走らせ直す流れ(テストを先に赤くする開発)で、
+ * 直した後も Stop が差し戻し続けるのを避ける。
+ * @param {State} s @param {string} session @param {string} repo @param {string} profile @param {string} cmd @returns {State}
+ */
+export function resolveBySuccess(s, session, repo, profile, cmd) {
+  const list = s.unacked[session];
+  if (list === undefined) return s;
+  const same = (/** @type {import('./types.mjs').Unacked} */ u) =>
+    RESOLVED_BY_SUCCESS.has(u.kind) && u.repo === repo && u.profile === profile && (!profile.startsWith('cmd:') || u.cmd === cmd);
+  const rest = list.filter((u) => !same(u));
+  if (rest.length === list.length) return s;
+  const { [session]: _dropped, ...others } = s.unacked;
+  return { ...s, unacked: rest.length > 0 ? { ...others, [session]: rest } : others };
 }
 
 /** @param {State} s @param {Lease} l @returns {State} */
@@ -78,6 +98,7 @@ export function decide(input, e) {
       extra.push({ type: 'history', repo: l.job.repo, profile: l.job.profile, class: l.job.class, cpus: l.cpus, durationMs: e.durationMs, code: e.code });
       if (e.killedByCaller) s = addUnacked(s, l, 'killed', e.code);
       else if (e.code !== 0) s = addUnacked(s, l, 'failed', e.code);
+      else s = resolveBySuccess(s, l.job.session, l.job.repo, l.job.profile, l.job.cmd);
       s = afterMeasure(s, l);
       break;
     }
@@ -130,10 +151,16 @@ export function decide(input, e) {
       break;
     }
     case 'unmanagedExit': {
-      // 管理なしで走って失敗したジョブ(設計 §4.2)。リースは無いので、ack 待ちに積むだけ(同じ id は 2 度積まない)
+      // 管理なしで走ったジョブ(設計 §4.2)。リースは無いので、失敗なら ack 待ちに積むだけ(同じ id は 2 度積まない)。
+      // 成功なら、同じ走行の前の失敗を片付ける
+      if (e.code === 0) {
+        if (e.repo !== undefined && e.profile !== undefined) s = resolveBySuccess(s, e.session, e.repo, e.profile, e.cmd);
+        break;
+      }
       const list = s.unacked[e.session] ?? [];
       if (!list.some((u) => u.jobId === e.jobId)) {
-        s = { ...s, unacked: { ...s.unacked, [e.session]: [...list, { jobId: e.jobId, kind: 'failed', code: e.code, cmd: e.cmd }] } };
+        const where = e.repo !== undefined && e.profile !== undefined ? { repo: e.repo, profile: e.profile } : {};
+        s = { ...s, unacked: { ...s.unacked, [e.session]: [...list, { jobId: e.jobId, kind: 'failed', code: e.code, cmd: e.cmd, ...where }] } };
       }
       break;
     }
