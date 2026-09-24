@@ -23,7 +23,7 @@ import { isOff } from './off.mjs';
 export const SHIM_WORDS = [
   'npm', 'npx', 'node', 'cargo', 'pytest', 'go', 'make', 'git', 'yarn', 'pnpm', 'bun',
   'python', 'python3', 'uv', 'poetry', 'mvn', 'gradle', 'dotnet', 'bundle', 'rspec', 'deno',
-  'xcodebuild', 'bazel', 'bazelisk', 'nx', 'turbo',
+  'xcodebuild', 'bazel', 'bazelisk', 'nx', 'turbo', 'php', 'composer', 'phpunit', 'pest', 'paratest',
 ];
 
 /**
@@ -31,7 +31,7 @@ export const SHIM_WORDS = [
  * 別の(プロジェクトの)実行ファイルを選んでいる。名前で呼び直すと PATH の別物が走るので拒否しない(重ければ背景へ回すだけ)。
  * @param {string} path @returns {boolean}
  */
-const isProjectLocal = (path) => /(^|\/)(\.?venv[^/]*|\.tox|\.nox|node_modules\/\.bin)\//.test(path);
+const isProjectLocal = (path) => /(^|\/)(\.?venv[^/]*|\.tox|\.nox|node_modules\/\.bin|vendor\/bin)\//.test(path);
 
 /**
  * Python の仮想環境の中の実行ファイルか。node_modules/.bin と違い、shebang が仮想環境の python を直に指すので、

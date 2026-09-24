@@ -37,7 +37,7 @@ END {
   # 改行・タブなどのエスケープ(\n)の字は語の一部ではない。語の境目にする
   gsub(/\\u[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]/, " ", cmd)
   gsub(/\\[nrtbf]/, " ", cmd)
-  if (cmd ~ /(^|[^A-Za-z0-9_-])(npm|npx|cargo|pytest|go|make|yarn|pnpm|bun|python|python3|uv|poetry|mvn|gradle|dotnet|bundle|rspec|deno|xcodebuild|bazel|bazelisk|nx|turbo|switchyard|gradlew|mvnw|node_modules)([^A-Za-z0-9_-]|$)/) exit 1
+  if (cmd ~ /(^|[^A-Za-z0-9_-])(npm|npx|cargo|pytest|go|make|yarn|pnpm|bun|python|python3|uv|poetry|mvn|gradle|dotnet|bundle|rspec|deno|xcodebuild|bazel|bazelisk|nx|turbo|php|composer|phpunit|pest|paratest|switchyard|gradlew|mvnw|node_modules)([^A-Za-z0-9_-]|$)/) exit 1
   # git は index を書き換えるサブコマンド(src/shim/decide.mjs の GIT_LOCK_SUBCOMMANDS)の語があるときだけ見る(git status・git diff は素通し)
   if (ENVIRON["SWITCHYARD_GIT"] == "1" && cmd ~ /(^|[^A-Za-z0-9_-])git([^A-Za-z0-9_-]|$)/ && cmd ~ /(^|[^A-Za-z0-9_-])(commit|merge|rebase|cherry-pick|stash|am|add|rm|mv|reset|restore|checkout|switch|pull|revert)([^A-Za-z0-9_-]|$)/) exit 1
   cwd = field(s, "cwd")

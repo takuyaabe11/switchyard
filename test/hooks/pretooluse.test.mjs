@@ -78,6 +78,18 @@ describe('switchyard run の中身への承認の求め', () => {
   });
 });
 
+describe('PHP', () => {
+  it('vendor/bin の実行ファイルは php の shim を通るので拒否せず背景へ回し、パスで呼ぶ php は拒否する', () => {
+    const o = (/** @type {string} */ c) => outcome(preToolUse(bash(c), opts));
+    for (const c of ['php artisan test', 'vendor/bin/phpunit', './vendor/bin/pest --parallel', 'composer test', 'cd api && php artisan test --parallel']) {
+      assert.equal(o(c), 'background', c);
+    }
+    for (const c of ['php -v', 'php artisan migrate', 'composer install', 'vendor/bin/phpstan analyse']) assert.equal(o(c), null, c);
+    assert.equal(o('/usr/bin/php artisan test'), 'deny');
+    assert.equal(/** @type {any} */ (preToolUse(bash('switchyard run -- vendor/bin/phpunit'), opts))?.hookSpecificOutput?.permissionDecision, undefined, '包んだ vendor/bin は承認を求めない');
+  });
+});
+
 describe('headWord', () => {
   it('VAR=値 と包みのコマンドを読み飛ばして先頭の語を取る', () => {
     assert.equal(headWord('FOO=1 BAR=2 npm test').head, 'npm');

@@ -118,6 +118,10 @@ export const DEFAULT_PROFILES = [
         'turbo run test*', 'turbo run build*', 'turbo test*', 'turbo build*',
         'npx turbo run test*', 'npx turbo run build*', 'npx turbo test*', 'npx turbo build*',
         'pnpm turbo run test*', 'pnpm turbo run build*', 'pnpm turbo test*', 'pnpm turbo build*',
+        // PHP: vendor/bin の実行ファイル(vendor/bin/phpunit・php vendor/bin/pest)は、呼んだ道具の名前の形で分類する(classifiableCommand)
+        'php artisan test', 'php artisan test *',
+        'phpunit', 'phpunit *', 'pest', 'pest *', 'paratest', 'paratest *',
+        'composer test', 'composer test *', 'composer run test*', 'composer run-script test*',
       ],
       class: 'batch',
       cpus: { min: 2, max: ALL_CPUS },
@@ -143,6 +147,31 @@ export function defaultHeadWords() {
 /** node_modules/.bin の下の実行ファイルのパスか(語そのものではなくパスで呼んだ形だけ) @param {string} w */
 const isLocalBin = (w) => /(^|\/)node_modules\/\.bin\/[^/]+$/.test(w);
 
+/** composer が入れた vendor/bin の下の実行ファイルのパスか @param {string} w */
+const isVendorBin = (w) => /(^|\/)vendor\/bin\/[^/]+$/.test(w);
+
+/** php の、値を次の語に取るオプション(-d memory_limit=-1・-c php.ini・-z ext) */
+const PHP_VALUE_OPTIONS = new Set(['-d', '-c', '-z']);
+
+/**
+ * php が走らせるスクリプトの位置(`-f` の値か、オプションの後の最初の語)。インラインのコード(-r・-B・-R・-E)なら -1。
+ * @param {string[]} words @returns {number}
+ */
+function phpScriptAt(words) {
+  for (let i = 1; i < words.length; i += 1) {
+    const w = words[i];
+    if (w === '-f') return i + 1 < words.length ? i + 1 : -1;
+    if (PHP_VALUE_OPTIONS.has(w)) {
+      i += 1;
+      continue;
+    }
+    if (w === '--') return i + 1 < words.length ? i + 1 : -1;
+    if (/^-[rBRE]/.test(w)) return -1;
+    if (!w.startsWith('-')) return i;
+  }
+  return -1;
+}
+
 /** node の、インラインのコードを値に取るオプション */
 const NODE_INLINE = new Set(['-e', '--eval', '-p', '--print']);
 
@@ -156,6 +185,13 @@ export function classifiableCommand(words) {
   if (words.length === 0) return '';
   // node_modules/.bin の実行ファイルを直に呼ぶ形(./node_modules/.bin/vitest run)は npx と同じ走行なので、npx の形で分類する
   if (isLocalBin(words[0])) return ['npx', basename(words[0]), ...words.slice(1)].join(' ');
+  // vendor/bin の実行ファイル(vendor/bin/phpunit)は道具の名前の形(phpunit …)。
+  // `#!/usr/bin/env php` の shebang で起動した形(php vendor/bin/phpunit …)も、オプションを読み飛ばして同じ形にする
+  if (isVendorBin(words[0])) return [basename(words[0]), ...words.slice(1)].join(' ');
+  if (basename(words[0]) === 'php') {
+    const script = phpScriptAt(words);
+    if (script > 0 && isVendorBin(words[script])) return [basename(words[script]), ...words.slice(script + 1)].join(' ');
+  }
   if (basename(words[0]) !== 'node') return words.join(' ');
   const out = [words[0]];
   let script = false;

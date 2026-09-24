@@ -3,6 +3,19 @@
 All notable changes to switchyard. Versions follow `plugin.json`; Claude Code only offers an update when that
 version goes up.
 
+## 0.13.0
+
+### Added
+- PHP: `php`, `composer`, `phpunit`, `pest` and `paratest` get shims (31 words in all), and the built-in table recognizes
+  `php artisan test`, `phpunit`, `pest`, `paratest`, `composer test` and `composer run test*`. A script under
+  `vendor/bin` (`./vendor/bin/phpunit`, `php vendor/bin/pest`, `php -d memory_limit=-1 vendor/bin/paratest`) is classified
+  by the tool's name, the way `node_modules/.bin` already was; it starts through `php`, so `PreToolUse` does not refuse
+  it. The `sh` sieve sends `php` to the classifier only for `artisan test` and `vendor/bin/…`, so other `php` calls
+  start no Node process. Checked with PHPUnit 11 on PHP 8.4.
+- README: answers to questions from the second persona round (subagents, a run that dies holding a lock, where learning
+  lives, locks for a shared database and docker compose, dev containers and WSL2, capacity on shared machines, what
+  installing changes, GPUs).
+
 ## 0.12.1
 
 ### Security
