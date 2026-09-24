@@ -464,9 +464,15 @@ const SUITES = {
         to: 'return true;',
       },
       {
+        name: 'H22 待ちの見込みに、実測で縮めた要求を使わない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "const min = cores === undefined ? h.cpusMin : rightSize({ class: h.jobClass, cpus: { min: h.cpusMin, max: h.cpusMin } }, cores).cpus.min;",
+        to: 'const min = h.cpusMin;',
+      },
+      {
         name: 'H21 auto の方針でもデーモンの盤面を見ない',
         file: 'src/hooks/main.mjs',
-        from: "out = preToolUse(input, { ...base, shouldBackground: (heavy) => snap !== null && waitExpected(snap, heavy) });",
+        from: "out = preToolUse(input, { ...base, shouldBackground: (heavy) => snap !== null && waitExpected(snap, heavy, repo) });",
         to: '',
       },
       {

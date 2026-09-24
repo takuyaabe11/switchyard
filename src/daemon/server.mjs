@@ -214,6 +214,8 @@ export async function startDaemon(opts) {
       badRecords: journal.bad,
       // 起動したときの版。plugin を更新した後も古いデーモンが走り続けるので、SessionStart が食い違いを知らせる(設計 §9.6)
       version: VERSION,
+      // 実測で要求を縮める repo × profile と使用コア数。PreToolUse が「待たされるか」の見込みに使う
+      sized: adaptive ? usage.sizedAll() : {},
     };
   };
 

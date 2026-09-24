@@ -5,6 +5,7 @@
 import { switchyardHome, pathsOf } from '../daemon/paths.mjs';
 import { appendRecord } from '../daemon/store.mjs';
 import { ask, connectDaemon } from '../client/connect.mjs';
+import { repoRoot } from '../config/context.mjs';
 import { preToolUse, waitExpected } from './pretooluse.mjs';
 import { sessionStart, stop } from './session.mjs';
 import { t } from '../i18n.mjs';
@@ -77,7 +78,8 @@ export async function runHook(event, raw, { write = (s) => process.stdout.write(
       // 普段の Bash の呼び出しにはデーモンへの問い合わせを足さない
       if (isBackground(out) && backgroundMode(env) === 'auto') {
         const snap = await snapshot(env);
-        out = preToolUse(input, { ...base, shouldBackground: (heavy) => snap !== null && waitExpected(snap, heavy) });
+        const repo = repoRoot(typeof input.cwd === 'string' ? input.cwd : process.cwd());
+        out = preToolUse(input, { ...base, shouldBackground: (heavy) => snap !== null && waitExpected(snap, heavy, repo) });
       } else if (isBackground(out) && backgroundMode(env) === 'never') {
         out = null;
       }

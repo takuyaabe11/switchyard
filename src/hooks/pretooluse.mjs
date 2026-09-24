@@ -11,6 +11,7 @@ import { repoRoot } from '../config/context.mjs';
 import { classifiableCommand, classify, globMatch, loadProfiles } from '../config/profiles.mjs';
 import { GIT_LOCK_SUBCOMMANDS, gitSubcommand } from '../shim/decide.mjs';
 import { simpleCommands } from './shell.mjs';
+import { rightSize, usageKey } from '../core/usage.mjs';
 import { t } from '../i18n.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
@@ -167,27 +168,29 @@ function wrapperOf(args, profiles) {
     jobClass: flags.class ?? named?.profile.class ?? 'batch',
     cpusMin: flags.cpus?.min ?? named?.profile.cpus?.min ?? 1,
     locks: [...new Set([...(named?.profile.locks ?? []), ...(flags.locks ?? [])])],
+    ...(named === null ? {} : { profile: named.name }),
   };
   return { ...need, argv };
 }
 
 /** profile が要求する資源(buildRequest と同じ既定: CPU 1) @param {import('../config/profiles.mjs').Profile} p @returns {Heavy} */
-const needOf = (p) => ({ jobClass: p.class, cpusMin: p.cpus?.min ?? 1, locks: p.locks ?? [] });
+const needOf = (p, /** @type {string} */ name) => ({ jobClass: p.class, cpusMin: p.cpus?.min ?? 1, locks: p.locks ?? [], profile: name });
 
 /**
  * 背景へ回すかを決める関数。既定は「重いものは必ず回す」(switchyard replay の数え方と同じ)。
  * hook の入口は、デーモンの盤面を見て待ちが見込まれるときだけ回す関数を渡す(waitExpected)。
  * @typedef {(heavy: Heavy[]) => boolean} BackgroundPolicy
  */
-/** @typedef {{ jobClass: JobClass, cpusMin: number, locks: string[] }} Heavy */
+/** @typedef {{ jobClass: JobClass, cpusMin: number, locks: string[], profile?: string }} Heavy */
 
 /**
  * いまの盤面で、この重い部分が待たされる見込みがあるか。
  * 待ち列がある・計測が走っている・計測を要求するのに CPU を持つ走行がある・鍵が使われている・CPU の空きが足りない、のどれか。
  * 見込みが無ければ前景のまま走らせる(待たないなら背景へ回す理由が無く、回すとエージェントは完了の通知を待つことになる)。
- * @param {import('../protocol/messages.mjs').Snapshot} snap @param {Heavy[]} heavy @returns {boolean}
+ * repo を渡すと、デーモンが実測で縮める profile(盤面の sized)は縮めた要求で見積もる(right-sizing と同じ計算)。
+ * @param {import('../protocol/messages.mjs').Snapshot} snap @param {Heavy[]} heavy @param {string} [repo] @returns {boolean}
  */
-export function waitExpected(snap, heavy) {
+export function waitExpected(snap, heavy, repo) {
   if (snap.waiting.length > 0) return true;
   if (snap.leases.some((l) => l.class === 'measure')) return true;
   const cpuHeld = snap.leases.some((l) => l.cpus > 0);
@@ -195,7 +198,9 @@ export function waitExpected(snap, heavy) {
   for (const h of heavy) {
     if (h.jobClass === 'measure' && cpuHeld) return true;
     if (h.locks.some((k) => snap.leases.some((l) => l.locks.includes(k)))) return true;
-    need += Math.min(Math.max(h.cpusMin, 1), snap.capacity);
+    const cores = repo === undefined || h.profile === undefined ? undefined : snap.sized?.[usageKey(repo, h.profile)];
+    const min = cores === undefined ? h.cpusMin : rightSize({ class: h.jobClass, cpus: { min: h.cpusMin, max: h.cpusMin } }, cores).cpus.min;
+    need += Math.min(Math.max(min, 1), snap.capacity);
   }
   return need > snap.capacity - snap.used;
 }
@@ -259,7 +264,7 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
       const hit = classify(classifiableCommand([base, ...rest]), profiles);
       if (hit === null) return;
       if (!pathHead || isProjectLocal(head)) {
-        if (hit.profile.class !== 'quick') heavy.push(needOf(hit.profile));
+        if (hit.profile.class !== 'quick') heavy.push(needOf(hit.profile, hit.name));
         if (!wrapped && bypass.length > 0) overridden.push(bypassText);
       } else if (!wrapped) {
         unshimmed.push(text);
@@ -273,7 +278,7 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
     const hit = classify(ownText, profiles) ?? (pathHead ? classify(classifiableCommand([base, ...rest]), profiles) : null);
     const launches = pathHead || profiles.some((np) => np.profile.match.some((g) => leadWord(g) === head && globMatch(g, ownText)));
     // switchyard run で包んだ中では、子に入れ子の印が立ち node の shim も包まないので、重さは包みの性格だけで決まる(ここでは数えない)
-    if (!wrapped && hit !== null && launches && hit.profile.class !== 'quick') heavy.push(needOf(hit.profile));
+    if (!wrapped && hit !== null && launches && hit.profile.class !== 'quick') heavy.push(needOf(hit.profile, hit.name));
     // パスで呼ぶスクリプトの引数の中の shim の語・シェルから後ろ(scripts/probe-run.sh gates npm run bench など)は、中で PATH の shim が包みうる。
     // 背景への判定だけに使う(拒否にはかけない)
     if (pathHead) {

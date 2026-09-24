@@ -433,6 +433,11 @@ describe('実測の CPU の使い方で要求を縮める(right-sizing)', () => 
     assert.deepEqual(history.map((h) => h.cpuMs), [8_000, 8_000, 8_000, 8_000]);
     const req = readFileSync(pathsOf(home).events, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.kind === 'event' && r.event.type === 'request').pop();
     assert.deepEqual([req.event.job.cpus, req.event.job.sizedFrom, req.event.job.measuredCores], [{ min: 1, max: 1 }, { min: 2, max: 4 }, 0.8]);
+    // 盤面にも載せる(PreToolUse が待ちの見込みに使う)
+    const q = await client(d.sock);
+    q.send({ t: 'status' });
+    const snap = /** @type {Snapshot} */ ((await q.next((m) => m.t === 'status')).snapshot);
+    assert.deepEqual(snap.sized, { [JSON.stringify(['/repo', 'unit'])]: 0.8 });
   });
 
   it('adaptive: false なら宣言どおり。計測は縮めない。再起動しても記録から学び直す', async () => {
