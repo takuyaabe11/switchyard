@@ -87,30 +87,35 @@ describe('decideShim(設計 §9.1)', () => {
     assert.deepEqual(decideShim({ word: 'npm', args: ['run', 'e2e'], cwd: dir, env: {} }), { kind: 'pass' });
   });
 
+  it('既定(SWITCHYARD_GIT が 1 でない)では git を扱わず、git-dir も読まずに pass', () => {
+    assert.deepEqual(decideShim({ word: 'git', args: ['commit', '-m', 'x'], cwd: plainDir(), env: {}, gitDir: mustNotRead }), { kind: 'pass' });
+    assert.deepEqual(decideShim({ word: 'git', args: ['commit'], cwd: plainDir(), env: { SWITCHYARD_GIT: '0' }, gitDir: mustNotRead }), { kind: 'pass' });
+  });
+
   it('git commit は git-dir の実パスの鍵を持つ lock', () => {
     const dir = gitDir();
-    assert.deepEqual(decideShim({ word: 'git', args: ['commit', '-m', 'x'], cwd: dir, env: {} }), { kind: 'lock', lock: `git-index:${realpathSync(join(dir, '.git'))}` });
+    assert.deepEqual(decideShim({ word: 'git', args: ['commit', '-m', 'x'], cwd: dir, env: { SWITCHYARD_GIT: '1' } }), { kind: 'lock', lock: `git-index:${realpathSync(join(dir, '.git'))}` });
   });
 
   it('index を書き換えない git は、git-dir を読まずに pass', () => {
-    assert.deepEqual(decideShim({ word: 'git', args: ['status'], cwd: plainDir(), env: {}, gitDir: mustNotRead }), { kind: 'pass' });
-    assert.deepEqual(decideShim({ word: 'git', args: [], cwd: plainDir(), env: {}, gitDir: mustNotRead }), { kind: 'pass' });
+    assert.deepEqual(decideShim({ word: 'git', args: ['status'], cwd: plainDir(), env: { SWITCHYARD_GIT: '1' }, gitDir: mustNotRead }), { kind: 'pass' });
+    assert.deepEqual(decideShim({ word: 'git', args: [], cwd: plainDir(), env: { SWITCHYARD_GIT: '1' }, gitDir: mustNotRead }), { kind: 'pass' });
   });
 
   it('祖先が同じ git の鍵を持っていれば pass', () => {
     const dir = gitDir();
     const lock = `git-index:${realpathSync(join(dir, '.git'))}`;
-    assert.deepEqual(decideShim({ word: 'git', args: ['stash'], cwd: dir, env: { SWITCHYARD_HELD_LOCKS: `other,${lock}` } }), { kind: 'pass' });
+    assert.deepEqual(decideShim({ word: 'git', args: ['stash'], cwd: dir, env: { SWITCHYARD_GIT: '1', SWITCHYARD_HELD_LOCKS: `other,${lock}` } }), { kind: 'pass' });
   });
 
   it('大域オプション(-C dir・-c k=v・--no-pager)の後ろのサブコマンドでも鍵を取り、鍵は -C の先の repo の git-dir', () => {
     const dir = gitDir();
     const lock = { kind: 'lock', lock: `git-index:${realpathSync(join(dir, '.git'))}` };
     // cwd は git の外。-C で指した repo の鍵になる
-    assert.deepEqual(decideShim({ word: 'git', args: ['-C', dir, 'commit', '-m', 'x'], cwd: plainDir(), env: {} }), lock);
-    assert.deepEqual(decideShim({ word: 'git', args: ['-c', 'user.name=x', '--no-pager', 'commit'], cwd: dir, env: {} }), lock);
-    assert.deepEqual(decideShim({ word: 'git', args: ['add', '-A'], cwd: dir, env: {} }), lock);
-    assert.deepEqual(decideShim({ word: 'git', args: ['-C', dir, 'status'], cwd: plainDir(), env: {}, gitDir: mustNotRead }), { kind: 'pass' });
+    assert.deepEqual(decideShim({ word: 'git', args: ['-C', dir, 'commit', '-m', 'x'], cwd: plainDir(), env: { SWITCHYARD_GIT: '1' } }), lock);
+    assert.deepEqual(decideShim({ word: 'git', args: ['-c', 'user.name=x', '--no-pager', 'commit'], cwd: dir, env: { SWITCHYARD_GIT: '1' } }), lock);
+    assert.deepEqual(decideShim({ word: 'git', args: ['add', '-A'], cwd: dir, env: { SWITCHYARD_GIT: '1' } }), lock);
+    assert.deepEqual(decideShim({ word: 'git', args: ['-C', dir, 'status'], cwd: plainDir(), env: { SWITCHYARD_GIT: '1' }, gitDir: mustNotRead }), { kind: 'pass' });
   });
 
   it('gitSubcommand は値を取る大域オプションの値をサブコマンドと取り違えない', () => {
@@ -121,7 +126,7 @@ describe('decideShim(設計 §9.1)', () => {
   });
 
   it('git の外の git commit は pass', () => {
-    assert.deepEqual(decideShim({ word: 'git', args: ['commit'], cwd: plainDir(), env: {}, gitDir: () => null }), { kind: 'pass' });
+    assert.deepEqual(decideShim({ word: 'git', args: ['commit'], cwd: plainDir(), env: { SWITCHYARD_GIT: '1' }, gitDir: () => null }), { kind: 'pass' });
   });
 
   it('答えを 1 行の文字列にする', () => {

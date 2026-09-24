@@ -81,28 +81,28 @@ describe('bashCallsOf(記録の 1 行)', () => {
 
 describe('judgeCall(PreToolUse と shim の分類器の実物で判定する)', () => {
   it('読むだけのコマンドは何もしない。shim も通らない', () => {
-    assert.deepEqual(judgeCall(call('cat benchmarks/standards.json'), { profilesFor: defaults }), { hook: 'none', shims: [] });
+    assert.deepEqual(judgeCall(call('cat benchmarks/standards.json'), { profilesFor: defaults, git: true }), { hook: 'none', shims: [] });
   });
 
   it('前景の npm test は背景へ。shim は既定表で包む', () => {
-    assert.deepEqual(judgeCall(call('npm test'), { profilesFor: defaults }), { hook: 'background', shims: [{ word: 'npm', answer: 'run default:batch' }] });
+    assert.deepEqual(judgeCall(call('npm test'), { profilesFor: defaults, git: true }), { hook: 'background', shims: [{ word: 'npm', answer: 'run default:batch' }] });
   });
 
   it('既に背景の重い走行は「既に背景」', () => {
-    assert.deepEqual(judgeCall(call('npm test', true), { profilesFor: defaults }), {
+    assert.deepEqual(judgeCall(call('npm test', true), { profilesFor: defaults, git: true }), {
       hook: 'already-background',
       shims: [{ word: 'npm', answer: 'run default:batch' }],
     });
   });
 
   it('パスで呼ぶ git commit は拒否、git commit は鍵だけ、git status は素通し', () => {
-    assert.deepEqual(judgeCall(call('/usr/bin/git commit -m x'), { profilesFor: defaults }), { hook: 'deny', shims: [] });
-    assert.deepEqual(judgeCall(call('git commit -m x'), { profilesFor: defaults }), { hook: 'none', shims: [{ word: 'git', answer: 'lock' }] });
-    assert.deepEqual(judgeCall(call('git status'), { profilesFor: defaults }), { hook: 'none', shims: [{ word: 'git', answer: 'pass' }] });
+    assert.deepEqual(judgeCall(call('/usr/bin/git commit -m x'), { profilesFor: defaults, git: true }), { hook: 'deny', shims: [] });
+    assert.deepEqual(judgeCall(call('git commit -m x'), { profilesFor: defaults, git: true }), { hook: 'none', shims: [{ word: 'git', answer: 'lock' }] });
+    assert.deepEqual(judgeCall(call('git status'), { profilesFor: defaults, git: true }), { hook: 'none', shims: [{ word: 'git', answer: 'pass' }] });
   });
 
   it('区切った単純コマンドごとに shim の答えを並べる', () => {
-    assert.deepEqual(judgeCall(call('npm install && npm run lint'), { profilesFor: defaults }), {
+    assert.deepEqual(judgeCall(call('npm install && npm run lint'), { profilesFor: defaults, git: true }), {
       hook: 'none',
       shims: [
         { word: 'npm', answer: 'pass' },
@@ -116,7 +116,7 @@ describe('judgeCall(PreToolUse と shim の分類器の実物で判定する)', 
       hook: 'background',
       shims: [{ word: 'npm', answer: 'run e2e' }],
     });
-    assert.deepEqual(judgeCall(call('npm run e2e'), { profilesFor: defaults }), { hook: 'none', shims: [{ word: 'npm', answer: 'pass' }] });
+    assert.deepEqual(judgeCall(call('npm run e2e'), { profilesFor: defaults, git: true }), { hook: 'none', shims: [{ word: 'npm', answer: 'pass' }] });
   });
 
   it('走らせている側の環境(考える層の印・入れ子の印)で判定を変えない', () => {
@@ -124,7 +124,7 @@ describe('judgeCall(PreToolUse と shim の分類器の実物で判定する)', 
     process.env.SWITCHYARD_THINKER = '1';
     process.env.SWITCHYARD_IN_JOB = '1';
     try {
-      assert.deepEqual(judgeCall(call('npm test'), { profilesFor: defaults }), { hook: 'background', shims: [{ word: 'npm', answer: 'run default:batch' }] });
+      assert.deepEqual(judgeCall(call('npm test'), { profilesFor: defaults, git: true }), { hook: 'background', shims: [{ word: 'npm', answer: 'run default:batch' }] });
     } finally {
       if (saved.thinker === undefined) delete process.env.SWITCHYARD_THINKER;
       else process.env.SWITCHYARD_THINKER = saved.thinker;
@@ -136,7 +136,7 @@ describe('judgeCall(PreToolUse と shim の分類器の実物で判定する)', 
 
 describe('replay(記録の根を読んで集計する)', () => {
   it('メインとサブエージェントの記録を読み、同じ tool_use を 1 回だけ数える', async () => {
-    const r = await replay({ dir: fixture(), cwdPrefix: null, since: null, profilesFor: defaults, examples: 5 });
+    const r = await replay({ dir: fixture(), cwdPrefix: null, since: null, profilesFor: defaults, examples: 5, git: true });
     assert.equal(r.files, 3);
     assert.equal(r.calls, 6);
     assert.deepEqual(r.hook, { deny: 1, background: 2, alreadyBackground: 1, none: 2 });
@@ -147,17 +147,17 @@ describe('replay(記録の根を読んで集計する)', () => {
 
   it('cwd の前方一致と、期間の始まりで絞る', async () => {
     const dir = fixture();
-    const irc = await replay({ dir, cwdPrefix: '/w/irc', since: null, profilesFor: defaults, examples: 5 });
+    const irc = await replay({ dir, cwdPrefix: '/w/irc', since: null, profilesFor: defaults, examples: 5, git: true });
     assert.equal(irc.calls, 5);
     assert.deepEqual(irc.hook, { deny: 1, background: 1, alreadyBackground: 1, none: 2 });
-    const recent = await replay({ dir, cwdPrefix: null, since: Date.parse('2026-09-12T00:00:00.000Z'), profilesFor: defaults, examples: 5 });
+    const recent = await replay({ dir, cwdPrefix: null, since: Date.parse('2026-09-12T00:00:00.000Z'), profilesFor: defaults, examples: 5, git: true });
     assert.equal(recent.calls, 4);
     assert.equal(recent.first, '2026-09-12T01:00:00.000Z');
   });
 
   it('例は新しい順に、決めた件数まで', async () => {
     const dir = fixture();
-    const all = await replay({ dir, cwdPrefix: null, since: null, profilesFor: defaults, examples: 5 });
+    const all = await replay({ dir, cwdPrefix: null, since: null, profilesFor: defaults, examples: 5, git: true });
     assert.deepEqual(
       all.examples.background.map((e) => [e.cwd, e.timestamp]),
       [
@@ -166,14 +166,14 @@ describe('replay(記録の根を読んで集計する)', () => {
       ],
     );
     assert.deepEqual(all.examples.deny.map((e) => e.command), ['/usr/bin/git commit -m x']);
-    const one = await replay({ dir, cwdPrefix: null, since: null, profilesFor: defaults, examples: 1 });
+    const one = await replay({ dir, cwdPrefix: null, since: null, profilesFor: defaults, examples: 1, git: true });
     assert.deepEqual(one.examples.background.map((e) => e.cwd), ['/w/other']);
   });
 });
 
 describe('formatReport(端末に出す文面)', () => {
   it('件数・割合・profile の内訳・絞り込み・例を出す', async () => {
-    const r = await replay({ dir: fixture(), cwdPrefix: '/w/irc', since: null, profilesFor: defaults, examples: 5 });
+    const r = await replay({ dir: fixture(), cwdPrefix: '/w/irc', since: null, profilesFor: defaults, examples: 5, git: true });
     const text = formatReport(r, { cwdPrefix: '/w/irc', sinceDays: null, examples: 5 });
     assert.match(text, /対象: 記録 3 本・Bash の呼び出し 5 件\(2026-09-10 〜 2026-09-14\)/);
     assert.match(text, /絞り込み: cwd が \/w\/irc で始まる/);
@@ -188,7 +188,7 @@ describe('formatReport(端末に出す文面)', () => {
   });
 
   it('0 件なら割合も例も出さない', async () => {
-    const empty = await replay({ dir: mkdtempSync(join(tmpdir(), 'crep-')), cwdPrefix: null, since: null, profilesFor: defaults, examples: 5 });
+    const empty = await replay({ dir: mkdtempSync(join(tmpdir(), 'crep-')), cwdPrefix: null, since: null, profilesFor: defaults, examples: 5, git: true });
     const text = formatReport(empty, { cwdPrefix: null, sinceDays: 7, examples: 5 });
     assert.match(text, /Bash の呼び出しは 0 件/);
     assert.match(text, /絞り込み: 直近 7 日/);
@@ -200,7 +200,7 @@ describe('formatReport(端末に出す文面)', () => {
     mkdirSync(join(root, 'p'));
     const long = `npm test -- ${'x'.repeat(200)}\n  && echo done`;
     writeFileSync(join(root, 'p', 's.jsonl'), bashLine({ id: 'l1', command: long }) + '\n');
-    const r = await replay({ dir: root, cwdPrefix: null, since: null, profilesFor: defaults, examples: 5 });
+    const r = await replay({ dir: root, cwdPrefix: null, since: null, profilesFor: defaults, examples: 5, git: true });
     const example = formatReport(r, { cwdPrefix: null, sinceDays: null, examples: 5 })
       .split('\n')
       .find((l) => l.includes('npm test -- x'));

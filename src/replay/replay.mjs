@@ -9,6 +9,7 @@ import { createInterface } from 'node:readline';
 import { headWord, preToolUse, SHIM_WORDS } from '../hooks/pretooluse.mjs';
 import { simpleCommands } from '../hooks/shell.mjs';
 import { decideShim } from '../shim/decide.mjs';
+import { maskSecrets } from '../redact.mjs';
 import { t } from '../i18n.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
@@ -28,8 +29,11 @@ import { t } from '../i18n.mjs';
  * }} Report
  */
 
-/** 判定に使う環境。走らせている側の印(考える層・入れ子)を持ち込まない */
-const CLEAN_ENV = {};
+/**
+ * 判定に使う環境。走らせている側の印(考える層・入れ子)を持ち込まない。git の鍵を取るか(SWITCHYARD_GIT)だけは利用者の設定に合わせる
+ * @param {boolean} git @returns {NodeJS.ProcessEnv}
+ */
+const cleanEnv = (git) => (git ? { SWITCHYARD_GIT: '1' } : {});
 
 /** 分類器が git-dir を読む代わり。記録の cwd で git を叩かない(鍵の名前は数えないので実パスは要らない) */
 const NO_GIT = () => '<git-dir>';
@@ -71,12 +75,12 @@ function denied(out) {
 
 /**
  * 1 件を、PreToolUse と shim の分類器の実物で判定する。
- * @param {BashCall} call @param {{ profilesFor: (cwd: string) => NamedProfile[] }} opts @returns {Judgement}
+ * @param {BashCall} call @param {{ profilesFor: (cwd: string) => NamedProfile[], git?: boolean }} opts @returns {Judgement}
  */
-export function judgeCall(call, { profilesFor }) {
+export function judgeCall(call, { profilesFor, git = false }) {
   const foreground = { tool_name: 'Bash', tool_input: { command: call.command }, cwd: call.cwd };
   const recorded = call.runInBackground ? { ...foreground, tool_input: { command: call.command, run_in_background: true } } : foreground;
-  const opts = { env: CLEAN_ENV, profilesFor };
+  const opts = { env: cleanEnv(git), profilesFor };
   const out = preToolUse(recorded, opts);
   /** @type {HookVerdict} */
   let hook = 'none';
@@ -93,7 +97,7 @@ export function judgeCall(call, { profilesFor }) {
   for (const words of simpleCommands(call.command)) {
     const { head, rest } = headWord(words.join(' '));
     if (!SHIM_WORDS.includes(head)) continue;
-    const a = decideShim({ word: head, args: rest, cwd: call.cwd, env: CLEAN_ENV, gitDir: NO_GIT, profilesFor });
+    const a = decideShim({ word: head, args: rest, cwd: call.cwd, env: cleanEnv(git), gitDir: NO_GIT, profilesFor });
     shims.push({ word: head, answer: a.kind === 'run' ? `run ${a.profile}` : a.kind });
   }
   return { hook, shims };
@@ -101,10 +105,10 @@ export function judgeCall(call, { profilesFor }) {
 
 /**
  * 記録の根の下の *.jsonl(メインのセッションとサブエージェント)を読み、判定を数える。
- * @param {{ dir: string, cwdPrefix: string | null, since: number | null, profilesFor: (cwd: string) => NamedProfile[], examples: number }} opts
+ * @param {{ dir: string, cwdPrefix: string | null, since: number | null, profilesFor: (cwd: string) => NamedProfile[], examples: number, git?: boolean }} opts
  * @returns {Promise<Report>}
  */
-export async function replay({ dir, cwdPrefix, since, profilesFor, examples }) {
+export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git = false }) {
   const files = readdirSync(dir, { recursive: true, encoding: 'utf8' })
     .filter((p) => p.endsWith('.jsonl'))
     .sort()
@@ -136,7 +140,7 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples }) {
         if (cwdPrefix !== null && !c.cwd.startsWith(cwdPrefix)) continue;
         if (since !== null && !(Date.parse(c.timestamp) >= since)) continue;
 
-        const j = judgeCall(c, { profilesFor });
+        const j = judgeCall(c, { profilesFor, git });
         report.calls += 1;
         if (report.first === null || c.timestamp < report.first) report.first = c.timestamp;
         if (report.last === null || c.timestamp > report.last) report.last = c.timestamp;
@@ -221,7 +225,7 @@ export function formatReport(r, { cwdPrefix, sinceDays, examples }) {
     ])) {
       if (xs.length === 0) continue;
       lines.push(t(`${label}の例(新しい順に最大 ${examples} 件)`, `${label}: examples (newest first, up to ${examples})`));
-      for (const x of xs) lines.push(`  ${x.timestamp.slice(0, 16).replace('T', ' ')}  ${x.cwd}  ${oneLine(x.command)}`);
+      for (const x of xs) lines.push(`  ${x.timestamp.slice(0, 16).replace('T', ' ')}  ${x.cwd}  ${oneLine(maskSecrets(x.command))}`);
     }
   }
   lines.push(

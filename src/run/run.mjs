@@ -8,6 +8,7 @@ import { sessionId } from '../client/session.mjs';
 import { heldLocks, repoRoot } from '../config/context.mjs';
 import { applyTemplate, classifiableCommand, classify, loadProfiles } from '../config/profiles.mjs';
 import { threadEnv } from '../config/threads.mjs';
+import { loggedCommand, maskSecrets } from '../redact.mjs';
 import { pathsOf } from '../daemon/paths.mjs';
 import { appendRecord } from '../daemon/store.mjs';
 import { readPgid, renicePriority, signalGroup, spawnMeasured, verifiedGroup, waitGroupGone } from './group.mjs';
@@ -64,7 +65,8 @@ function signalCode(sig) {
 export function buildRequest({ argv, flags, env, cwd }) {
   const repo = repoRoot(cwd);
   const { profiles, error, notice } = loadProfiles(repo);
-  const cmd = argv.join(' ');
+  // 記録と表示に使う文字列。秘密は隠す(SWITCHYARD_LOG_COMMANDS)。走らせるのは argv そのまま
+  const cmd = loggedCommand(argv.join(' '), env);
   const named = flags.profile !== undefined ? profiles.find((p) => p.name === flags.profile) ?? null : classify(classifiableCommand(argv), profiles);
   if (flags.profile !== undefined && named === null) throw new Error(t(`profile ${flags.profile} が見つからない`, `profile ${flags.profile} not found`));
   const base = named === null ? null : named.profile;
@@ -88,7 +90,7 @@ export function buildRequest({ argv, flags, env, cwd }) {
       session: sessionId(env),
       repo,
       // shim は本物のパスで起動するので、先頭の語は basename にする(パスごとに見込みが分かれないように。設計 §5.4)
-      profile: named === null ? `cmd:${[basename(argv[0]), ...argv.slice(1, 2)].join(' ')}` : named.name,
+      profile: named === null ? `cmd:${maskSecrets([basename(argv[0]), ...argv.slice(1, 2)].join(' '))}` : named.name,
       cmd,
       class: flags.class ?? base?.class ?? 'batch',
       cpus: env.SWITCHYARD_IN_JOB === '1' ? { min: 0, max: 0 } : flags.cpus ?? base?.cpus ?? { min: 1, max: 1 },

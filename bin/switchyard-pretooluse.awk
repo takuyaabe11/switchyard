@@ -5,7 +5,7 @@
 # 判定が何かを返すのは、どれかの部分が次のどれかのときだけ:
 #   - 既定表の glob が始まる語(src/config/profiles.mjs の defaultHeadWords。どれも shim の語)。
 #     shim の語のうち node は、設定ファイルが無ければ node_modules/.bin の形でしか当たらない(下の node_modules で拾う)
-#   - git の、index を書き換えるサブコマンド(パスで呼ぶ・PATH を差し替えると拒否する)
+#   - git の、index を書き換えるサブコマンド(SWITCHYARD_GIT=1 のときだけ。パスで呼ぶ・PATH を差し替えると拒否する)
 #   - switchyard run の包み・パスで呼ぶビルドの包み(gradlew・mvnw)・node_modules/.bin の実行ファイル
 #   - repo の switchyard.json(改名前の conductor.json)の profile
 # だから、コマンドの文字列にこれらの語が語として現れず、cwd から上に設定ファイルが無ければ、node を起動するまでもない。
@@ -30,6 +30,8 @@ function field(s, key,    re, v) {
 { s = s $0 "\n" }
 
 END {
+  # switchyard を止めていれば、判定も何もしない
+  if (ENVIRON["SWITCHYARD_OFF"] == "1" || ENVIRON["SWITCHYARD_THINKER"] == "1") exit 0
   cmd = field(s, "command")
   if (cmd == "\001") exit 1
   # 改行・タブなどのエスケープ(\n)の字は語の一部ではない。語の境目にする
@@ -37,7 +39,7 @@ END {
   gsub(/\\[nrtbf]/, " ", cmd)
   if (cmd ~ /(^|[^A-Za-z0-9_-])(npm|npx|cargo|pytest|go|make|yarn|pnpm|bun|python|python3|uv|poetry|mvn|gradle|dotnet|bundle|rspec|deno|switchyard|gradlew|mvnw|node_modules)([^A-Za-z0-9_-]|$)/) exit 1
   # git は index を書き換えるサブコマンド(src/shim/decide.mjs の GIT_LOCK_SUBCOMMANDS)の語があるときだけ見る(git status・git diff は素通し)
-  if (cmd ~ /(^|[^A-Za-z0-9_-])git([^A-Za-z0-9_-]|$)/ && cmd ~ /(^|[^A-Za-z0-9_-])(commit|merge|rebase|cherry-pick|stash|am|add|rm|mv|reset|restore|checkout|switch|pull|revert)([^A-Za-z0-9_-]|$)/) exit 1
+  if (ENVIRON["SWITCHYARD_GIT"] == "1" && cmd ~ /(^|[^A-Za-z0-9_-])git([^A-Za-z0-9_-]|$)/ && cmd ~ /(^|[^A-Za-z0-9_-])(commit|merge|rebase|cherry-pick|stash|am|add|rm|mv|reset|restore|checkout|switch|pull|revert)([^A-Za-z0-9_-]|$)/) exit 1
   cwd = field(s, "cwd")
   if (cwd == "\001" || cwd !~ /^\// || cwd ~ /\\/) exit 1
   d = cwd

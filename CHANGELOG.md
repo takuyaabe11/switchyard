@@ -3,6 +3,32 @@
 All notable changes to switchyard. Versions follow `plugin.json`; Claude Code only offers an update when that
 version goes up.
 
+## 0.11.0
+
+Defaults changed after a round of persona interviews ([docs/research/2026-09-24-personas.md](docs/research/2026-09-24-personas.md)):
+what kept people from installing was fear of what switchyard might do, more than any missing feature.
+
+### Changed
+- Commands are logged with secrets masked: assignments to secret-looking names (`API_KEY=…`, `-Dx.password=…`,
+  `--api-key=…`), the value after `--password`/`--token`/…, `mysql -p…`, `user:pass@` in URLs, `Authorization:` and
+  similar headers, and token shapes (`sk-…`, `ghp_…`, `AKIA…`, JWTs, …) become `***`. This covers `events.jsonl`,
+  `state.json`, `top`, unacked lists, `hooks.jsonl`, and the examples `replay` and `init` print. The command itself runs
+  unchanged. `SWITCHYARD_LOG_COMMANDS=none` keeps only the first word; `full` keeps everything as before.
+- `Stop` no longer holds a session back by default. It tells you (`systemMessage`) about runs nobody has looked at,
+  once per run. `SWITCHYARD_STOP=block` restores the old behavior.
+- The `git` shim does nothing by default: no index lock, no daemon round-trip, and `PreToolUse` no longer refuses
+  `git` called by path. `SWITCHYARD_GIT=1` turns the index lock back on (worktrees each have their own index and
+  never needed it).
+- The update check is off by default; `SWITCHYARD_UPDATE_CHECK=1` turns it on. switchyard makes no network requests
+  unless asked.
+
+### Added
+- `SWITCHYARD_OFF=1` turns switchyard off for a session: hooks do nothing and shims run the real tools directly. The
+  old `SWITCHYARD_THINKER=1` still works. Putting `SWITCHYARD_OFF=1` in front of a queued command is refused like the
+  other bypasses.
+- README: who it is for, "Questions people ask" (Unix socket only, what it sees on the machine, worktrees, headless
+  `claude -p`).
+
 ## 0.10.0
 
 ### Added

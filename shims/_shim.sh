@@ -23,6 +23,9 @@ if [ -z "$real" ]; then
   exit 127
 fi
 
+# switchyard を止めている(SWITCHYARD_OFF=1・以前の名前 SWITCHYARD_THINKER=1)なら、何もせずに本物を走らせる
+if [ "${SWITCHYARD_OFF:-}" = 1 ] || [ "${SWITCHYARD_THINKER:-}" = 1 ]; then exec "$real" "$@"; fi
+
 # CPU を持つジョブの中なら、そのジョブの一部として走らせる(設計 §4.3 の 7。分類器を呼ぶまでもない)
 if [ "${SWITCHYARD_IN_JOB:-}" = 1 ]; then exec "$real" "$@"; fi
 
@@ -31,6 +34,8 @@ if [ "${SWITCHYARD_IN_JOB:-}" = 1 ]; then exec "$real" "$@"; fi
 # 最初の引数だけを見ると git -C repo commit が鍵を取らずに素通りする
 # (src/shim/decide.mjs の gitSubcommand と GIT_LOCK_SUBCOMMANDS と同じ。test/shim/shims.test.mjs が食い違いを止める)
 if [ "$name" = git ]; then
+  # git の index の鍵は SWITCHYARD_GIT=1 のときだけ取る(既定は素通し。src/shim/decide.mjs と同じ)
+  if [ "${SWITCHYARD_GIT:-0}" != 1 ]; then exec "$real" "$@"; fi
   git_sub=
   git_skip=0
   for a in "$@"; do

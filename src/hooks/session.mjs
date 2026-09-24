@@ -7,6 +7,7 @@ import { ask, connectDaemon, DaemonUnavailableError } from '../client/connect.mj
 import { ensurePrivateDir, switchyardHome, pathsOf } from '../daemon/paths.mjs';
 import { VERSION } from '../version.mjs';
 import { t } from '../i18n.mjs';
+import { isOff } from './off.mjs';
 
 /** @typedef {import('../protocol/messages.mjs').Snapshot} Snapshot */
 /** @typedef {import('../core/types.mjs').Unacked} Unacked */
@@ -63,6 +64,34 @@ function writeFileAtomic(file, text) {
   renameSync(tmp, file);
 }
 
+/**
+ * Stop で知らせたジョブを覚え、まだ知らせていないものだけを返す(同じ失敗を毎回のターンの終わりに出さない)。
+ * 覚えられなくても知らせる(記録は補助)。セッションごとに直近 200 件まで。
+ * @param {string} home @param {string} session @param {string[]} jobIds @returns {string[]}
+ */
+export function notifyOnce(home, session, jobIds) {
+  const file = join(home, 'stop-notified.json');
+  /** @type {Record<string, string[]>} */
+  let seen = {};
+  try {
+    const raw = JSON.parse(readFileSync(file, 'utf8'));
+    if (typeof raw === 'object' && raw !== null) seen = raw;
+  } catch {
+    // 無い・読めない
+  }
+  const before = Array.isArray(seen[session]) ? seen[session] : [];
+  const fresh = jobIds.filter((id) => !before.includes(id));
+  if (fresh.length === 0) return [];
+  seen[session] = [...before, ...fresh].slice(-200);
+  try {
+    ensurePrivateDir(home);
+    writeFileAtomic(file, JSON.stringify(seen));
+  } catch {
+    // 覚えられなくても知らせる
+  }
+  return fresh;
+}
+
 /** 最新の版を問う先(公開の repo の plugin.json) */
 export const LATEST_URL = 'https://raw.githubusercontent.com/takuyaabe11/switchyard/main/.claude-plugin/plugin.json';
 /** 最新の版を問い直すまでの間(1 日) */
@@ -80,13 +109,14 @@ export function compareVersions(a, b) {
 }
 
 /**
- * 新しい版が出ていれば、知らせる 1 行。1 日に 1 回だけ外へ問う。SWITCHYARD_UPDATE_CHECK=0 で問わない。
+ * 新しい版が出ていれば、知らせる 1 行。SWITCHYARD_UPDATE_CHECK=1 のときだけ、1 日に 1 回まで外へ問う(既定は問わない。
+ * 会社の機械で、断りなく外へ通信するものを嫌う声が多かった)。
  * 問えなければ何も言わない(セッションの始まりを止めない)。
  * @param {{ env: NodeJS.ProcessEnv, version: string, fetchLatest?: () => Promise<string | null>, now?: () => number }} opts
  * @returns {Promise<string | null>}
  */
 export async function updateNotice({ env, version, fetchLatest = defaultFetchLatest, now = Date.now }) {
-  if (env.SWITCHYARD_UPDATE_CHECK === '0') return null;
+  if (env.SWITCHYARD_UPDATE_CHECK !== '1') return null;
   const cache = join(switchyardHome(env), 'update-check.json');
   /** @type {string | null} */
   let latest = null;
@@ -128,7 +158,7 @@ async function defaultFetchLatest() {
  * @returns {Promise<string[]>}
  */
 export async function sessionStart(_input, { env = process.env, connect = connectDaemon, root = PLUGIN_ROOT, version = VERSION, fetchLatest } = {}) {
-  if (env.SWITCHYARD_THINKER === '1') return [];
+  if (isOff(env)) return [];
   /** @type {string[]} */
   const lines = [];
   const envFile = env.CLAUDE_ENV_FILE;
@@ -205,7 +235,7 @@ const KIND = () => ({
  * @returns {Promise<Record<string, unknown> | null>}
  */
 export async function stop(input, { env = process.env, connect = connectDaemon } = {}) {
-  if (env.SWITCHYARD_THINKER === '1' || input.stop_hook_active === true) return null;
+  if (isOff(env) || input.stop_hook_active === true) return null;
   const session = typeof input.session_id === 'string' ? input.session_id.slice(0, 8) : '';
   if (session === '') return null;
   const home = switchyardHome(env);
@@ -221,6 +251,23 @@ export async function stop(input, { env = process.env, connect = connectDaemon }
   }
   if (jobs.length === 0) return null;
   const kind = KIND();
+  if (env.SWITCHYARD_STOP !== 'block') {
+    // 既定: 差し戻さず、人に知らせるだけ(Claude に確認を強いない)。同じジョブは 1 回だけ知らせる
+    const fresh = notifyOnce(home, session, jobs.map((j) => j.jobId));
+    if (fresh.length === 0) return null;
+    const lines = jobs
+      .filter((j) => fresh.includes(j.jobId))
+      .map((j) => t(`- ${j.jobId} ${kind[j.kind]}(終了コード ${j.code ?? 'なし'}): ${j.cmd}`, `- ${j.jobId} ${kind[j.kind]} (exit code ${j.code ?? 'none'}): ${j.cmd}`))
+      .join('\n');
+    return {
+      systemMessage: t(
+        `[switchyard] このセッションで、まだ誰も確かめていない終わり方の走行がある:\n${lines}\n` +
+          'switchyard why <job> で理由を読み、確かめたら switchyard ack <job>。止まる前に Claude に確かめさせたいときは SWITCHYARD_STOP=block。',
+        `[switchyard] runs in this session ended in a way nobody has looked at yet:\n${lines}\n` +
+          'Read why with switchyard why <job>, and mark it with switchyard ack <job>. To have Claude check before it stops, set SWITCHYARD_STOP=block.',
+      ),
+    };
+  }
   const list = jobs
     .map((j) => t(`- ${j.jobId} ${kind[j.kind]}(終了コード ${j.code ?? 'なし'}): ${j.cmd}`, `- ${j.jobId} ${kind[j.kind]} (exit code ${j.code ?? 'none'}): ${j.cmd}`))
     .join('\n');

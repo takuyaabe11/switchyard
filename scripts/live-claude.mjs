@@ -3,7 +3,7 @@
 // 本物の Claude Code での通し(設計 §15)。費用が出るので SWITCHYARD_LIVE_CLAUDE=1 のときだけ走る。
 // 使い捨ての作業場所と一時の SWITCHYARD_HOME で、この repo を --plugin-dir として haiku に 3 回走らせる:
 //   1. 成功する npm test: shim が switchyard に通し(記録に default:batch)、空いているので前景のまま走り、子にジョブの id が渡り、文言は英語
-//   2. 失敗する npm test: Stop が差し戻し、Claude が switchyard ack で確認済みにする
+//   2. 失敗する npm test: Stop が差し戻し(SWITCHYARD_STOP=block)、Claude が switchyard ack で確認済みにする
 //   3. ./gradlew test: shim から見えないので PreToolUse が拒否し、Claude が案内どおり switchyard run -- で包んで走らせる
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -131,7 +131,7 @@ if (isMain) {
     const a1 = analyzeStream(r1.stdout ?? '');
     const managed = records().some((r) => r.kind === 'history' && r.profile === 'default:batch' && r.code === 0);
 
-    const r2 = claude('Run the Bash command `npm test` exactly once; it is expected to fail. Before you stop, follow any instructions you receive.', ['Bash(npm test)', 'Bash(switchyard ack:*)', 'Bash(switchyard why:*)'], { LIVE_FAIL: '1' });
+    const r2 = claude('Run the Bash command `npm test` exactly once; it is expected to fail. Before you stop, follow any instructions you receive.', ['Bash(npm test)', 'Bash(switchyard ack:*)', 'Bash(switchyard why:*)'], { LIVE_FAIL: '1', SWITCHYARD_STOP: 'block' });
     const a2 = analyzeStream(r2.stdout ?? '');
     const acked = records().some((r) => r.kind === 'event' && typeof r.event === 'object' && r.event !== null && /** @type {Record<string, unknown>} */ (r.event).type === 'ack');
 

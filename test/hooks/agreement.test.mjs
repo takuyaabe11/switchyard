@@ -171,7 +171,7 @@ describe('三者の判定の表(shim の分類器・switchyard run の包み・P
   for (const row of ROWS) {
     // テスト名は置き場所に依らないようにする(変異の走行は一時ディレクトリの写しで走る)
     it(JSON.stringify(row.command.split(CLI).join('<bin/switchyard.mjs>')), () => {
-      const answers = row.shims.map(([argv]) => formatAnswer(decideShim({ word: argv[0], args: argv.slice(1), cwd: dir, env: {} })));
+      const answers = row.shims.map(([argv]) => formatAnswer(decideShim({ word: argv[0], args: argv.slice(1), cwd: dir, env: { SWITCHYARD_GIT: '1' } })));
       assert.deepEqual(answers, row.shims.map(([, a]) => (a === LOCK ? lock : a)), '分類器の答え');
 
       /** @type {string | null} */
@@ -179,11 +179,11 @@ describe('三者の判定の表(shim の分類器・switchyard run の包み・P
       if (row.run !== undefined) {
         const parsed = parseArgs(['run', ...row.run[0]]);
         if (parsed.cmd !== 'run') throw new Error('run として読めない');
-        wrapper = buildRequest({ argv: parsed.argv, flags: parsed.flags, env: {}, cwd: dir }).job.class;
+        wrapper = buildRequest({ argv: parsed.argv, flags: parsed.flags, env: { SWITCHYARD_GIT: '1' }, cwd: dir }).job.class;
         assert.equal(wrapper, row.run[1], '包みの性格');
       }
 
-      const hook = outcome(preToolUse({ session_id: 's', cwd: dir, hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: row.command } }, { env: {} }));
+      const hook = outcome(preToolUse({ session_id: 's', cwd: dir, hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: row.command } }, { env: { SWITCHYARD_GIT: '1' } }));
       assert.equal(hook, row.hook, 'PreToolUse の答え');
 
       // 食い違いの検査: CPU を持つ重い走行が起きるなら、前景のまま通さない

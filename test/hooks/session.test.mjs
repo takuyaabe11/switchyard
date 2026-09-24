@@ -61,14 +61,14 @@ async function failedJob(sock) {
   return String(acc.jobId);
 }
 
-describe('新しい版の知らせ(既定で有効。SWITCHYARD_UPDATE_CHECK=0 で問わない)', () => {
+describe('新しい版の知らせ(既定で無効。SWITCHYARD_UPDATE_CHECK=1 で問う)', () => {
   it('compareVersions は数の並びで比べる', () => {
     assert.ok(compareVersions('0.10.0', '0.9.9') > 0);
     assert.ok(compareVersions('1.0.0', '1.0.0') === 0);
     assert.ok(compareVersions('0.5.0', '0.6.0') < 0);
   });
 
-  it('0 なら外へ問わない。既定では新しいときだけ知らせ、1 日は控えを使う。問えなければ黙る', async () => {
+  it('既定と 0 では外へ問わない。1 なら新しいときだけ知らせ、1 日は控えを使う。問えなければ黙る', async () => {
     const home = tempHome();
     let asked = 0;
     const fetchLatest = async () => {
@@ -76,8 +76,9 @@ describe('新しい版の知らせ(既定で有効。SWITCHYARD_UPDATE_CHECK=0 �
       return '9.0.0';
     };
     assert.equal(await updateNotice({ env: { SWITCHYARD_HOME: home, SWITCHYARD_UPDATE_CHECK: '0' }, version: '0.6.0', fetchLatest }), null);
-    assert.equal(asked, 0, '0 なら外へ出ない');
-    const env = { SWITCHYARD_HOME: home };
+    assert.equal(await updateNotice({ env: { SWITCHYARD_HOME: home }, version: '0.6.0', fetchLatest }), null);
+    assert.equal(asked, 0, '既定と 0 では外へ出ない');
+    const env = { SWITCHYARD_HOME: home, SWITCHYARD_UPDATE_CHECK: '1' };
     assert.match(String(await updateNotice({ env, version: '0.6.0', fetchLatest, now: () => 1_000 })), /9\.0\.0/);
     assert.match(String(await updateNotice({ env, version: '0.6.0', fetchLatest, now: () => 2_000 })), /9\.0\.0/);
     assert.equal(asked, 1, '1 日の間は控えを使う');
@@ -87,7 +88,7 @@ describe('新しい版の知らせ(既定で有効。SWITCHYARD_UPDATE_CHECK=0 �
     const failing = async () => {
       throw new Error('offline');
     };
-    assert.equal(await updateNotice({ env: { SWITCHYARD_HOME: tempHome() }, version: '0.6.0', fetchLatest: failing }), null);
+    assert.equal(await updateNotice({ env: { SWITCHYARD_HOME: tempHome(), SWITCHYARD_UPDATE_CHECK: '1' }, version: '0.6.0', fetchLatest: failing }), null);
   });
 });
 
@@ -233,10 +234,23 @@ describe('SessionStart(設計 §9.2)', () => {
 });
 
 describe('Stop(設計 §9.2)', () => {
-  it('このセッションに ack されていない失敗があれば、decision: block で差し戻す', async () => {
+  it('既定: 差し戻さず、まだ知らせていない失敗だけを人に知らせる(systemMessage)。同じジョブは 2 度知らせない', async () => {
     const { d, home } = await daemon();
     const jobId = await failedJob(d.sock);
-    const out = /** @type {any} */ (await stop({ session_id: 'sessStop-1234', stop_hook_active: false }, { env: { SWITCHYARD_HOME: home }, connect: noAutoStart }));
+    const call = () => stop({ session_id: 'sessStop-1234', stop_hook_active: false }, { env: { SWITCHYARD_HOME: home }, connect: noAutoStart });
+    const out = /** @type {any} */ (await call());
+    assert.equal(out.decision, undefined);
+    assert.ok(out.systemMessage.includes(`${jobId} 失敗(終了コード 1): npm test`), out.systemMessage);
+    assert.ok(out.systemMessage.includes('SWITCHYARD_STOP=block'), out.systemMessage);
+    assert.equal(await call(), null, '2 度目のターンの終わりには出さない');
+    const other = /** @type {any} */ (await stop({ session_id: 'sessStop-1234' }, { env: { SWITCHYARD_HOME: home, SWITCHYARD_OFF: '1' }, connect: noAutoStart }));
+    assert.equal(other, null, 'SWITCHYARD_OFF=1 なら何もしない');
+  });
+
+  it('SWITCHYARD_STOP=block なら、ack されていない失敗があれば decision: block で差し戻す', async () => {
+    const { d, home } = await daemon();
+    const jobId = await failedJob(d.sock);
+    const out = /** @type {any} */ (await stop({ session_id: 'sessStop-1234', stop_hook_active: false }, { env: { SWITCHYARD_HOME: home, SWITCHYARD_STOP: 'block' }, connect: noAutoStart }));
     assert.equal(out.decision, 'block');
     assert.ok(out.reason.includes(`${jobId} 失敗(終了コード 1): npm test`), out.reason);
     assert.ok(out.reason.includes('switchyard ack <job>'), out.reason);
@@ -245,7 +259,7 @@ describe('Stop(設計 §9.2)', () => {
   it('stop_hook_active が true なら差し戻さない(2 度目の停止は通す)', async () => {
     const { d, home } = await daemon();
     await failedJob(d.sock);
-    assert.equal(await stop({ session_id: 'sessStop-1234', stop_hook_active: true }, { env: { SWITCHYARD_HOME: home }, connect: noAutoStart }), null);
+    assert.equal(await stop({ session_id: 'sessStop-1234', stop_hook_active: true }, { env: { SWITCHYARD_HOME: home, SWITCHYARD_STOP: 'block' }, connect: noAutoStart }), null);
   });
 
   it('他のセッションの失敗では差し戻さない', async () => {

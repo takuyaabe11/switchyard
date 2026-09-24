@@ -20,9 +20,9 @@ const BASE_PATH = '/usr/local/bin:/usr/bin:/bin';
 /** @param {string} command @param {string} cwd @param {Record<string, unknown>} [extra] */
 const input = (command, cwd, extra = {}) => ({ session_id: 's', transcript_path: '/home/u/.claude/projects/-home-u-go-node/s.jsonl', cwd, hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command, description: 'd', ...extra }, tool_use_id: 't' });
 
-/** ふるいが node を起動しないと言うか @param {unknown} json @returns {boolean} */
-const skips = (json) => {
-  const r = spawnSync('awk', ['-f', AWK], { input: typeof json === 'string' ? json : JSON.stringify(json), env: { PATH: BASE_PATH } });
+/** ふるいが node を起動しないと言うか(env はふるいに渡す環境) */
+const skips = (/** @type {unknown} */ json, /** @type {Record<string, string>} */ env = {}) => {
+  const r = spawnSync('awk', ['-f', AWK], { input: typeof json === 'string' ? json : JSON.stringify(json), env: { PATH: BASE_PATH, ...env } });
   assert.ok(r.status === 0 || r.status === 1, `awk の終了コード ${r.status}: ${r.stderr}`);
   return r.status === 0;
 };
@@ -61,21 +61,28 @@ describe('PreToolUse の入口のふるい(bin/switchyard-pretooluse.awk)', () =
     assert.deepEqual(lock[0].slice(1, -1).split('|').sort(), [...GIT_LOCK_SUBCOMMANDS].sort());
   });
 
-  it('ふるいが node を起動しないと言った呼び出しでは、判定も何もしない(設定ファイルの無い repo)', () => {
+  it('ふるいが node を起動しないと言った呼び出しでは、判定も何もしない(設定ファイルの無い repo・git の鍵のあり/なし)', () => {
     const cwd = bare();
     let skipped = 0;
-    for (const c of corpus()) {
-      if (!skips(input(c, cwd))) continue;
-      skipped += 1;
-      assert.equal(preToolUse(input(c, cwd), { profilesFor: () => DEFAULT_PROFILES }), null, c);
+    for (const env of /** @type {Array<Record<string, string>>} */ ([{}, { SWITCHYARD_GIT: '1' }])) {
+      for (const c of corpus()) {
+        if (!skips(input(c, cwd), env)) continue;
+        skipped += 1;
+        assert.equal(preToolUse(input(c, cwd), { env, profilesFor: () => DEFAULT_PROFILES }), null, `${c} ${JSON.stringify(env)}`);
+      }
     }
-    assert.ok(skipped >= 15, `素通しが少なすぎる: ${skipped}`);
+    assert.ok(skipped >= 30, `素通しが少なすぎる: ${skipped}`);
   });
 
   it('重い形・拒否する形は必ず node の判定へ回す', () => {
     const cwd = bare();
-    for (const c of ['npm test', '/usr/local/bin/npm test', './gradlew test', '.venv/bin/pytest', 'switchyard run -- x', 'ls\nnpm test', 'echo a;npm test', 'x=$(cargo build)', './node_modules/.bin/vitest run', 'bash -c "go test ./..."', '/usr/bin/git commit -m x', 'PATH=/x git add .', 'node node_modules/.bin/jest']) {
+    for (const c of ['npm test', '/usr/local/bin/npm test', './gradlew test', '.venv/bin/pytest', 'switchyard run -- x', 'ls\nnpm test', 'echo a;npm test', 'x=$(cargo build)', './node_modules/.bin/vitest run', 'bash -c "go test ./..."', 'node node_modules/.bin/jest']) {
       assert.equal(skips(input(c, cwd)), false, c);
+    }
+    // git は SWITCHYARD_GIT=1 のときだけ見る
+    for (const c of ['/usr/bin/git commit -m x', 'PATH=/x git add .']) {
+      assert.equal(skips(input(c, cwd), { SWITCHYARD_GIT: '1' }), false, c);
+      assert.equal(skips(input(c, cwd)), true, c);
     }
   });
 
@@ -85,6 +92,11 @@ describe('PreToolUse の入口のふるい(bin/switchyard-pretooluse.awk)', () =
     for (const c of ['ls -la', 'cat src/a.ts | head -20', 'rg gopher', 'echo nodejs', 'docker build .', 'git status', 'git diff HEAD~1', 'git log --oneline -5', 'node -e "1"', 'node scripts/x.mjs']) {
       assert.equal(skips(input(c, cwd)), true, c);
     }
+  });
+
+  it('SWITCHYARD_OFF=1 なら、どれも node を起動しない(判定も何もしない)', () => {
+    const cwd = bare();
+    for (const c of ['npm test', '/usr/local/bin/npm test']) assert.equal(skips(input(c, cwd), { SWITCHYARD_OFF: '1' }), true, c);
   });
 
   it('cwd から上に switchyard.json(改名前の conductor.json)があれば、どれも node の判定へ回す', () => {

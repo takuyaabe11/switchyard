@@ -198,7 +198,7 @@ export async function cli(args, opts = {}) {
         };
       }
       const since = command.sinceDays === null ? null : now() - command.sinceDays * 86_400_000;
-      const report = await replay({ dir, cwdPrefix: command.cwdPrefix, since, profilesFor, examples: command.examples });
+      const report = await replay({ dir, cwdPrefix: command.cwdPrefix, since, profilesFor, examples: command.examples, git: env.SWITCHYARD_GIT === '1' });
       stdout(formatReport(report, { cwdPrefix: command.cwdPrefix, sinceDays: command.sinceDays, examples: command.examples }));
       return 0;
     }

@@ -13,6 +13,7 @@ import { GIT_LOCK_SUBCOMMANDS, gitSubcommand } from '../shim/decide.mjs';
 import { simpleCommands } from './shell.mjs';
 import { rightSize, usageKey } from '../core/usage.mjs';
 import { t } from '../i18n.mjs';
+import { isOff } from './off.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
 /** @typedef {import('../core/types.mjs').JobClass} JobClass */
@@ -64,7 +65,7 @@ const RESERVED = new Set(['!', '{', 'if', 'then', 'elif', 'else', 'do', 'while',
 const ENV_VALUE_OPTIONS = new Set(['-u', '--unset', '-C', '--chdir', '-P', '-S', '--split-string']);
 
 /** shim を素通りさせる環境変数。PATH を差し替えると shim が引かれず、残りの 2 つは shim に「ジョブの中」「鍵は祖先が持つ」と思わせる */
-const BYPASS_VARS = ['PATH', 'SWITCHYARD_IN_JOB', 'SWITCHYARD_HELD_LOCKS'];
+const BYPASS_VARS = ['PATH', 'SWITCHYARD_IN_JOB', 'SWITCHYARD_HELD_LOCKS', 'SWITCHYARD_OFF', 'SWITCHYARD_THINKER'];
 
 /**
  * コマンドの前の代入(VAR=値・env NAME=値・env -i・env -u NAME)のうち、shim を素通りさせるもの。
@@ -239,7 +240,7 @@ export function waitExpected(snap, heavy, repo) {
  * @returns {Record<string, unknown> | null}
  */
 export function preToolUse(input, { env = process.env, profilesFor = (cwd) => loadProfiles(repoRoot(cwd)).profiles, shouldBackground = () => true } = {}) {
-  if (env.SWITCHYARD_THINKER === '1') return null;
+  if (isOff(env)) return null;
   if (input.tool_name !== 'Bash') return null;
   const ti = /** @type {Record<string, unknown>} */ (typeof input.tool_input === 'object' && input.tool_input !== null ? input.tool_input : {});
   const command = typeof ti.command === 'string' ? ti.command : '';
@@ -288,6 +289,8 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
     }
     // git は profile で分類しない。shim と同じく、index を書き換えるサブコマンドだけが鍵だけのジョブになる(CPU を持たないので前景のまま)
     if (base === 'git') {
+      // git の鍵を取らない既定(SWITCHYARD_GIT が 1 でない)では、パスで呼ぶ git も環境変数の差し替えも拒否しない
+      if (env.SWITCHYARD_GIT !== '1') return;
       const locks = GIT_LOCK_SUBCOMMANDS.has(gitSubcommand(rest).sub);
       if (head !== 'git' && !wrapped && locks) unshimmed.push(text);
       else if (!wrapped && locks && bypass.length > 0) overridden.push(bypassText);
