@@ -27,7 +27,8 @@ When two or three Claude Code sessions share one machine — one per git worktre
 are meaningless, and memory runs out.
 
 switchyard puts those runs in a queue. A `PATH` shim recognizes test and build commands for npm, yarn, pnpm, bun,
-cargo, pytest, uv, poetry, go, Maven, Gradle, dotnet, rspec, deno, make, Xcode, Bazel, Nx and Turborepo, and routes
+cargo, pytest, uv, poetry, go, Maven, Gradle, dotnet, rspec, deno, make, Xcode, Bazel, Nx, Turborepo and PHP (PHPUnit,
+Pest, `php artisan test`), and routes
 them through a small local
 daemon that hands out CPU shares, watches memory, and gives out exclusive locks (a port, a database, any name).
 The share reaches the tool as its thread or worker count (cargo, Go, pytest-xdist, Vitest and others).
@@ -86,7 +87,7 @@ result after a week. `switchyard uninstall` removes everything it wrote.
 メモリが尽きる。
 
 switchyard はそれらの走行を順番待ちに乗せる。`PATH` の shim が npm・yarn・pnpm・bun・cargo・pytest・uv・poetry・go・Maven・
-Gradle・dotnet・rspec・deno・make・Xcode・Bazel・Nx・Turborepo のテストとビルドのコマンドを見分け、手元の小さなデーモンに通す。デーモンは CPU の取り分を
+Gradle・dotnet・rspec・deno・make・Xcode・Bazel・Nx・Turborepo・PHP(PHPUnit・Pest・`php artisan test`)のテストとビルドのコマンドを見分け、手元の小さなデーモンに通す。デーモンは CPU の取り分を
 割り振り、メモリを見て、排他の鍵(ポート・データベース・任意の名前)を渡す。取り分は、道具のスレッド数・ワーカー数として
 伝わる(cargo・Go・pytest-xdist・Vitest など)。コマンドの打ち方は誰も変えなくてよい。
 待つことになる走行は Claude が背景で走らせ、終わったら知らせを受ける。`./gradlew test` など shim から見えないコマンドは

@@ -42,7 +42,7 @@ overlapped, it says so, and you can take it out with `switchyard uninstall`.
 
 - **Nothing in how you or Claude type commands.** A `PATH` shim in front of `npm`, `npx`, `node`, `yarn`, `pnpm`, `bun`,
   `cargo`, `pytest`, `python`, `python3`, `uv`, `poetry`, `go`, `mvn`, `gradle`, `dotnet`, `bundle`, `rspec`, `deno`,
-  `make`, `xcodebuild`, `bazel`, `bazelisk`, `nx` and `turbo` recognizes test and build runs and queues them. Everything else passes straight through. (`git` has a shim
+  `make`, `xcodebuild`, `bazel`, `bazelisk`, `nx`, `turbo`, `php`, `composer`, `phpunit`, `pest` and `paratest` recognizes test and build runs and queues them. Everything else passes straight through. (`git` has a shim
   too, but does nothing unless you turn it on; see below.)
 - **Heavy runs take turns.** When a run has to wait, Claude runs it in the background and is told when it finishes,
   so the session is not stuck. `switchyard top` shows what runs, what waits and why.
@@ -95,7 +95,7 @@ On a 4-core, 16 GB machine ([0.6–0.8](docs/verification/2026-09-24-effect.md),
   before switchyard had learned the suite.
 - It only queues commands it recognizes. For others (`npm run e2e`, a custom script), add them to a
   `switchyard.json`; `switchyard init` suggests entries from your own history.
-- Jest, Playwright, Gradle, Maven, `make`, `dotnet`, Xcode, Bazel, Nx and Turbo have no environment variable for their
+- Jest, Playwright, Gradle, Maven, `make`, `dotnet`, Xcode, Bazel, Nx, Turbo, PHPUnit, Pest and ParaTest have no environment variable for their
   worker count, so their share is not passed on. Put it in `switchyard.json` yourself (`"args": ["--maxWorkers={cpus}"]`).
 - The clue on a failed run is a hint, not a diagnosis: a run can fail for its own reasons on a busy machine too.
 - The numbers above come from controlled runs on one machine, not from people's everyday use yet.
@@ -203,8 +203,10 @@ Without a `switchyard.json`, a built-in table covers the usual commands: `npm te
 `dotnet test|build`, `bundle exec rspec`, `rspec`, `deno test`, `make`,
 `xcodebuild test|build|build-for-testing|test-without-building` (the action may come after the options),
 `bazel`/`bazelisk test|build|coverage`, `nx test|build|run-many|affected|run <project>:test|build` (also through
-`npx`, `pnpm` or `yarn`) and `turbo run test|build` (also `turbo test|build`, through `npx` or `pnpm`).
-A script under `node_modules/.bin` (`./node_modules/.bin/vitest run`) is classified as its `npx` form.
+`npx`, `pnpm` or `yarn`), `turbo run test|build` (also `turbo test|build`, through `npx` or `pnpm`), `php artisan test`,
+`phpunit`, `pest`, `paratest` and `composer test` (also `composer run test*`).
+A script under `node_modules/.bin` (`./node_modules/.bin/vitest run`) is classified as its `npx` form, and one under
+`vendor/bin` (`./vendor/bin/phpunit`, which starts through `php`) as the tool's own name.
 A run that keeps watching (`--watch`, `--watchAll`, `tsc -w`) is never classified: it would hold its CPU share forever.
 Anything else is not classified unless your `switchyard.json` names it, and runs outside the queue.
 
@@ -405,7 +407,7 @@ node bin/switchyard.mjs replay --since 14d
 
 - **自分も Claude も、コマンドの打ち方は変わらない。** `npm` / `npx` / `node` / `yarn` / `pnpm` / `bun` / `cargo` / `pytest` /
   `python` / `python3` / `uv` / `poetry` / `go` / `mvn` / `gradle` / `dotnet` / `bundle` / `rspec` / `deno` / `make` /
-  `xcodebuild` / `bazel` / `bazelisk` / `nx` / `turbo` の前に入る
+  `xcodebuild` / `bazel` / `bazelisk` / `nx` / `turbo` / `php` / `composer` / `phpunit` / `pest` / `paratest` の前に入る
   `PATH` の shim が、テストやビルドの走行を見分けて順番待ちに乗せる。それ以外はそのまま通る(`git` にも shim はあるが、
   有効にしない限り何もしない。下を参照)。
 - **重い走行は順番に走る。** 待つことになる走行は、Claude が背景で走らせ、終わったら知らせを受けるので、セッションは
@@ -453,7 +455,7 @@ node bin/switchyard.mjs replay --since 14d
 - 新しいコマンドの最初の 1〜2 回は控えめに扱う。上の実験では、学ぶ前は 19.4 秒のところが 24.4 秒だった。
 - 順番待ちに乗せるのは見分けられるコマンドだけ。それ以外(`npm run e2e`・自作のスクリプト)は `switchyard.json`
   に書く。`switchyard init` が自分の履歴から候補を出す。
-- Jest・Playwright・Gradle・Maven・`make`・`dotnet`・Xcode・Bazel・Nx・Turbo にはワーカー数の環境変数が無いので、取り分は伝わらない。
+- Jest・Playwright・Gradle・Maven・`make`・`dotnet`・Xcode・Bazel・Nx・Turbo・PHPUnit・Pest・ParaTest にはワーカー数の環境変数が無いので、取り分は伝わらない。
   `switchyard.json` に自分で書く(`"args": ["--maxWorkers={cpus}"]`)。
 - 失敗に添える手がかりは見立てで、診断ではない。忙しい機械の上でも、走行はそれ自身の理由で失敗しうる。
 - 上の数字は 1 台の機械で条件をそろえて測ったもので、まだ普段使いの利用者のデータではない。自分の機械で何をしたかは
@@ -533,8 +535,10 @@ repo の根に `switchyard.json` を置くと、その repo のコマンドの�
 `dotnet test|build`、`bundle exec rspec`・`rspec`、`deno test`、`make`、
 `xcodebuild test|build|build-for-testing|test-without-building`(オプションの後ろに置いた形も)、
 `bazel`/`bazelisk test|build|coverage`、`nx test|build|run-many|affected|run <project>:test|build`(`npx`・`pnpm`・`yarn` 経由も)、
-`turbo run test|build`(`turbo test|build`、`npx`・`pnpm` 経由も)。
-`node_modules/.bin` の下のスクリプト(`./node_modules/.bin/vitest run`)は `npx` の形として分類する。
+`turbo run test|build`(`turbo test|build`、`npx`・`pnpm` 経由も)、`php artisan test`・`phpunit`・`pest`・`paratest`・`composer test`
+(`composer run test*` も)。
+`node_modules/.bin` の下のスクリプト(`./node_modules/.bin/vitest run`)は `npx` の形として、`vendor/bin` の下のもの
+(`php` を通って起動する `./vendor/bin/phpunit`)は道具の名前の形として分類する。
 見張り続ける走行(`--watch`・`--watchAll`・`tsc -w`)は分類しない。包むと CPU の取り分を握ったまま終わらない。
 それ以外は、`switchyard.json` で名指ししない限り分類されず、順番待ちの外で走る。
 

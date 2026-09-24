@@ -1,0 +1,3 @@
+#!/bin/sh
+name=composer
+. "${0%/*}/_shim.sh"

@@ -78,7 +78,7 @@ if [ "$name" != git ]; then
   # 既定表に無い語(node など)がふるいで素通しになり、その repo の profile が効かなくなる
   if [ ! -f "$sieve_root/switchyard.json" ] && [ ! -f "$sieve_root/conductor.json" ]; then
     case "$name" in
-      bazel | bazelisk | bun | bundle | cargo | deno | dotnet | go | gradle | make | mvn | npm | npx | nx | pnpm | poetry | pytest | python | python3 | rspec | turbo | uv | xcodebuild | yarn) ;;
+      bazel | bazelisk | bun | bundle | cargo | composer | deno | dotnet | go | gradle | make | mvn | npm | npx | nx | paratest | pest | php | phpunit | pnpm | poetry | pytest | python | python3 | rspec | turbo | uv | xcodebuild | yarn) ;;
       *)
         # node_modules/.bin のスクリプトを shebang(#!/usr/bin/env node)で起動した形は、npx と同じに分類する
         case "$name:${1:-}" in
@@ -93,6 +93,13 @@ if [ "$name" != git ]; then
       python:-m:pytest | python3:-m:pytest | uv:run:* | poetry:run:* | bundle:exec:*) ;;
       python:* | python3:* | uv:* | poetry:* | bundle:*) exec "$real" "$@" ;;
     esac
+    # php も同じ。既定表が見るのは php artisan test と、shebang で起動した vendor/bin の実行ファイル(php vendor/bin/phpunit)だけ
+    if [ "$name" = php ]; then
+      case " $* " in
+        " artisan test "* | *vendor/bin/*) ;;
+        *) exec "$real" "$@" ;;
+      esac
+    fi
   fi
 fi
 

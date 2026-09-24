@@ -173,6 +173,34 @@ describe('shims(設計 §9.1)', () => {
     assert.deepEqual(history(home).map((h) => h.profile), ['default:batch']);
   });
 
+  it('php は artisan test と vendor/bin の実行ファイルのときだけ分類器にかけ、shebang で起動した phpunit も包む', async () => {
+    const { home } = await daemon();
+    const cwd = plainDir();
+    const fake = fakeBin();
+    writeFileSync(join(fake, 'php'), '#!/bin/sh\necho "fake-php $* job=${SWITCHYARD_JOB_ID:-none}"\n');
+    chmodSync(join(fake, 'php'), 0o755);
+    mkdirSync(join(cwd, 'vendor', 'bin'), { recursive: true });
+    writeFileSync(join(cwd, 'vendor', 'bin', 'phpunit'), '#!/usr/bin/env php\n<?php\n');
+    chmodSync(join(cwd, 'vendor', 'bin', 'phpunit'), 0o755);
+    // 呼ばれたら印を残す偽の node を置く: ふるいで直行するなら、分類器(node)は起動されない
+    const spy = fakeBin();
+    const marker = join(spy, 'node-was-called');
+    writeFileSync(join(spy, 'node'), `#!/bin/sh\ntouch '${marker}'\nexit 1\n`);
+    chmodSync(join(spy, 'node'), 0o755);
+    for (const c of ['php -v', 'php artisan serve', 'php script.php']) {
+      const r = await sh(c, { cwd, home, path: `${SHIMS}:${fake}:${spy}:/usr/bin:/bin` });
+      assert.equal(r.stdout.trim(), `fake-${c} job=none`, c);
+      assert.equal(existsSync(marker), false, `${c} で node を起動した`);
+    }
+    const artisan = await sh('php artisan test --parallel', { cwd, home, path: `${SHIMS}:${fake}:${BASE_PATH}` });
+    assert.equal(artisan.code, 0, artisan.stderr);
+    assert.match(artisan.stdout, /^fake-php artisan test --parallel job=j\S+$/m);
+    const unit = await sh('./vendor/bin/phpunit --filter Foo', { cwd, home, path: `${SHIMS}:${fake}:${BASE_PATH}` });
+    assert.equal(unit.code, 0, unit.stderr);
+    assert.match(unit.stdout, /^fake-php \.\/vendor\/bin\/phpunit --filter Foo job=j\S+$/m);
+    assert.deepEqual(history(home).map((h) => h.profile), ['default:batch', 'default:batch']);
+  });
+
   it('switchyard.json が無い repo では、既定表に無い語は node を起動せずに本物へ直行する', async () => {
     const { home } = await daemon();
     const cwd = plainDir();

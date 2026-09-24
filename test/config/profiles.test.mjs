@@ -81,7 +81,7 @@ describe('既定表(設計 §9.3)', () => {
 
   it('どの glob も語で始まる(shim の sh のふるいが先頭の語だけで判断できる)', () => {
     for (const np of DEFAULT_PROFILES) for (const g of np.profile.match) assert.equal(g.startsWith('*'), false, g);
-    assert.deepEqual(defaultHeadWords(), ['bazel', 'bazelisk', 'bun', 'bundle', 'cargo', 'deno', 'dotnet', 'go', 'gradle', 'make', 'mvn', 'npm', 'npx', 'nx', 'pnpm', 'poetry', 'pytest', 'python', 'python3', 'rspec', 'turbo', 'uv', 'xcodebuild', 'yarn']);
+    assert.deepEqual(defaultHeadWords(), ['bazel', 'bazelisk', 'bun', 'bundle', 'cargo', 'composer', 'deno', 'dotnet', 'go', 'gradle', 'make', 'mvn', 'npm', 'npx', 'nx', 'paratest', 'pest', 'php', 'phpunit', 'pnpm', 'poetry', 'pytest', 'python', 'python3', 'rspec', 'turbo', 'uv', 'xcodebuild', 'yarn']);
   });
 });
 
@@ -107,6 +107,45 @@ describe('既定表: Xcode・Bazel・Nx・Turbo', () => {
     }
     for (const c of ['xcodebuild -version', 'xcodebuild -list', 'xcodebuild -showBuildSettings', 'bazel query //...', 'nx serve web', 'nx graph', 'npx nx dev web', 'turbo run dev', 'bazel run //app']) {
       assert.equal(hit(c), null, c);
+    }
+  });
+});
+
+describe('PHP(既定表と vendor/bin の形)', () => {
+  it('artisan test・PHPUnit・Pest・ParaTest・composer test に当て、vendor/bin と shebang で起動した形は道具の名前で分類する', () => {
+    const hit = (/** @type {string[]} */ words) => classify(classifiableCommand(words), DEFAULT_PROFILES)?.name ?? null;
+    for (const c of [
+      'php artisan test',
+      'php artisan test --parallel --processes=4',
+      'vendor/bin/phpunit',
+      './vendor/bin/phpunit --filter UserTest',
+      'vendor/bin/pest --parallel',
+      'php vendor/bin/phpunit',
+      'php ./vendor/bin/pest tests/Unit',
+      'php -d memory_limit=-1 /app/vendor/bin/paratest',
+      'php -f vendor/bin/phpunit',
+      'phpunit',
+      'pest --coverage',
+      'composer test',
+      'composer run test:unit',
+    ]) {
+      assert.equal(hit(c.split(' ')), 'default:batch', c);
+    }
+    for (const c of [
+      'php -v',
+      'php artisan serve',
+      'php artisan migrate',
+      'php artisan tinker',
+      'php script.php vendor/bin/phpunit',
+      'php -r vendor/bin/phpunit',
+      'php -d vendor/bin/phpunit script.php',
+      'composer install',
+      'composer run lint',
+      'vendor/bin/php-cs-fixer fix',
+      'vendor/bin/phpstan analyse',
+      'pesticide',
+    ]) {
+      assert.equal(hit(c.split(' ')), null, c);
     }
   });
 });
