@@ -288,6 +288,8 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
     }
     // git は profile で分類しない。shim と同じく、index を書き換えるサブコマンドだけが鍵だけのジョブになる(CPU を持たないので前景のまま)
     if (base === 'git') {
+      // git の鍵を取らない既定(SWITCHYARD_GIT が 1 でない)では、パスで呼ぶ git も環境変数の差し替えも拒否しない
+      if (env.SWITCHYARD_GIT !== '1') return;
       const locks = GIT_LOCK_SUBCOMMANDS.has(gitSubcommand(rest).sub);
       if (head !== 'git' && !wrapped && locks) unshimmed.push(text);
       else if (!wrapped && locks && bypass.length > 0) overridden.push(bypassText);

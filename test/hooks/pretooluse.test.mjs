@@ -12,7 +12,8 @@ const PROFILES = [
   { name: 'bench', profile: { match: ['node benchmarks/*', 'npm run bench*'], class: 'measure' } },
   ...DEFAULT_PROFILES,
 ];
-const opts = { env: {}, profilesFor: () => PROFILES };
+/** git の鍵の判定も確かめるので SWITCHYARD_GIT=1(既定は git を扱わない。下の「既定では git を扱わない」で確かめる) */
+const opts = { env: { SWITCHYARD_GIT: '1' }, profilesFor: () => PROFILES };
 
 /** @param {string} command @param {Record<string, unknown>} [extra] */
 const bash = (command, extra = {}) => ({ session_id: 's', cwd: '/repo', hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command, ...extra } });
@@ -125,6 +126,12 @@ describe('preToolUse(設計 §9.2)', () => {
     }
     assert.equal(decision('/usr/bin/python3 -m pytest'), 'deny');
     assert.equal(decision('/usr/local/bin/mvn test'), 'deny');
+  });
+
+  it('既定(SWITCHYARD_GIT が 1 でない)では git を扱わない: パスで呼ぶ git も、環境変数の差し替えも拒否しない', () => {
+    const off = { env: {}, profilesFor: () => PROFILES };
+    assert.equal(preToolUse(bash('/usr/bin/git commit -m x'), off), null);
+    assert.equal(preToolUse(bash('SWITCHYARD_HELD_LOCKS=x git -C . commit -m x'), off), null);
   });
 
   it('パスで呼ぶ git commit は拒否し、git commit は通す', () => {

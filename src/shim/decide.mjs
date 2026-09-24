@@ -82,6 +82,9 @@ export function decideShim({ word, args, cwd, env, gitDir = absoluteGitDir, prof
   // 取ってから内側の switchyard run が鍵を 2 段目に要求し、資源を一括で取る(設計 §5.3)が崩れる。性格は内側の switchyard run が決める
   if (word === 'node' && isOwnCli(args[0], cwd)) return { kind: 'pass' };
   if (word === 'git') {
+    // git の index の鍵は SWITCHYARD_GIT=1 のときだけ取る(既定は素通し)。worktree ごとに index は別なので、
+    // worktree で分けて作業する人には要らない。全コマンドの前に割り込まれるのを嫌う声も多かった
+    if (env.SWITCHYARD_GIT !== '1') return { kind: 'pass' };
     const { globals, sub } = gitSubcommand(args);
     if (!GIT_LOCK_SUBCOMMANDS.has(sub)) return { kind: 'pass' };
     const dir = gitDir(cwd, globals);
