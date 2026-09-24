@@ -81,7 +81,33 @@ describe('既定表(設計 §9.3)', () => {
 
   it('どの glob も語で始まる(shim の sh のふるいが先頭の語だけで判断できる)', () => {
     for (const np of DEFAULT_PROFILES) for (const g of np.profile.match) assert.equal(g.startsWith('*'), false, g);
-    assert.deepEqual(defaultHeadWords(), ['bun', 'bundle', 'cargo', 'deno', 'dotnet', 'go', 'gradle', 'make', 'mvn', 'npm', 'npx', 'pnpm', 'poetry', 'pytest', 'python', 'python3', 'rspec', 'uv', 'yarn']);
+    assert.deepEqual(defaultHeadWords(), ['bazel', 'bazelisk', 'bun', 'bundle', 'cargo', 'deno', 'dotnet', 'go', 'gradle', 'make', 'mvn', 'npm', 'npx', 'nx', 'pnpm', 'poetry', 'pytest', 'python', 'python3', 'rspec', 'turbo', 'uv', 'xcodebuild', 'yarn']);
+  });
+});
+
+describe('既定表: Xcode・Bazel・Nx・Turbo', () => {
+  it('テストとビルドの形だけを当て、見張り続ける形や調べるだけの形は当てない', () => {
+    const hit = (/** @type {string} */ c) => classify(c, DEFAULT_PROFILES)?.name ?? null;
+    for (const c of [
+      'xcodebuild test -scheme App -destination platform=iOS',
+      'xcodebuild -scheme App -destination "platform=iOS Simulator,name=iPhone 15" test',
+      'xcodebuild -workspace A.xcworkspace -scheme App build',
+      'xcodebuild -scheme App build-for-testing',
+      'bazel test //...',
+      'bazelisk build //app:all',
+      'nx test web',
+      'nx run web:test',
+      'npx nx affected -t test',
+      'nx affected -t build',
+      'pnpm nx run-many -t build',
+      'turbo run test',
+      'npx turbo build --filter=web',
+    ]) {
+      assert.equal(hit(c), 'default:batch', c);
+    }
+    for (const c of ['xcodebuild -version', 'xcodebuild -list', 'xcodebuild -showBuildSettings', 'bazel query //...', 'nx serve web', 'nx graph', 'npx nx dev web', 'turbo run dev', 'bazel run //app']) {
+      assert.equal(hit(c), null, c);
+    }
   });
 });
 

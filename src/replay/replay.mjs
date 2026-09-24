@@ -14,18 +14,19 @@ import { t } from '../i18n.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
 /** @typedef {{ id: string, command: string, runInBackground: boolean, cwd: string, timestamp: string }} BashCall */
-/** @typedef {'deny' | 'background' | 'already-background' | 'none'} HookVerdict */
+/** @typedef {'deny' | 'wrap' | 'background' | 'already-background' | 'none'} HookVerdict */
 /** @typedef {{ hook: HookVerdict, shims: Array<{ word: string, answer: string }> }} Judgement */
-/** @typedef {{ timestamp: string, cwd: string, command: string }} Example */
+/** trigger は、判定を起こした部分(単純コマンド 1 つ)。コマンド全体と同じなら省く */
+/** @typedef {{ timestamp: string, cwd: string, command: string, trigger?: string }} Example */
 /**
  * @typedef {{
  *   files: number,
  *   calls: number,
  *   first: string | null,
  *   last: string | null,
- *   hook: { deny: number, background: number, alreadyBackground: number, none: number },
+ *   hook: { deny: number, wrap: number, background: number, alreadyBackground: number, none: number },
  *   shim: { run: Record<string, number>, lock: number, pass: number },
- *   examples: { deny: Example[], background: Example[] }
+ *   examples: { deny: Example[], wrap: Example[], background: Example[] }
  * }} Report
  */
 
@@ -73,6 +74,12 @@ function denied(out) {
   return h?.permissionDecision === 'deny';
 }
 
+/** switchyard run -- で包む書き換えか @param {Record<string, unknown> | null} out @param {string} command @returns {boolean} */
+function wrapped(out, command) {
+  const h = out === null ? undefined : /** @type {{ updatedInput?: { command?: unknown } } | undefined} */ (out.hookSpecificOutput);
+  return typeof h?.updatedInput?.command === 'string' && h.updatedInput.command !== command;
+}
+
 /**
  * 1 件を、PreToolUse と shim の分類器の実物で判定する。
  * @param {BashCall} call @param {{ profilesFor: (cwd: string) => NamedProfile[], git?: boolean }} opts @returns {Judgement}
@@ -85,6 +92,7 @@ export function judgeCall(call, { profilesFor, git = false }) {
   /** @type {HookVerdict} */
   let hook = 'none';
   if (denied(out)) hook = 'deny';
+  else if (wrapped(out, call.command)) hook = 'wrap';
   else if (out !== null) hook = 'background';
   else if (call.runInBackground) {
     // 既に背景なら hook は何も返さない。前景だったら書き換えたかで、重い走行かを見分ける
@@ -119,12 +127,12 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
     calls: 0,
     first: null,
     last: null,
-    hook: { deny: 0, background: 0, alreadyBackground: 0, none: 0 },
+    hook: { deny: 0, wrap: 0, background: 0, alreadyBackground: 0, none: 0 },
     shim: { run: {}, lock: 0, pass: 0 },
-    examples: { deny: [], background: [] },
+    examples: { deny: [], wrap: [], background: [] },
   };
-  /** @type {{ deny: Example[], background: Example[] }} */
-  const all = { deny: [], background: [] };
+  /** @type {{ deny: Example[], wrap: Example[], background: Example[] }} */
+  const all = { deny: [], wrap: [], background: [] };
   // 再開したセッションは前の行を持ち越すことがあるので、同じ tool_use の id は 1 回だけ数える
   /** @type {Set<string>} */
   const seen = new Set();
@@ -144,10 +152,19 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
         report.calls += 1;
         if (report.first === null || c.timestamp < report.first) report.first = c.timestamp;
         if (report.last === null || c.timestamp > report.last) report.last = c.timestamp;
+        /** @type {Example} */
         const example = { timestamp: c.timestamp, cwd: c.cwd, command: c.command };
+        if (j.hook === 'deny' || j.hook === 'wrap' || j.hook === 'background') {
+          // 長いコマンド(ヒアドキュメントで書いてから走らせる形など)は、先頭だけ見ても何が重いのか分からない。判定を起こした部分を添える
+          const trigger = triggerOf(c, { profilesFor, git });
+          if (trigger !== null && trigger !== c.command.trim()) example.trigger = trigger;
+        }
         if (j.hook === 'deny') {
           report.hook.deny += 1;
           all.deny.push(example);
+        } else if (j.hook === 'wrap') {
+          report.hook.wrap += 1;
+          all.wrap.push(example);
         } else if (j.hook === 'background') {
           report.hook.background += 1;
           all.background.push(example);
@@ -171,11 +188,24 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
   }
 
   const newest = (/** @type {Example[]} */ xs) => [...xs].sort((a, b) => (a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : 0)).slice(0, examples);
-  report.examples = { deny: newest(all.deny), background: newest(all.background) };
+  report.examples = { deny: newest(all.deny), wrap: newest(all.wrap), background: newest(all.background) };
   return report;
 }
 
 /** 例に出すコマンド: 空白の並び(改行を含む)を 1 つにまとめ、長ければ切る @param {string} command @returns {string} */
+/**
+ * 判定を起こした部分: 単純コマンドを 1 つずつ判定し、最初に何かをする(拒否・背景)ものを返す。
+ * @param {BashCall} call @param {{ profilesFor: (cwd: string) => NamedProfile[], git: boolean }} opts @returns {string | null}
+ */
+function triggerOf(call, opts) {
+  for (const words of simpleCommands(call.command)) {
+    const part = words.join(' ');
+    if (judgeCall({ ...call, command: part, runInBackground: false }, opts).hook !== 'none') return part;
+  }
+  return null;
+}
+
+/** @param {string} command */
 function oneLine(command) {
   const flat = command.replace(/\s+/g, ' ').trim();
   return flat.length > EXAMPLE_WIDTH ? `${flat.slice(0, EXAMPLE_WIDTH)}…` : flat;
@@ -206,6 +236,7 @@ export function formatReport(r, { cwdPrefix, sinceDays, examples }) {
     const share = (/** @type {number} */ n) => t(`${n} 件(${pct(n)}%)`, `${n} (${pct(n)}%)`);
     lines.push('PreToolUse');
     lines.push(t(`  拒否: ${share(r.hook.deny)}`, `  refused: ${share(r.hook.deny)}`));
+    lines.push(t(`  switchyard run で包む: ${share(r.hook.wrap)}`, `  wrapped in switchyard run: ${share(r.hook.wrap)}`));
     lines.push(t(`  背景へ書き換え: ${share(r.hook.background)}`, `  sent to background: ${share(r.hook.background)}`));
     lines.push(t(`  既に背景の重い走行: ${share(r.hook.alreadyBackground)}`, `  heavy and already in background: ${share(r.hook.alreadyBackground)}`));
     lines.push(t(`  何もしない: ${share(r.hook.none)}`, `  nothing to do: ${share(r.hook.none)}`));
@@ -221,11 +252,15 @@ export function formatReport(r, { cwdPrefix, sinceDays, examples }) {
 
     for (const [label, xs] of /** @type {Array<[string, Example[]]>} */ ([
       [t('拒否', 'Refused'), r.examples.deny],
+      [t('switchyard run で包む', 'Wrapped in switchyard run'), r.examples.wrap],
       [t('背景へ書き換え', 'Sent to background'), r.examples.background],
     ])) {
       if (xs.length === 0) continue;
       lines.push(t(`${label}の例(新しい順に最大 ${examples} 件)`, `${label}: examples (newest first, up to ${examples})`));
-      for (const x of xs) lines.push(`  ${x.timestamp.slice(0, 16).replace('T', ' ')}  ${x.cwd}  ${oneLine(maskSecrets(x.command))}`);
+      for (const x of xs) {
+        lines.push(`  ${x.timestamp.slice(0, 16).replace('T', ' ')}  ${x.cwd}  ${oneLine(maskSecrets(x.command))}`);
+        if (x.trigger !== undefined) lines.push(t(`      → 判定した部分: ${oneLine(maskSecrets(x.trigger))}`, `      → the part that triggered it: ${oneLine(maskSecrets(x.trigger))}`));
+      }
     }
   }
   lines.push(

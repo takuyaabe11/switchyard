@@ -9,6 +9,7 @@ import { heldLocks, repoRoot } from '../config/context.mjs';
 import { applyTemplate, classifiableCommand, classify, loadProfiles } from '../config/profiles.mjs';
 import { threadEnv } from '../config/threads.mjs';
 import { loggedCommand, maskSecrets } from '../redact.mjs';
+import { environmentalNote } from '../core/diagnose.mjs';
 import { pathsOf } from '../daemon/paths.mjs';
 import { appendRecord } from '../daemon/store.mjs';
 import { readPgid, renicePriority, signalGroup, spawnMeasured, verifiedGroup, waitGroupGone } from './group.mjs';
@@ -266,7 +267,10 @@ export function runJob(opts) {
       const summary = escape === null ? null : { escaped: escape.escaped, survivors: escape.survivors };
       if (ch !== null && jobId !== null && !ch.isClosed()) {
         ch.onMessage((m) => {
-          if (m.t === 'ok') finish(code);
+          if (m.t !== 'ok') return;
+          // デーモンが、この失敗は環境のせいかもしれないと見たら、Claude に見えるように出す(コードを直しに行く前に)
+          if (Array.isArray(m.environmental) && m.environmental.length > 0) out(environmentalNote(m.environmental.map(String)));
+          finish(code);
         });
         ch.send({ t: 'exit', jobId, code, killedByCaller, durationMs: Date.now() - childStartedAt, escape: summary, cpuMs });
         setTimeout(() => finish(code), 1_000).unref();

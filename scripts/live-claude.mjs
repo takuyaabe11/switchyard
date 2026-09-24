@@ -4,7 +4,7 @@
 // 使い捨ての作業場所と一時の SWITCHYARD_HOME で、この repo を --plugin-dir として haiku に 3 回走らせる:
 //   1. 成功する npm test: shim が switchyard に通し(記録に default:batch)、空いているので前景のまま走り、子にジョブの id が渡り、文言は英語
 //   2. 失敗する npm test: Stop が差し戻し(SWITCHYARD_STOP=block)、Claude が switchyard ack で確認済みにする
-//   3. ./gradlew test: shim から見えないので PreToolUse が拒否し、Claude が案内どおり switchyard run -- で包んで走らせる
+//   3. ./gradlew test: shim から見えないので PreToolUse が switchyard run -- で包む形に書き換え、拒否せずにそのまま走る
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -135,7 +135,8 @@ if (isMain) {
     const a2 = analyzeStream(r2.stdout ?? '');
     const acked = records().some((r) => r.kind === 'event' && typeof r.event === 'object' && r.event !== null && /** @type {Record<string, unknown>} */ (r.event).type === 'ack');
 
-    const r3 = claude('Run the Bash command `./gradlew test` exactly once. If it is refused, follow the instructions in the refusal, then reply with the line of its output that starts with GRADLE_JOB=.', ['Bash(./gradlew test)', 'Bash(switchyard run:*)']);
+    // 書き換えた後のコマンドで権限を確かめるので、包んだ形を許しておく
+    const r3 = claude('Run the Bash command `./gradlew test` exactly once, then reply with the line of its output that starts with GRADLE_JOB=.', ['Bash(switchyard run:*)']);
     const a3 = analyzeStream(r3.stdout ?? '');
     const gradleManaged = records().some((r) => r.kind === 'event' && typeof r.event === 'object' && r.event !== null && JSON.stringify(r.event).includes('gradlew test') && /** @type {Record<string, unknown>} */ (r.event).type === 'request');
 
@@ -145,7 +146,7 @@ if (isMain) {
       '子にジョブの id が渡った(LIVE_JOB=j…)': /LIVE_JOB=j/.test(a1.toolText),
       '文言は英語(started)': a1.toolText.includes('[switchyard] started'),
       'Stop の差し戻しの後、Claude が switchyard ack した': a2.blockedStop && acked,
-      './gradlew test を拒否し、Claude が switchyard run で包んで走らせた': a3.denied && gradleManaged,
+      './gradlew test を拒否せずに switchyard run で包んで走らせた(子にジョブの id)': !a3.denied && gradleManaged && /GRADLE_JOB=j/.test(a3.toolText),
     };
     console.log(JSON.stringify({ checks, costUsd: [a1.costUsd, a2.costUsd, a3.costUsd], result1: a1.result, result2: a2.result, result3: a3.result, work, home }, null, 2));
     process.exitCode = Object.values(checks).every(Boolean) ? 0 : 1;

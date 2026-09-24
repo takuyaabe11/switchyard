@@ -48,7 +48,8 @@
 /** @typedef {'failed' | 'killed' | 'orphan' | 'lost'} UnackedKind */
 /**
  * repo と profile は、後の成功で自動に確認済みにするための手がかり(0.5.0 以前の state.json には無い)。
- * @typedef {{ jobId: string, kind: UnackedKind, code: number | null, cmd: string, repo?: string, profile?: string }} Unacked
+ * hint は、環境のせいかもしれない失敗の手がかり(src/core/diagnose.mjs)。
+ * @typedef {{ jobId: string, kind: UnackedKind, code: number | null, cmd: string, repo?: string, profile?: string, hint?: string[] }} Unacked
  */
 /** @typedef {{ jobId: string, position: number, reason: string, etaAt: number | null }} QueueNote */
 
@@ -68,7 +69,7 @@
  * @typedef {(
  *   { type: 'request', now: number, job: JobSpec } |
  *   { type: 'started', now: number, jobId: string, pid: number, pgid: number | null } |
- *   { type: 'exit', now: number, jobId: string, code: number | null, killedByCaller: boolean, durationMs: number, cpuMs?: number | null, peakMemMb?: number | null } |
+ *   { type: 'exit', now: number, jobId: string, code: number | null, killedByCaller: boolean, durationMs: number, cpuMs?: number | null, peakMemMb?: number | null, environmental?: string[] } |
  *   { type: 'cancel', now: number, jobId: string } |
  *   { type: 'heartbeatLost', now: number, jobId: string, alive: boolean } |
  *   { type: 'orphanGone', now: number, jobId: string } |
@@ -83,7 +84,7 @@
  * @typedef {(
  *   { type: 'grant', jobId: string, cpus: number, lockChild?: boolean, overcommit?: boolean } |
  *   { type: 'queued', jobId: string, position: number, reason: string, etaAt: number | null } |
- *   { type: 'history', repo: string, profile: string, class: JobClass, cpus: number, durationMs: number, code: number | null, cpuMs?: number | null, peakMemMb?: number | null } |
+ *   { type: 'history', repo: string, profile: string, class: JobClass, cpus: number, durationMs: number, code: number | null, cpuMs?: number | null, peakMemMb?: number | null, environmental?: string[] } |
  *   { type: 'hold', jobId: string, mode: 'pause' | 'throttle' } |
  *   { type: 'unhold', jobId: string }
  * )} Action

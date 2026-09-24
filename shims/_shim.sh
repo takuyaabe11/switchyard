@@ -78,7 +78,7 @@ if [ "$name" != git ]; then
   # 既定表に無い語(node など)がふるいで素通しになり、その repo の profile が効かなくなる
   if [ ! -f "$sieve_root/switchyard.json" ] && [ ! -f "$sieve_root/conductor.json" ]; then
     case "$name" in
-      bun | bundle | cargo | deno | dotnet | go | gradle | make | mvn | npm | npx | pnpm | poetry | pytest | python | python3 | rspec | uv | yarn) ;;
+      bazel | bazelisk | bun | bundle | cargo | deno | dotnet | go | gradle | make | mvn | npm | npx | nx | pnpm | poetry | pytest | python | python3 | rspec | turbo | uv | xcodebuild | yarn) ;;
       *)
         # node_modules/.bin のスクリプトを shebang(#!/usr/bin/env node)で起動した形は、npx と同じに分類する
         case "$name:${1:-}" in

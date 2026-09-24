@@ -1,0 +1,3 @@
+#!/bin/sh
+name=turbo
+. "${0%/*}/_shim.sh"

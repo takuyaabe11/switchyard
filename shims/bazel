@@ -1,0 +1,3 @@
+#!/bin/sh
+name=bazel
+. "${0%/*}/_shim.sh"

@@ -11,6 +11,7 @@ import { numOrNull, parseEscape, parseJobRequest } from '../protocol/messages.mj
 import { createDecoder, encode } from '../protocol/ndjson.mjs';
 import { groupHasLiveMembers, rssByGroup } from '../run/group.mjs';
 import { effectiveAvailableMb } from '../core/memory.mjs';
+import { environmentalReasons } from '../core/diagnose.mjs';
 import { VERSION } from '../version.mjs';
 import { ensurePrivateDir, pathsOf, SOCKET_PATH_LIMIT, tightenFiles } from './paths.mjs';
 import { rightSize } from '../core/usage.mjs';
@@ -225,7 +226,7 @@ export async function startDaemon(opts) {
       estimates.record(a.repo, a.profile, a.durationMs, a.code);
       usage.record(a.repo, a.profile, { durationMs: a.durationMs, cpuMs: a.cpuMs ?? null, cpus: a.cpus, code: a.code });
       memBook.record(a.repo, a.profile, a.peakMemMb);
-      appendRecord(p.events, { at: wallNow(), kind: 'history', repo: a.repo, profile: a.profile, class: a.class, cpus: a.cpus, durationMs: a.durationMs, code: a.code, cpuMs: a.cpuMs ?? null, peakMemMb: a.peakMemMb ?? null });
+      appendRecord(p.events, { at: wallNow(), kind: 'history', repo: a.repo, profile: a.profile, class: a.class, cpus: a.cpus, durationMs: a.durationMs, code: a.code, cpuMs: a.cpuMs ?? null, peakMemMb: a.peakMemMb ?? null, ...(a.environmental === undefined ? {} : { environmental: a.environmental }) });
       return;
     }
     // 決定(入場と、待たせた順番・理由)も記録に残す。包みが繋がっていなくても残すので、
@@ -271,6 +272,34 @@ export async function startDaemon(opts) {
           }),
           floorMb: memFloorMb,
         };
+
+  /** @type {Map<string, import('../core/diagnose.mjs').RunStats & { lastAt: number }>} jobId → 走行中に測った機械の様子(環境のせいの失敗の手がかり) */
+  const runStats = new Map();
+  /**
+   * 走行中のジョブごとに、重なった他の重い走行の数・機械の忙しさ・空きメモリの最小・止められていた時間を覚える。
+   * 標本を取るたびと tick ごとに呼ぶ(何度呼んでも、止められていた時間は前回からの差だけを足す)。
+   */
+  const observeRuns = () => {
+    const now = monoNow();
+    const running = state.leases.filter((l) => l.phase === 'running' && l.cpus > 0);
+    const a = samples[samples.length - 2];
+    const b = samples[samples.length - 1];
+    const busy = a !== undefined && b !== undefined && b.at > a.at ? Math.max(0, b.busy - a.busy) / (b.at - a.at) : null;
+    const avail = memory ? readAvailableMb() : null;
+    for (const l of running) {
+      const st = runStats.get(l.job.id) ?? { maxOthers: 0, maxBusyCores: null, maxOtherLoad: null, minAvailMb: null, heldMs: 0, lastAt: now };
+      st.maxOthers = Math.max(st.maxOthers, running.filter((o) => o !== l && o.held === undefined).length);
+      if (busy !== null) {
+        st.maxBusyCores = Math.max(st.maxBusyCores ?? 0, busy);
+        // この走行が使いうるのは、道具に渡したスレッド数まで。それを超える分は他の処理
+        st.maxOtherLoad = Math.max(st.maxOtherLoad ?? 0, busy - threadsOf(l, state.capacity, cores));
+      }
+      if (avail !== null) st.minAvailMb = Math.min(st.minAvailMb ?? Infinity, avail);
+      if (l.held !== undefined) st.heldMs += now - st.lastAt;
+      st.lastAt = now;
+      runStats.set(l.job.id, st);
+    }
+  };
 
   /** @param {Event} e */
   const apply = (e) => {
@@ -431,8 +460,14 @@ export async function startDaemon(opts) {
           }
           const peakMemMb = rss.get(id)?.peakMb ?? null;
           rss.delete(id);
-          apply({ type: 'exit', now: monoNow(), jobId: id, code: numOrNull(m.code), killedByCaller: m.killedByCaller === true, durationMs: Number(m.durationMs), cpuMs: numOrNull(m.cpuMs), peakMemMb: peakMemMb === null ? null : Math.round(peakMemMb) });
-          send(conn, { t: 'ok' });
+          observeRuns();
+          const code = numOrNull(m.code);
+          const killedByCaller = m.killedByCaller === true;
+          // 失敗が環境のせいかもしれないか(混雑・メモリ不足・計測のための一時停止・SIGKILL)。包みが Claude に伝え、確認待ちにも添える
+          const environmental = done === undefined ? [] : environmentalReasons({ code, killedByCaller, stats: runStats.get(id) ?? null, cores, memFloorMb: memory ? memFloorMb : null });
+          runStats.delete(id);
+          apply({ type: 'exit', now: monoNow(), jobId: id, code, killedByCaller, durationMs: Number(m.durationMs), cpuMs: numOrNull(m.cpuMs), peakMemMb: peakMemMb === null ? null : Math.round(peakMemMb), ...(environmental.length > 0 ? { environmental } : {}) });
+          send(conn, { t: 'ok', ...(environmental.length > 0 ? { environmental } : {}) });
           return;
         }
         case 'status':
@@ -500,6 +535,8 @@ export async function startDaemon(opts) {
   const timer = setInterval(() => {
     const now = monoNow();
     if (++ticks % rotateEvery === 0) rotateJournals();
+    observeRuns();
+    for (const id of [...runStats.keys()]) if (!state.leases.some((l) => l.job.id === id)) runStats.delete(id);
     // 終わり方を持たない呼び出し元(startDaemon を直に使うテストなど)では、黙って tick を止めない
     if (onIdleExit !== null && !everGranted && idleExitMs !== null && now - startedAt >= idleExitMs && quiet()) {
       clearInterval(timer);
@@ -542,6 +579,7 @@ export async function startDaemon(opts) {
         const now = monoNow();
         samples.push({ at: now, busy: readBusyMs() });
         while (samples.length > 0 && now - samples[0].at > SPARE_WINDOW_MS * 4) samples.shift();
+        observeRuns();
         const sp = state.waiting.length > 0 ? spare() : null;
         if (sp !== null && sp >= 1) apply({ type: 'tick', now });
       }, sampleMs)
@@ -564,6 +602,7 @@ export async function startDaemon(opts) {
               rss.set(l.job.id, { rssMb: now, peakMb: Math.max(prev?.peakMb ?? 0, now) });
             }
             for (const id of [...rss.keys()]) if (!state.leases.some((l) => l.job.id === id)) rss.delete(id);
+            observeRuns();
             if (!closing && state.waiting.length > 0) apply({ type: 'tick', now: monoNow() });
           })
           .catch(() => {})

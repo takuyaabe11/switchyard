@@ -31,6 +31,7 @@ describe('summarizeObserved', () => {
       hooks: [
         { kind: 'hook', observe: true, decision: 'deny', at: 0, cwd: '/r' },
         { kind: 'hook', observe: true, decision: 'background', at: 0, cwd: '/r' },
+        { kind: 'hook', observe: true, decision: 'wrap', at: 0, cwd: '/r' },
         { kind: 'hook', decision: 'background', at: 0, cwd: '/r' },
       ],
     });
@@ -43,7 +44,7 @@ describe('summarizeObserved', () => {
       sessions: 3,
       measureDisturbed: 1,
       lockClashes: 1,
-      hook: { background: 1, deny: 1 },
+      hook: { background: 1, deny: 1, wrap: 1 },
     });
   });
 
@@ -56,7 +57,7 @@ describe('summarizeObserved', () => {
 
   it('report の普段の集計は、観察だけのモードの hook の行を数えない', () => {
     const s = summarize({ events: [], hooks: [{ kind: 'hook', observe: true, decision: 'deny', at: 0, cwd: '/r' }] });
-    assert.deepEqual(s.hook, { background: 0, deny: 0 });
+    assert.deepEqual(s.hook, { background: 0, deny: 0, wrap: 0 });
   });
 });
 

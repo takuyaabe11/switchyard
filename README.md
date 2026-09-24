@@ -41,20 +41,26 @@ overlapped, it says so, and you can take it out with `switchyard uninstall`.
 ## What changes once it is installed
 
 - **Nothing in how you or Claude type commands.** A `PATH` shim in front of `npm`, `npx`, `node`, `yarn`, `pnpm`, `bun`,
-  `cargo`, `pytest`, `python`, `python3`, `uv`, `poetry`, `go`, `mvn`, `gradle`, `dotnet`, `bundle`, `rspec`, `deno`
-  and `make` recognizes test and build runs and queues them. Everything else passes straight through. (`git` has a shim
+  `cargo`, `pytest`, `python`, `python3`, `uv`, `poetry`, `go`, `mvn`, `gradle`, `dotnet`, `bundle`, `rspec`, `deno`,
+  `make`, `xcodebuild`, `bazel`, `bazelisk`, `nx` and `turbo` recognizes test and build runs and queues them. Everything else passes straight through. (`git` has a shim
   too, but does nothing unless you turn it on; see below.)
 - **Heavy runs take turns.** When a run has to wait, Claude runs it in the background and is told when it finishes,
   so the session is not stuck. `switchyard top` shows what runs, what waits and why.
 - **A failed run is not forgotten.** If a queued run fails and nobody looks at it, you get a notice when the session
   stops (once per run; Claude is not made to do anything). Running the same command successfully later, or
   `switchyard ack <job>`, clears it. `SWITCHYARD_STOP=block` has Claude look at it before it stops instead.
+- **A failure that may not be the code's fault says so.** If a run fails while the machine was saturated by other work,
+  free memory ran low, the run was killed with SIGKILL, or it was paused for a measurement, Claude is told right under
+  the output (`this failure may not be caused by the code: …`) and asked to re-run it on a quiet machine before
+  changing code. The same clue is added to the Stop notice and counted in `switchyard report`.
 - **Secrets stay out of the logs.** Values that look like secrets — `API_KEY=…`, `--password …`, `-Dx.password=…`,
   `mysql -p…`, `user:pass@` in URLs, `Authorization:` headers, and token shapes such as `sk-…`, `ghp_…`, `AKIA…` —
   are written as `***`. The command itself runs unchanged.
-- **A few forms are refused, with a fix.** Commands a shim cannot see (`./gradlew test`, `.venv/bin/pytest`, a tool
-  called by its full path) would skip the queue, so they are refused with the exact `switchyard run -- …` to use
-  instead. Claude follows it on its own.
+- **Commands a shim cannot see are wrapped for you.** `./gradlew test`, `./mvnw verify` or `.venv/bin/pytest` on a line
+  of its own is rewritten to `switchyard run -- ./gradlew test` and runs in the queue. Claude Code checks permission on
+  the rewritten command, so an allow rule for `./gradlew test` alone does not approve it; you are asked, or allow
+  `Bash(switchyard run:*)`. Chained forms (`cd app && ./gradlew test`) are refused with the exact `switchyard run -- …`
+  to use instead, and Claude follows it on its own. `SWITCHYARD_WRAP=0` refuses every form instead of rewriting.
 - **Runs keep to their share.** The share a run is given reaches the tool as its thread or worker count
   (`CARGO_BUILD_JOBS`, `RUST_TEST_THREADS`, `RAYON_NUM_THREADS`, `GOMAXPROCS`, `OMP_NUM_THREADS`,
   `PYTEST_XDIST_AUTO_NUM_WORKERS` for `pytest -n auto`, and Vitest's `VITEST_MAX_THREADS`/`FORKS`/`WORKERS`). A value
@@ -87,10 +93,11 @@ On a 4-core, 16 GB machine ([0.6–0.8](docs/verification/2026-09-24-effect.md),
 - It does not help a single session running one thing at a time.
 - The first one or two runs of a new command are handled conservatively: in the test above, 24.4 s instead of 19.4 s
   before switchyard had learned the suite.
-- It only queues commands it recognizes. For others (`bazel test`, `npm run e2e`, a custom script), add them to a
+- It only queues commands it recognizes. For others (`npm run e2e`, a custom script), add them to a
   `switchyard.json`; `switchyard init` suggests entries from your own history.
-- Jest, Playwright, Gradle, Maven, `make` and `dotnet` have no environment variable for their worker count, so their
-  share is not passed on. Put it in `switchyard.json` yourself (`"args": ["--maxWorkers={cpus}"]`).
+- Jest, Playwright, Gradle, Maven, `make`, `dotnet`, Xcode, Bazel, Nx and Turbo have no environment variable for their
+  worker count, so their share is not passed on. Put it in `switchyard.json` yourself (`"args": ["--maxWorkers={cpus}"]`).
+- The clue on a failed run is a hint, not a diagnosis: a run can fail for its own reasons on a busy machine too.
 - The numbers above come from controlled runs on one machine, not from people's everyday use yet.
   `switchyard report` shows what it did on yours: how many runs it held back, how long they waited, what it packed in.
 - macOS and Linux only (Windows through WSL).
@@ -115,7 +122,7 @@ Once installed, every new Claude Code session gets three hooks:
 | Hook | What it does |
 |---|---|
 | `SessionStart` | Puts `shims/` at the front of `PATH` for the session |
-| `PreToolUse` (Bash) | Sends a CPU-holding run to the background when it would have to wait (a queue, a measurement, a held lock, not enough free CPU); rejects bypasses that call the real binary by path. `SWITCHYARD_BACKGROUND=always` sends every heavy run to the background, `never` sends none. A small `sh`/`awk` sieve answers commands that name no heavy tool (`ls`, `git status`, `node -e`) in about 4 ms without starting Node |
+| `PreToolUse` (Bash) | Sends a CPU-holding run to the background when it would have to wait (a queue, a measurement, a held lock, not enough free CPU); wraps a heavy command the shims cannot see (`./gradlew test`) in `switchyard run --`; rejects bypasses that call the real binary by path. `SWITCHYARD_BACKGROUND=always` sends every heavy run to the background, `never` sends none. A small `sh`/`awk` sieve answers commands that name no heavy tool (`ls`, `git status`, `node -e`) in about 4 ms without starting Node |
 | `Stop` | Tells you when one of the session's runs ended in a way nobody has looked at (`SWITCHYARD_STOP=block` holds the session back instead) |
 
 ## Commands
@@ -193,15 +200,20 @@ Without a `switchyard.json`, a built-in table covers the usual commands: `npm te
 `npm run test*` / `npm run build*`, the same for `yarn`, `pnpm` and `bun`, `npx vitest run`, `npx jest`,
 `npx playwright test`, `npx tsc`, `cargo build|test|nextest|clippy|check`, `pytest`, `python -m pytest`,
 `uv run pytest`, `poetry run pytest`, `go test|build`, `mvn test|verify|package|install`, `gradle test|build|check`,
-`dotnet test|build`, `bundle exec rspec`, `rspec`, `deno test` and `make`.
+`dotnet test|build`, `bundle exec rspec`, `rspec`, `deno test`, `make`,
+`xcodebuild test|build|build-for-testing|test-without-building` (the action may come after the options),
+`bazel`/`bazelisk test|build|coverage`, `nx test|build|run-many|affected|run <project>:test|build` (also through
+`npx`, `pnpm` or `yarn`) and `turbo run test|build` (also `turbo test|build`, through `npx` or `pnpm`).
 A script under `node_modules/.bin` (`./node_modules/.bin/vitest run`) is classified as its `npx` form.
 A run that keeps watching (`--watch`, `--watchAll`, `tsc -w`) is never classified: it would hold its CPU share forever.
 Anything else is not classified unless your `switchyard.json` names it, and runs outside the queue.
 
 Some heavy runs cannot be seen by a shim: `./gradlew test` and `./mvnw verify` (scripts called by path), tools inside a
 Python virtualenv (`.venv/bin/pytest`), and `pytest` or `python -m pytest` after `source .venv/bin/activate` (the
-virtualenv comes before the shims on `PATH`). `PreToolUse` refuses these and asks for `switchyard run -- <command>`,
-which puts them in the queue. Scripts under `node_modules/.bin` go through the `node` shim and need nothing.
+virtualenv comes before the shims on `PATH`). When one of these is the whole command, `PreToolUse` rewrites it to
+`switchyard run -- <command>`, which puts it in the queue. When it is chained with other commands, it is refused with
+the `switchyard run -- …` to use, since rewriting part of a chain could change what the line does. `SWITCHYARD_WRAP=0`
+refuses in both cases. Scripts under `node_modules/.bin` go through the `node` shim and need nothing.
 
 With `SWITCHYARD_GIT=1`, `git` takes the index lock for the subcommands that write the index: `commit`, `merge`,
 `rebase`, `cherry-pick`, `stash`, `am`, `add`, `rm`, `mv`, `reset`, `restore`, `checkout`, `switch`,
@@ -241,7 +253,8 @@ changed in each release is in [CHANGELOG.md](CHANGELOG.md).
 ## Turning it off, and taking it out
 
 switchyard installs three hooks, and one of them can stop you: `PreToolUse` refuses a command that calls a shimmed
-binary by path or overrides the environment to get past the shim (`Stop` only tells you something, unless you set
+binary by path or overrides the environment to get past the shim, and rewrites a lone `./gradlew test`-style command
+to `switchyard run -- …` (Claude Code then asks for permission on the rewritten command) (`Stop` only tells you something, unless you set
 `SWITCHYARD_STOP=block`). The ways out:
 
 | Want | Do |
@@ -250,6 +263,7 @@ binary by path or overrides the environment to get past the shim (`Stop` only te
 | Turn switchyard off for a session | `SWITCHYARD_OFF=1` in the environment: the hooks do nothing and the shims run the real tools directly (the old name `SWITCHYARD_THINKER=1` still works) |
 | Stop the daemon | `switchyard stop` (it starts again on the next request) |
 | Run one command outside the queue | `switchyard run --class quick -- <command>`. The hook refuses the other ways around the shim for a command it would queue: calling a shimmed binary by path (`/usr/local/bin/npm test`), replacing `PATH` without keeping `$PATH`, `env -i`, and setting `SWITCHYARD_IN_JOB` or `SWITCHYARD_HELD_LOCKS` |
+| Keep `./gradlew test` and the like as typed | `SWITCHYARD_WRAP=0`: they are refused with the `switchyard run -- …` to use instead of being rewritten |
 | Watch without acting | `SWITCHYARD_OBSERVE=1`: nothing is held back, queued or refused; `switchyard report` shows what would have happened |
 | Remove it | `switchyard uninstall` first (it stops the daemon, removes the shims `PATH` line from the session env files, and deletes `~/.switchyard`; `--dry-run` shows what it would do, `--keep-logs` keeps the logs), then `/plugin uninstall switchyard@switchyard`, then reopen open sessions |
 
@@ -354,7 +368,8 @@ node bin/switchyard.mjs replay --since 14d
 ## 入れると何が変わるか
 
 - **自分も Claude も、コマンドの打ち方は変わらない。** `npm` / `npx` / `node` / `yarn` / `pnpm` / `bun` / `cargo` / `pytest` /
-  `python` / `python3` / `uv` / `poetry` / `go` / `mvn` / `gradle` / `dotnet` / `bundle` / `rspec` / `deno` / `make` の前に入る
+  `python` / `python3` / `uv` / `poetry` / `go` / `mvn` / `gradle` / `dotnet` / `bundle` / `rspec` / `deno` / `make` /
+  `xcodebuild` / `bazel` / `bazelisk` / `nx` / `turbo` の前に入る
   `PATH` の shim が、テストやビルドの走行を見分けて順番待ちに乗せる。それ以外はそのまま通る(`git` にも shim はあるが、
   有効にしない限り何もしない。下を参照)。
 - **重い走行は順番に走る。** 待つことになる走行は、Claude が背景で走らせ、終わったら知らせを受けるので、セッションは
@@ -362,10 +377,17 @@ node bin/switchyard.mjs replay --since 14d
 - **失敗した走行を見落とさない。** 順番待ちに乗った走行が失敗して誰も見ていなければ、セッションが止まるときにあなたに
   知らせる(1 本につき 1 回。Claude には何もさせない)。後で同じコマンドが成功するか、`switchyard ack <job>` で消える。
   `SWITCHYARD_STOP=block` にすると、止まる前に Claude に確かめさせる。
+- **コードのせいではないかもしれない失敗は、そう伝える。** 他の処理で機械のコアがほぼ埋まっていた・空きメモリが減った・
+  SIGKILL で止められた・計測のために一時停止された、の中で失敗した走行は、出力のすぐ下で Claude に
+  (`この失敗はコードのせいではないかもしれない: …`)伝え、コードを直す前に空いた機械で走らせ直すよう促す。同じ手がかりを
+  Stop の知らせにも載せ、`switchyard report` でも数える。
 - **秘密を記録に残さない。** 秘密らしい値(`API_KEY=…`・`--password …`・`-Dx.password=…`・`mysql -p…`・URL の `user:pass@`・
   `Authorization:` ヘッダ・`sk-…`・`ghp_…`・`AKIA…` などのトークンの形)は `***` として記録する。走らせるコマンドは変えない。
-- **いくつかの形は拒否し、直し方を示す。** shim から見えない形(`./gradlew test`・`.venv/bin/pytest`・フルパスで呼ぶ道具)は
-  順番待ちを素通りするので拒否し、代わりに使う `switchyard run -- …` をそのまま示す。Claude は自分でそれに従う。
+- **shim から見えないコマンドは代わりに包む。** 1 行だけの `./gradlew test`・`./mvnw verify`・`.venv/bin/pytest` は
+  `switchyard run -- ./gradlew test` に書き換えて順番待ちに乗せる。Claude Code は書き換えた後のコマンドで権限を確かめるので、
+  `./gradlew test` だけを許す設定ではそのまま通らない(承認を求められる。`Bash(switchyard run:*)` を許してもよい)。
+  つないだ形(`cd app && ./gradlew test`)は拒否し、代わりに使う `switchyard run -- …` を示す。Claude は自分でそれに従う。
+  `SWITCHYARD_WRAP=0` にすると、書き換えずにどの形も拒否する。
 - **走行は自分の取り分を守る。** 割り当てたコア数を、道具が読むスレッド数・ワーカー数として渡す(`CARGO_BUILD_JOBS`・
   `RUST_TEST_THREADS`・`RAYON_NUM_THREADS`・`GOMAXPROCS`・`OMP_NUM_THREADS`・`pytest -n auto` の `PYTEST_XDIST_AUTO_NUM_WORKERS`・
   Vitest の `VITEST_MAX_THREADS`/`FORKS`/`WORKERS`)。自分で決めた値がいつも勝つ。機械を独り占めしている走行には全コアを
@@ -393,10 +415,11 @@ node bin/switchyard.mjs replay --since 14d
 - 機械を速くしたり、CPU の総量を減らしたりはしない。順番を決めて、走行同士が取り合わないようにするだけ。
 - 1 本のセッションで 1 つずつ走らせる使い方には効かない。
 - 新しいコマンドの最初の 1〜2 回は控えめに扱う。上の実験では、学ぶ前は 19.4 秒のところが 24.4 秒だった。
-- 順番待ちに乗せるのは見分けられるコマンドだけ。それ以外(`bazel test`・`npm run e2e`・自作のスクリプト)は `switchyard.json`
+- 順番待ちに乗せるのは見分けられるコマンドだけ。それ以外(`npm run e2e`・自作のスクリプト)は `switchyard.json`
   に書く。`switchyard init` が自分の履歴から候補を出す。
-- Jest・Playwright・Gradle・Maven・`make`・`dotnet` にはワーカー数の環境変数が無いので、取り分は伝わらない。
+- Jest・Playwright・Gradle・Maven・`make`・`dotnet`・Xcode・Bazel・Nx・Turbo にはワーカー数の環境変数が無いので、取り分は伝わらない。
   `switchyard.json` に自分で書く(`"args": ["--maxWorkers={cpus}"]`)。
+- 失敗に添える手がかりは見立てで、診断ではない。忙しい機械の上でも、走行はそれ自身の理由で失敗しうる。
 - 上の数字は 1 台の機械で条件をそろえて測ったもので、まだ普段使いの利用者のデータではない。自分の機械で何をしたかは
   `switchyard report` で見られる(待たせた本数・待ち時間・詰めて入れた本数など)。
 - macOS と Linux だけ(Windows は WSL で)。
@@ -420,7 +443,7 @@ node bin/switchyard.mjs replay --since 14d
 | Hook | すること |
 |---|---|
 | `SessionStart` | そのセッションの `PATH` の先頭に `shims/` を足す |
-| `PreToolUse` (Bash) | CPU を持つ走行が待たされる見込み(待ち列・計測・使われている鍵・CPU の空き不足)のときだけ背景実行に回す。本物の実行ファイルをパスで直に呼ぶ抜け道を拒否する。`SWITCHYARD_BACKGROUND=always` で重い走行を必ず背景へ、`never` で回さない。重い道具の名前を含まないコマンド(`ls`・`git status`・`node -e`)は、`sh`/`awk` のふるいが Node を起動せずに約 4ms で通す |
+| `PreToolUse` (Bash) | CPU を持つ走行が待たされる見込み(待ち列・計測・使われている鍵・CPU の空き不足)のときだけ背景実行に回す。shim から見えない重いコマンド(`./gradlew test`)を `switchyard run --` で包む。本物の実行ファイルをパスで直に呼ぶ抜け道を拒否する。`SWITCHYARD_BACKGROUND=always` で重い走行を必ず背景へ、`never` で回さない。重い道具の名前を含まないコマンド(`ls`・`git status`・`node -e`)は、`sh`/`awk` のふるいが Node を起動せずに約 4ms で通す |
 | `Stop` | そのセッションの走行に、まだ誰も確かめていない終わり方があれば知らせる(`SWITCHYARD_STOP=block` なら止まるのを差し戻す) |
 
 ## コマンド
@@ -471,14 +494,19 @@ repo の根に `switchyard.json` を置くと、その repo のコマンドの�
 `npm run test*` / `npm run build*` と、`yarn` / `pnpm` / `bun` の同じ形、`npx vitest run`・`npx jest`・
 `npx playwright test`・`npx tsc`、`cargo build|test|nextest|clippy|check`、`pytest`・`python -m pytest`・
 `uv run pytest`・`poetry run pytest`、`go test|build`、`mvn test|verify|package|install`、`gradle test|build|check`、
-`dotnet test|build`、`bundle exec rspec`・`rspec`、`deno test`、`make`。
+`dotnet test|build`、`bundle exec rspec`・`rspec`、`deno test`、`make`、
+`xcodebuild test|build|build-for-testing|test-without-building`(オプションの後ろに置いた形も)、
+`bazel`/`bazelisk test|build|coverage`、`nx test|build|run-many|affected|run <project>:test|build`(`npx`・`pnpm`・`yarn` 経由も)、
+`turbo run test|build`(`turbo test|build`、`npx`・`pnpm` 経由も)。
 `node_modules/.bin` の下のスクリプト(`./node_modules/.bin/vitest run`)は `npx` の形として分類する。
 見張り続ける走行(`--watch`・`--watchAll`・`tsc -w`)は分類しない。包むと CPU の取り分を握ったまま終わらない。
 それ以外は、`switchyard.json` で名指ししない限り分類されず、順番待ちの外で走る。
 
 shim から見えない重い走行もある: パスで呼ぶスクリプト(`./gradlew test`・`./mvnw verify`)、Python の仮想環境の中の
 道具(`.venv/bin/pytest`)、`source .venv/bin/activate` の後の `pytest`・`python -m pytest`(仮想環境が `PATH` で shim より前に
-来る)。`PreToolUse` はこれらを拒否し、`switchyard run -- <コマンド>` で包むよう案内する(包めば順番待ちに乗る)。
+来る)。これだけの 1 行なら、`PreToolUse` が `switchyard run -- <コマンド>` に書き換え、順番待ちに乗せる。他のコマンドと
+つないだ形は、一部だけを書き換えると行の意味が変わりうるので拒否し、使う `switchyard run -- …` を示す。
+`SWITCHYARD_WRAP=0` ならどちらも拒否する。
 `node_modules/.bin` の下のスクリプトは `node` の shim を通るので、何もしなくてよい。
 
 `SWITCHYARD_GIT=1` にすると、`git` は index を書き換えるサブコマンド(`commit`・`merge`・`rebase`・`cherry-pick`・`stash`・`am`・
@@ -512,7 +540,7 @@ VS Code の拡張でも同じで、`/plugins` で Manage plugins の画面が開
 
 ## 切る・外す
 
-switchyard は hook を 3 つ入れる。作業を止めうるのは `PreToolUse` だけで、shim の語の実行ファイルをパスで直に呼ぶコマンドと、環境変数で shim を素通りさせるコマンドを拒否する(`Stop` は知らせるだけ。`SWITCHYARD_STOP=block` のときだけ差し戻す)。逃げ道:
+switchyard は hook を 3 つ入れる。作業を止めうるのは `PreToolUse` だけで、shim の語の実行ファイルをパスで直に呼ぶコマンドと、環境変数で shim を素通りさせるコマンドを拒否し、1 行だけの `./gradlew test` のような形を `switchyard run -- …` に書き換える(Claude Code は書き換えた後のコマンドで承認を求める)(`Stop` は知らせるだけ。`SWITCHYARD_STOP=block` のときだけ差し戻す)。逃げ道:
 
 | したいこと | すること |
 |---|---|
@@ -520,6 +548,7 @@ switchyard は hook を 3 つ入れる。作業を止めうるのは `PreToolUse
 | このセッションで switchyard を止める | 環境変数 `SWITCHYARD_OFF=1`。hook は何もせず、shim は本物をそのまま走らせる(以前の名前 `SWITCHYARD_THINKER=1` も効く) |
 | デーモンを止める | `switchyard stop`(次の要求で起動し直す) |
 | 1 本だけ順番待ちの外で走らせる | `switchyard run --class quick -- <コマンド>` で包む |
+| `./gradlew test` などを打ったとおりに保つ | `SWITCHYARD_WRAP=0`。書き換えずに拒否し、使う `switchyard run -- …` を示す |
 | 何もさせずに見るだけにする | `SWITCHYARD_OBSERVE=1`。止めも並べも拒否もしない。入れていれば何が起きたかは `switchyard report` で分かる |
 | 外す | 先に `switchyard uninstall`(デーモンを止め、セッションの環境ファイルから shims の `PATH` の行を取り除き、`~/.switchyard` を消す。`--dry-run` ですることだけを見る、`--keep-logs` で記録を残す)。その後 `/plugin uninstall switchyard@switchyard`、開いているセッションを開き直す |
 

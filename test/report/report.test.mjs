@@ -53,6 +53,12 @@ describe('summarize(改善のための集計)', () => {
     assert.deepEqual(s.reasons, { measure: 1, cpu: 1, lock: 1, behind: 1, memory: 2 });
   });
 
+  it('環境のせいかもしれない失敗を数える', () => {
+    const history = (/** @type {Record<string, unknown>} */ over) => ({ at: T0, kind: 'history', repo: '/repo', profile: 'unit', class: 'batch', cpus: 2, durationMs: 1000, code: 1, ...over });
+    const s = summarize({ events: [history({ environmental: ['x'] }), history({}), history({ code: 0 })], hooks: [] });
+    assert.deepEqual([s.failures, s.environmental], [2, 1]);
+  });
+
   it('実測の空きに詰め込んだ入場を数える', () => {
     const events = [req('a', T0), grant('a', T0, { cpus: 1, overcommit: true }), req('b', T0), grant('b', T0)];
     assert.equal(summarize({ events, hooks: [] }).packed, 1);
@@ -81,7 +87,7 @@ describe('summarize(改善のための集計)', () => {
 
   it('hooks.jsonl の背景化と拒否を数える', () => {
     const s = summarize({ events: [], hooks: [hook('background', T0), hook('background', T0), hook('deny', T0)] });
-    assert.deepEqual(s.hook, { background: 2, deny: 1 });
+    assert.deepEqual(s.hook, { background: 2, deny: 1, wrap: 0 });
   });
 
   it('repo の前方一致と期間で絞る(決定は、その要求の repo で絞る)', () => {
@@ -95,7 +101,7 @@ describe('summarize(改善のための集計)', () => {
     assert.equal(s.jobs, 1);
     assert.equal(s.waitMs.max, MIN);
     assert.deepEqual(s.byProfile, []);
-    assert.deepEqual(s.hook, { background: 0, deny: 1 });
+    assert.deepEqual(s.hook, { background: 0, deny: 1, wrap: 0 });
   });
 });
 

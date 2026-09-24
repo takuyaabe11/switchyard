@@ -22,8 +22,10 @@ import { loggedCommand } from '../redact.mjs';
 function recordPreToolUse(input, out, env, observe = false) {
   if (out === null) return;
   const h = /** @type {Record<string, unknown>} */ (typeof out.hookSpecificOutput === 'object' && out.hookSpecificOutput !== null ? out.hookSpecificOutput : {});
-  const decision = h.permissionDecision === 'deny' ? 'deny' : 'background';
   const ti = /** @type {Record<string, unknown>} */ (typeof input.tool_input === 'object' && input.tool_input !== null ? input.tool_input : {});
+  const updated = /** @type {Record<string, unknown> | undefined} */ (h.updatedInput);
+  // wrap: switchyard run で包むよう書き換えた(背景へ回したかは問わない)
+  const decision = h.permissionDecision === 'deny' ? 'deny' : updated !== undefined && updated.command !== ti.command ? 'wrap' : 'background';
   try {
     appendRecord(pathsOf(switchyardHome(env)).hooks, {
       at: Date.now(),
@@ -89,7 +91,8 @@ export async function runHook(event, raw, { write = (s) => process.stdout.write(
         const repo = repoRoot(typeof input.cwd === 'string' ? input.cwd : process.cwd());
         out = preToolUse(input, { ...base, shouldBackground: (heavy) => snap !== null && waitExpected(snap, heavy, repo) });
       } else if (isBackground(out) && backgroundMode(env) === 'never') {
-        out = null;
+        // 背景へは回さない。switchyard run で包む書き換えだけは残す
+        out = preToolUse(input, { ...base, shouldBackground: () => false });
       }
       recordPreToolUse(input, out, env);
       if (out !== null) write(JSON.stringify(out));
