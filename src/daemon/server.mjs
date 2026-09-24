@@ -12,6 +12,7 @@ import { groupHasLiveMembers } from '../run/group.mjs';
 import { VERSION } from '../version.mjs';
 import { pathsOf, SOCKET_PATH_LIMIT } from './paths.mjs';
 import { appendRecord, createStateWriter, loadEscapes, loadEstimates, parseState, readJournal, readJson, rotateRecords, takeUnmanaged } from './store.mjs';
+import { t } from '../i18n.mjs';
 
 /** @typedef {import('../core/types.mjs').State} State */
 /** @typedef {import('../core/types.mjs').Event} Event */
@@ -62,7 +63,7 @@ async function removeStaleSocket(sock) {
     });
     c.once('error', () => resolve(false));
   });
-  if (answered) throw new Error(`別のデーモンが応答している: ${sock}`);
+  if (answered) throw new Error(t(`別のデーモンが応答している: ${sock}`, `another daemon is answering: ${sock}`));
   unlinkSync(sock);
 }
 
@@ -86,7 +87,7 @@ export async function startDaemon(opts) {
   } = opts;
   const p = pathsOf(home);
   const sockBytes = Buffer.byteLength(p.sock);
-  if (sockBytes > SOCKET_PATH_LIMIT) throw new Error(`socket のパスが長すぎる(${sockBytes} バイト > ${SOCKET_PATH_LIMIT}): ${p.sock}`);
+  if (sockBytes > SOCKET_PATH_LIMIT) throw new Error(t(`socket のパスが長すぎる(${sockBytes} バイト > ${SOCKET_PATH_LIMIT}): ${p.sock}`, `socket path too long (${sockBytes} bytes > ${SOCKET_PATH_LIMIT}): ${p.sock}`));
   mkdirSync(home, { recursive: true });
   await removeStaleSocket(p.sock);
 
@@ -171,7 +172,7 @@ export async function startDaemon(opts) {
     for (const u of takeUnmanaged(p.unmanaged)) {
       const jobId = `u${u.at.toString(36)}${(unmanagedSeq++).toString(36)}`;
       appendRecord(p.events, { kind: 'unmanaged', jobId, ...u });
-      if (u.code !== 0) apply({ type: 'unmanagedExit', now: monoNow(), session: u.session, jobId, code: u.code, cmd: u.cmd });
+      apply({ type: 'unmanagedExit', now: monoNow(), session: u.session, jobId, code: u.code, cmd: u.cmd, repo: u.repo, profile: u.profile });
     }
   };
   ingestUnmanaged();
@@ -241,7 +242,7 @@ export async function startDaemon(opts) {
     };
     /** @param {unknown} jobId @returns {string} */
     const own = (jobId) => {
-      if (bound === null || jobId !== bound) throw new Error('この接続のジョブではない');
+      if (bound === null || jobId !== bound) throw new Error(t('この接続のジョブではない', 'not the job of this connection'));
       return bound;
     };
 
@@ -310,8 +311,11 @@ export async function startDaemon(opts) {
           const has = (/** @type {string} */ s) => (state.unacked[s] ?? []).some((u) => u.jobId === jobId);
           const session = typeof m.session === 'string' ? m.session : Object.keys(state.unacked).find(has);
           if (session === undefined || !has(session)) {
-            const where = typeof m.session === 'string' ? `セッション ${m.session} の` : 'どのセッションの';
-            send(conn, { t: 'error', message: `${where}確認待ちにも ${jobId} は無い(switchyard top の「未確認」で id とセッションを確かめる)` });
+            const message =
+              typeof m.session === 'string'
+                ? t(`セッション ${m.session} の確認待ちにも ${jobId} は無い(switchyard top の「未確認」で id とセッションを確かめる)`, `${jobId} is not waiting to be acked in session ${m.session} (check the id and session under "Not looked at yet" in switchyard top)`)
+                : t(`どのセッションの確認待ちにも ${jobId} は無い(switchyard top の「未確認」で id とセッションを確かめる)`, `${jobId} is not waiting to be acked in any session (check the id under "Not looked at yet" in switchyard top)`);
+            send(conn, { t: 'error', message });
             return;
           }
           apply({ type: 'ack', now: monoNow(), session, jobId });
@@ -322,7 +326,7 @@ export async function startDaemon(opts) {
           send(conn, { t: 'unacked', jobs: state.unacked[String(m.session)] ?? [] });
           return;
         default:
-          send(conn, { t: 'error', message: `知らないメッセージ: ${String(m.t)}` });
+          send(conn, { t: 'error', message: t(`知らないメッセージ: ${String(m.t)}`, `unknown message: ${String(m.t)}`) });
       }
     };
 
@@ -334,7 +338,7 @@ export async function startDaemon(opts) {
           send(conn, { t: 'error', message: err instanceof Error ? err.message : String(err) });
         }
       },
-      () => send(conn, { t: 'error', message: 'JSON として読めない行' }),
+      () => send(conn, { t: 'error', message: t('JSON として読めない行', 'a line that is not valid JSON') }),
     );
     conn.on('data', (chunk) => feed(String(chunk)));
     conn.on('error', () => {});
@@ -393,7 +397,7 @@ export async function startDaemon(opts) {
       ingestUnmanaged();
     } catch (e) {
       // 控えを読めなくても割り振りの tick は止めない(次の tick で試し直す)
-      process.stderr.write(`[switchyardd] 管理なしの走行の控えを取り込めない: ${e instanceof Error ? e.message : String(e)}\n`);
+      process.stderr.write(`${t('[switchyardd] 管理なしの走行の控えを取り込めない', '[switchyardd] cannot ingest unmanaged runs')}: ${e instanceof Error ? e.message : String(e)}\n`);
     }
     apply({ type: 'tick', now });
   }, tickMs);

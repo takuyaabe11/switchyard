@@ -29,6 +29,24 @@ const SUITES = {
     ],
     mutations: [
       {
+        name: 'M30 後の成功で前の失敗を片付けない',
+        file: 'src/core/decide.mjs',
+        from: 'else s = resolveBySuccess(s, l.job.session, l.job.repo, l.job.profile, l.job.cmd);',
+        to: '',
+      },
+      {
+        name: 'M31 後の成功で、別の profile の失敗まで片付ける',
+        file: 'src/core/decide.mjs',
+        from: 'u.repo === repo && u.profile === profile &&',
+        to: 'u.repo === repo &&',
+      },
+      {
+        name: 'M32 子が走っている孤児も後の成功で片付ける',
+        file: 'src/core/decide.mjs',
+        from: "const RESOLVED_BY_SUCCESS = new Set(['failed', 'killed', 'lost']);",
+        to: "const RESOLVED_BY_SUCCESS = new Set(['failed', 'killed', 'lost', 'orphan']);",
+      },
+      {
         name: 'M1 鍵の空き判定を緩める',
         file: 'src/core/schedule.mjs',
         from: 'return locks.every((k) => holders(s, k).length < capOf(s, k));',
@@ -184,7 +202,19 @@ const SUITES = {
         // 待たせた理由の種別を取り違える(計測待ちが「その他」に落ちる)
         name: 'R1 計測の理由を見ない',
         file: 'src/report/report.mjs',
-        from: "if (reason.includes('計測')) return 'measure';",
+        from: "if (reason.includes('計測') || reason.includes('measurement')) return 'measure';",
+        to: '',
+      },
+      {
+        name: 'R6 重なりを避けた走行を数えない',
+        file: 'src/report/report.mjs',
+        from: "if (k !== 'other') avoided += 1;",
+        to: '',
+      },
+      {
+        name: 'R7 単独で走らせた計測を数えない',
+        file: 'src/report/report.mjs',
+        from: "if (r.class === 'measure') measureRuns += 1;",
         to: '',
       },
       {
@@ -298,8 +328,8 @@ const SUITES = {
       {
         name: 'W6 デーモンが管理なしの失敗を ack 待ちに積まない',
         file: 'src/daemon/server.mjs',
-        from: "if (u.code !== 0) apply({ type: 'unmanagedExit'",
-        to: "if (false) apply({ type: 'unmanagedExit'",
+        from: "apply({ type: 'unmanagedExit', now: monoNow(),",
+        to: "void ({ type: 'unmanagedExit', now: monoNow(),",
       },
       {
         name: 'W7 管理なしで走っても控えない',
@@ -398,8 +428,21 @@ const SUITES = {
       {
         name: 'H1 既に背景でも書き換える',
         file: 'src/hooks/pretooluse.mjs',
-        from: 'if (found.heavy && ti.run_in_background !== true) {',
-        to: 'if (found.heavy) {',
+        from: 'if (heavy.length > 0 && ti.run_in_background !== true && shouldBackground(heavy)) {',
+        to: 'if (heavy.length > 0 && shouldBackground(heavy)) {',
+      },
+      {
+        // 待ちが見込まれないのに背景へ回す(エージェントが完了の通知を待たされる)
+        name: 'H20 CPU の空きを見ずに、重ければ背景へ回す',
+        file: 'src/hooks/pretooluse.mjs',
+        from: 'return need > snap.capacity - snap.used;',
+        to: 'return true;',
+      },
+      {
+        name: 'H21 auto の方針でもデーモンの盤面を見ない',
+        file: 'src/hooks/main.mjs',
+        from: "out = preToolUse(input, { ...base, shouldBackground: (heavy) => snap !== null && waitExpected(snap, heavy) });",
+        to: '',
       },
       {
         name: 'H2 背景への書き換えに allow を付ける(権限の確認を飛ばす)',
@@ -418,7 +461,7 @@ const SUITES = {
         // 改善 2: 直す前の形。shim の語でないものをパスで呼ぶ形(scripts/probe-run.sh)と shim の無い語も拒否する
         name: 'H10 shim の語でないものをパスで呼ぶ形・shim の無い語も拒否へ戻す',
         file: 'src/hooks/pretooluse.mjs',
-        from: "if (!wrapped && hit !== null && launches && hit.profile.class !== 'quick') found.heavy = true;",
+        from: "if (!wrapped && hit !== null && launches && hit.profile.class !== 'quick') heavy.push(needOf(hit.profile));",
         to: 'if (!wrapped && hit !== null && launches) unshimmed.push(text);',
       },
       {
@@ -472,7 +515,7 @@ const SUITES = {
         // I1: switchyard run の `--` の後ろを見ない(直す前は switchyard run を含むコマンドを丸ごと素通しした)
         name: 'H12 switchyard run の包みの性格と -- の後ろを見ない',
         file: 'src/hooks/pretooluse.mjs',
-        from: "if (w.jobClass !== 'quick') found.heavy = true;\n      visit(w.argv, true);",
+        from: "if (w.jobClass !== 'quick') heavy.push({ jobClass: w.jobClass, cpusMin: w.cpusMin, locks: w.locks });\n      visit(w.argv, true);",
         to: '',
       },
       {
@@ -582,7 +625,8 @@ const TEST_TIMEOUT_MS = 180_000;
 function runTests(dir, tests) {
   return new Promise((resolve) => {
     // SWITCHYARD_HOME は写しの中へ向ける(env を渡さないと、テストの試算が実際の ~/.switchyard/ を汚す)
-    const env = { ...process.env, SWITCHYARD_HOME: join(dir, '.switchyard-home') };
+    // テストは日本語の文言で照合する(package.json の npm test と同じ)
+    const env = { ...process.env, SWITCHYARD_HOME: join(dir, '.switchyard-home'), SWITCHYARD_LANG: 'ja' };
     // 入れ子の印を落とす(package.json の `env -u` と同じ)。この script 自身が switchyard に包まれて走ると
     // SWITCHYARD_IN_JOB=1 が立ち、それが test へ漏れると、その印を読む側の振る舞いを試す試験が別物になる
     delete env.SWITCHYARD_IN_JOB;

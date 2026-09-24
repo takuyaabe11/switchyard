@@ -1,5 +1,6 @@
 // @ts-check
 // 包み・CLI とデーモンの間でやり取りするメッセージの形。
+import { t } from '../i18n.mjs';
 
 /** @typedef {import('../core/types.mjs').JobSpec} JobSpec */
 /** @typedef {import('../core/types.mjs').JobClass} JobClass */
@@ -45,26 +46,26 @@ export function numOrNull(v) {
  * @param {unknown} v @returns {JobRequest}
  */
 export function parseJobRequest(v) {
-  if (typeof v !== 'object' || v === null) throw new Error('job がオブジェクトではない');
+  if (typeof v !== 'object' || v === null) throw new Error(t('job がオブジェクトではない', 'job is not an object'));
   const o = /** @type {Record<string, unknown>} */ (v);
   const str = (/** @type {string} */ k) => {
     const x = o[k];
-    if (typeof x !== 'string' || x === '') throw new Error(`job.${k} は空でない文字列`);
+    if (typeof x !== 'string' || x === '') throw new Error(t(`job.${k} は空でない文字列`, `job.${k} must be a non-empty string`));
     return x;
   };
   const cls = o.class;
-  if (typeof cls !== 'string' || !CLASSES.includes(cls)) throw new Error('job.class は quick / batch / measure');
+  if (typeof cls !== 'string' || !CLASSES.includes(cls)) throw new Error(t('job.class は quick / batch / measure', 'job.class must be quick / batch / measure'));
   const pre = o.preempt;
-  if (typeof pre !== 'string' || !PREEMPTS.includes(pre)) throw new Error('job.preempt は pause / throttle / never');
+  if (typeof pre !== 'string' || !PREEMPTS.includes(pre)) throw new Error(t('job.preempt は pause / throttle / never', 'job.preempt must be pause / throttle / never'));
   const c = /** @type {Record<string, unknown> | null} */ (typeof o.cpus === 'object' ? o.cpus : null);
   const lockOnly = c !== null && c.min === 0 && c.max === 0;
   if (c === null || !Number.isInteger(c.min) || !Number.isInteger(c.max) || (!lockOnly && Number(c.min) < 1) || Number(c.max) < Number(c.min)) {
-    throw new Error('job.cpus は { min: 1 以上の整数, max: min 以上の整数 } か、鍵だけのジョブの { min: 0, max: 0 }');
+    throw new Error(t('job.cpus は { min: 1 以上の整数, max: min 以上の整数 } か、鍵だけのジョブの { min: 0, max: 0 }', 'job.cpus must be { min: integer >= 1, max: integer >= min }, or { min: 0, max: 0 } for a locks-only job'));
   }
-  if (!Array.isArray(o.locks) || !o.locks.every((x) => typeof x === 'string')) throw new Error('job.locks は文字列の配列');
-  if (lockOnly && o.locks.length === 0) throw new Error('job.cpus が 0..0 の鍵だけのジョブは、job.locks を 1 本以上持つ');
-  if (o.why !== null && typeof o.why !== 'string') throw new Error('job.why は文字列か null');
-  if (o.parent !== undefined && o.parent !== null && (typeof o.parent !== 'string' || o.parent === '')) throw new Error('job.parent は空でない文字列か null');
+  if (!Array.isArray(o.locks) || !o.locks.every((x) => typeof x === 'string')) throw new Error(t('job.locks は文字列の配列', 'job.locks must be an array of strings'));
+  if (lockOnly && o.locks.length === 0) throw new Error(t('job.cpus が 0..0 の鍵だけのジョブは、job.locks を 1 本以上持つ', 'a locks-only job (job.cpus 0..0) needs at least one entry in job.locks'));
+  if (o.why !== null && typeof o.why !== 'string') throw new Error(t('job.why は文字列か null', 'job.why must be a string or null'));
+  if (o.parent !== undefined && o.parent !== null && (typeof o.parent !== 'string' || o.parent === '')) throw new Error(t('job.parent は空でない文字列か null', 'job.parent must be a non-empty string or null'));
   return {
     session: str('session'),
     repo: str('repo'),

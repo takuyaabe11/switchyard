@@ -1,0 +1,3 @@
+#!/bin/sh
+name=mvn
+. "${0%/*}/_shim.sh"

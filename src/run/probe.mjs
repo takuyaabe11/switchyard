@@ -3,6 +3,7 @@
 // グループから抜けた子と、その後も生きている子を報告する。生き残りは最後に SIGKILL で片付ける。
 import { readPgid, signalGroup, spawnInOwnGroup, verifiedGroup, waitGroupGone } from './group.mjs';
 import { createEscapeTracker } from './watch.mjs';
+import { t } from '../i18n.mjs';
 
 /** @typedef {import('./watch.mjs').EscapeReport} EscapeReport */
 
@@ -16,14 +17,14 @@ export async function probe({ argv, seconds, intervalMs = 200, graceMs = 2_000, 
   const ownPgid = readPgid(process.pid);
   const child = spawnInOwnGroup(argv, { stdio: 'ignore', cwd, env });
   const pid = child.pid;
-  if (pid === undefined) throw new Error(`起動できない: ${argv.join(' ')}`);
+  if (pid === undefined) throw new Error(t(`起動できない: ${argv.join(' ')}`, `cannot start: ${argv.join(' ')}`));
   const group = verifiedGroup(pid, ownPgid);
   if (group === null) {
     child.kill('SIGKILL');
     // 自分の pgid を確かめられないときは、そもそもどのプロセスグループにも信号を送っていない
     // (確かめていない番号へは送らない)。理由を区別して伝える
-    if (ownPgid === null) throw new Error('自分のプロセスグループ(pgid)を確かめられないので、子へ信号を送れない');
-    throw new Error('子のプロセスグループを確かめられない');
+    if (ownPgid === null) throw new Error(t('自分のプロセスグループ(pgid)を確かめられないので、子へ信号を送れない', 'cannot confirm our own process group (pgid), so no signal can be sent to the child'));
+    throw new Error(t('子のプロセスグループを確かめられない', "cannot confirm the child's process group"));
   }
   const tracker = createEscapeTracker({ rootPid: pid, pgid: group });
   // グループへの後始末(SIGTERM → 待つ → 必要なら SIGKILL)が、通常の経路で最後まで終わったか。

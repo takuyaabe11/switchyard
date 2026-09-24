@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { pathsOf } from './paths.mjs';
+import { t } from '../i18n.mjs';
 
 /** @typedef {{ stopped: boolean, pid: number | null, reason: string }} StopResult */
 
@@ -71,19 +72,19 @@ export async function stopDaemon({
   isDaemon = isSwitchyarddPid,
 }) {
   const p = pathsOf(home);
-  if (!(await answers(p.sock))) return { stopped: false, pid: null, reason: 'デーモンは動いていない' };
+  if (!(await answers(p.sock))) return { stopped: false, pid: null, reason: t('デーモンは動いていない', 'the daemon is not running') };
   const pid = lockPid(p.lock);
-  if (pid === null) return { stopped: false, pid: null, reason: `応答しているが、持ち主の pid を ${p.lock} から読めない` };
-  if (!isDaemon(pid)) return { stopped: false, pid, reason: `pid ${pid} は switchyardd ではない(ロックが古い)` };
+  if (pid === null) return { stopped: false, pid: null, reason: t(`応答しているが、持ち主の pid を ${p.lock} から読めない`, `it answers, but its pid cannot be read from ${p.lock}`) };
+  if (!isDaemon(pid)) return { stopped: false, pid, reason: t(`pid ${pid} は switchyardd ではない(ロックが古い)`, `pid ${pid} is not switchyardd (stale lock)`) };
   try {
     signal(pid);
   } catch (e) {
-    return { stopped: false, pid, reason: `SIGTERM を送れない: ${e instanceof Error ? e.message : String(e)}` };
+    return { stopped: false, pid, reason: t(`SIGTERM を送れない: ${e instanceof Error ? e.message : String(e)}`, `cannot send SIGTERM: ${e instanceof Error ? e.message : String(e)}`) };
   }
   const until = Date.now() + timeoutMs;
   while (Date.now() < until) {
-    if (!(await answers(p.sock))) return { stopped: true, pid, reason: `pid ${pid} を止めた` };
+    if (!(await answers(p.sock))) return { stopped: true, pid, reason: t(`pid ${pid} を止めた`, `stopped pid ${pid}`) };
     await new Promise((r) => setTimeout(r, stepMs));
   }
-  return { stopped: false, pid, reason: `SIGTERM を送ったが ${timeoutMs}ms 以内に止まらない(pid ${pid})` };
+  return { stopped: false, pid, reason: t(`SIGTERM を送ったが ${timeoutMs}ms 以内に止まらない(pid ${pid})`, `sent SIGTERM but it did not stop within ${timeoutMs}ms (pid ${pid})`) };
 }

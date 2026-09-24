@@ -11,6 +11,7 @@ import { pathsOf } from '../daemon/paths.mjs';
 import { appendRecord } from '../daemon/store.mjs';
 import { readPgid, renicePriority, signalGroup, spawnInOwnGroup, verifiedGroup, waitGroupGone } from './group.mjs';
 import { createEscapeTracker, nextWatchMs } from './watch.mjs';
+import { t } from '../i18n.mjs';
 
 /** @typedef {import('../core/types.mjs').JobClass} JobClass */
 /** @typedef {import('../core/types.mjs').CpuRange} CpuRange */
@@ -64,14 +65,19 @@ export function buildRequest({ argv, flags, env, cwd }) {
   const { profiles, error, notice } = loadProfiles(repo);
   const cmd = argv.join(' ');
   const named = flags.profile !== undefined ? profiles.find((p) => p.name === flags.profile) ?? null : classify(classifiableCommand(argv), profiles);
-  if (flags.profile !== undefined && named === null) throw new Error(`profile ${flags.profile} が見つからない`);
+  if (flags.profile !== undefined && named === null) throw new Error(t(`profile ${flags.profile} が見つからない`, `profile ${flags.profile} not found`));
   const base = named === null ? null : named.profile;
   const held = heldLocks(env);
   const declaredLocks = [...new Set([...(base?.locks ?? []), ...(flags.locks ?? [])])];
   // 鍵だけのジョブ(--cpus 0..0)に鍵が 1 本も無いのは使い方の誤り。--profile の鍵はここで初めて分かるので、CLI の検査の続きをここで行う。
   // これで、デーモンに要求せずに走らせるのは、入れ子で祖先の鍵を外して何も残らなかったときだけになる(設計 §4.3 の 7)
   if (flags.cpus?.max === 0 && declaredLocks.length === 0) {
-    throw new UsageError(`--cpus 0..0(鍵だけのジョブ)には鍵が 1 本以上要る(--lock も、profile ${flags.profile ?? '(指定なし)'} の locks も無い)`);
+    throw new UsageError(
+      t(
+        `--cpus 0..0(鍵だけのジョブ)には鍵が 1 本以上要る(--lock も、profile ${flags.profile ?? '(指定なし)'} の locks も無い)`,
+        `--cpus 0..0 (a locks-only job) needs at least one lock (no --lock, and profile ${flags.profile ?? '(none)'} has no locks)`,
+      ),
+    );
   }
   // 鍵だけのジョブの子(祖先の鍵があり、CPU を持つジョブの中ではない)は、親のジョブの id を載せる。
   // 規則層が親のリースの実在を確かめてから先に入れ、容量を超えて借りさせる(設計 §4.3 の 7・§6.2・§6.3 の 4)
@@ -106,10 +112,16 @@ export function escapeLines(r) {
   /** @type {string[]} */
   const lines = [];
   if (r.escaped.length > 0) {
-    lines.push(`[switchyard] プロセスグループから抜けた子: ${r.escaped.map((e) => `${e.comm} ×${e.count}`).join(', ')}(信号と使用率の照合が届かない)`);
+    const list = r.escaped.map((e) => `${e.comm} ×${e.count}`).join(', ');
+    lines.push(t(`[switchyard] プロセスグループから抜けた子: ${list}(信号と使用率の照合が届かない)`, `[switchyard] children that left the process group: ${list} (signals and CPU accounting do not reach them)`));
   }
   if (r.survivors.length > 0) {
-    lines.push(`[switchyard] 終了後も生きている子: ${r.survivors.map((x) => `${x.comm}(pid ${x.pid}・${x.inGroup ? 'グループ内' : 'グループ外'})`).join(', ')}`);
+    lines.push(
+      t(
+        `[switchyard] 終了後も生きている子: ${r.survivors.map((x) => `${x.comm}(pid ${x.pid}・${x.inGroup ? 'グループ内' : 'グループ外'})`).join(', ')}`,
+        `[switchyard] children still alive after exit: ${r.survivors.map((x) => `${x.comm} (pid ${x.pid}, ${x.inGroup ? 'in group' : 'outside group'})`).join(', ')}`,
+      ),
+    );
   }
   return lines;
 }
@@ -140,7 +152,7 @@ export function runJob(opts) {
     verifyGroup = verifiedGroup,
   } = opts;
   const { job, profile, configError, configNotice } = buildRequest({ argv, flags, env, cwd });
-  if (configError !== null) out(`[switchyard] ${configError}(既定表で続ける)`);
+  if (configError !== null) out(t(`[switchyard] ${configError}(既定表で続ける)`, `[switchyard] ${configError} (continuing with the built-in table)`));
   if (configNotice !== null) out(`[switchyard] ${configNotice}`);
   const ownPgid = readPgid(process.pid);
 
@@ -220,7 +232,7 @@ export function runJob(opts) {
         try {
           appendRecord(pathsOf(home).unmanaged, { at: Date.now(), session: job.session, repo: job.repo, profile: job.profile, cmd: job.cmd, code, durationMs: Date.now() - childStartedAt });
         } catch (e) {
-          out(`[switchyard] 管理なしの走行を控えられない: ${e instanceof Error ? e.message : String(e)}`);
+          out(t(`[switchyard] 管理なしの走行を控えられない: ${e instanceof Error ? e.message : String(e)}`, `[switchyard] cannot record the unmanaged run: ${e instanceof Error ? e.message : String(e)}`));
         }
       }
       const summary = escape === null ? null : { escaped: escape.escaped, survivors: escape.survivors };
@@ -252,7 +264,7 @@ export function runJob(opts) {
       const c = spawnInOwnGroup([...argv, ...tpl.args], { env: childEnv, cwd, stdio: 'inherit' });
       child = c;
       c.once('error', (e) => {
-        out(`[switchyard] 起動できない: ${e.message}`);
+        out(t(`[switchyard] 起動できない: ${e.message}`, `[switchyard] cannot start: ${e.message}`));
         report(127, null);
       });
       c.once('exit', (code, sig) => {
@@ -276,7 +288,12 @@ export function runJob(opts) {
       if (c.pid === undefined) return;
       pgid = verifyGroup(c.pid, ownPgid);
       if (pgid === null) {
-        out('[switchyard] 子のプロセスグループを確かめられないので、グループへの信号は送らない(呼び出し元の終了だけを子に伝える)');
+        out(
+          t(
+            '[switchyard] 子のプロセスグループを確かめられないので、グループへの信号は送らない(呼び出し元の終了だけを子に伝える)',
+            "[switchyard] cannot confirm the child's process group, so no signal goes to the group (only the caller's exit is passed to the child)",
+          ),
+        );
       } else {
         // どのコマンドでも、子孫がグループから抜けるかを実行中に見る(設計 §13 V6)。
         // 顔ぶれが変わらない間は間隔を倍にして伸ばす(ps は 1 回が安くない。watch.mjs の nextWatchMs)
@@ -306,7 +323,7 @@ export function runJob(opts) {
       // 止まっている子は信号を処理できない。転送の前に必ず動かし直す
       release();
       if (phase === 'waiting') {
-        out(`[switchyard] ${sig} を受けたので待つのをやめる`);
+        out(t(`[switchyard] ${sig} を受けたので待つのをやめる`, `[switchyard] got ${sig}, giving up the wait`));
         phase = 'done';
         finish(signalCode(sig));
         return;
@@ -342,12 +359,12 @@ export function runJob(opts) {
         if (m.t === 'accepted') {
           jobId = String(m.jobId);
         } else if (m.t === 'queued' && phase === 'waiting') {
-          const eta = typeof m.etaWall === 'number' ? `(見込み ${clock(m.etaWall)})` : '';
-          const line = `[switchyard] 待機 ${String(m.position)} 番目: ${String(m.reason)}${eta}`;
+          const eta = typeof m.etaWall === 'number' ? t(`(見込み ${clock(m.etaWall)})`, ` (expected ${clock(m.etaWall)})`) : '';
+          const line = t(`[switchyard] 待機 ${String(m.position)} 番目: ${String(m.reason)}${eta}`, `[switchyard] waiting, #${String(m.position)}: ${String(m.reason)}${eta}`);
           if (line !== lastNote) out(line);
           lastNote = line;
         } else if (m.t === 'grant' && phase === 'waiting') {
-          out(`[switchyard] 開始 ${jobId}(CPU ${String(m.cpus)})`);
+          out(t(`[switchyard] 開始 ${jobId}(CPU ${String(m.cpus)})`, `[switchyard] started ${jobId} (CPU ${String(m.cpus)})`));
           startChild(Number(m.cpus), true);
         } else if (m.t === 'hold' && phase === 'running' && pgid !== null) {
           const mode = m.mode === 'pause' ? 'pause' : 'throttle';
@@ -355,23 +372,23 @@ export function runJob(opts) {
             held = mode;
             if (mode === 'pause') {
               signalGroup(pgid, 'SIGSTOP', ownPgid);
-              out('[switchyard] 計測に道を譲るため止まる(SIGSTOP)。計測が終われば動き出す');
+              out(t('[switchyard] 計測に道を譲るため止まる(SIGSTOP)。計測が終われば動き出す', '[switchyard] pausing (SIGSTOP) to make way for a measurement; resumes when it ends'));
             } else {
               renicePriority(pgid, throttleNice);
-              out(`[switchyard] 計測に道を譲るため優先度を下げる(nice ${throttleNice})`);
+              out(t(`[switchyard] 計測に道を譲るため優先度を下げる(nice ${throttleNice})`, `[switchyard] lowering priority (nice ${throttleNice}) to make way for a measurement`));
             }
           }
         } else if (m.t === 'unhold') {
           if (held !== null) {
             release();
-            out('[switchyard] 走行に戻る');
+            out(t('[switchyard] 走行に戻る', '[switchyard] back to running'));
           }
         } else if (m.t === 'unknown') {
           if (phase === 'waiting') {
             jobId = null;
             c.send({ t: 'request', job });
           } else if (phase === 'running') {
-            out('[switchyard] デーモンがこのジョブを知らないので、管理なしで走り続ける');
+            out(t('[switchyard] デーモンがこのジョブを知らないので、管理なしで走り続ける', '[switchyard] the daemon does not know this job; it keeps running unmanaged'));
             unmanaged = true;
             if (hbTimer !== null) clearInterval(hbTimer);
             ch = null;
@@ -380,13 +397,13 @@ export function runJob(opts) {
         } else if (m.t === 'error' && phase === 'waiting') {
           // 待っている間のエラーは要求が受け付けられなかったということ。待ち続けると永遠に終わらないので、
           // 作業を止めずに管理なしで実行し、控える(設計 §10・§4.3 の 8)
-          out(`[switchyard] デーモンが要求を受け付けない(${String(m.message)})ので、管理なしで実行する`);
+          out(t(`[switchyard] デーモンが要求を受け付けない(${String(m.message)})ので、管理なしで実行する`, `[switchyard] the daemon refused the request (${String(m.message)}); running unmanaged`));
           unmanaged = true;
           ch = null;
           c.close();
           startChild(job.cpus.min, false);
         } else if (m.t === 'error') {
-          out(`[switchyard] デーモンのエラー: ${String(m.message)}`);
+          out(t(`[switchyard] デーモンのエラー: ${String(m.message)}`, `[switchyard] daemon error: ${String(m.message)}`));
         }
       });
       c.onClose(() => {
@@ -396,7 +413,7 @@ export function runJob(opts) {
     };
 
     const reconnect = async () => {
-      out('[switchyard] デーモンとの接続が切れた。つなぎ直す');
+      out(t('[switchyard] デーモンとの接続が切れた。つなぎ直す', '[switchyard] lost the daemon connection; reconnecting'));
       if (hbTimer !== null) clearInterval(hbTimer);
       ch = null;
       const lostAt = Date.now();
@@ -419,11 +436,11 @@ export function runJob(opts) {
               }, heartbeatMs);
             }
           }
-          out('[switchyard] つなぎ直した');
+          out(t('[switchyard] つなぎ直した', '[switchyard] reconnected'));
           return;
         } catch {
           if (phase === 'waiting' && Date.now() - lostAt > unmanagedAfterMs) {
-            out(`[switchyard] ${unmanagedAfterMs}ms つなげないので、管理なしで実行する(二重貸し防止などの保証なし)`);
+            out(t(`[switchyard] ${unmanagedAfterMs}ms つなげないので、管理なしで実行する(二重貸し防止などの保証なし)`, `[switchyard] no connection for ${unmanagedAfterMs}ms; running unmanaged (no guarantee against double allocation)`));
             unmanaged = true;
             startChild(job.cpus.min, false);
             return;
@@ -455,7 +472,12 @@ export function runJob(opts) {
       .catch((e) => {
         if (over()) return;
         if (!(e instanceof DaemonUnavailableError)) throw e;
-        out(`[switchyard] デーモンに届かないので、管理なしで実行する(二重貸し防止などの保証なし・CPU は宣言の最小 ${job.cpus.min}): ${e.message}`);
+        out(
+          t(
+            `[switchyard] デーモンに届かないので、管理なしで実行する(二重貸し防止などの保証なし・CPU は宣言の最小 ${job.cpus.min}): ${e.message}`,
+            `[switchyard] cannot reach the daemon; running unmanaged (no guarantee against double allocation, CPU at the declared minimum ${job.cpus.min}): ${e.message}`,
+          ),
+        );
         unmanaged = true;
         startChild(job.cpus.min, false);
       });

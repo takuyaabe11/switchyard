@@ -42,7 +42,10 @@
  */
 
 /** @typedef {'failed' | 'killed' | 'orphan' | 'lost'} UnackedKind */
-/** @typedef {{ jobId: string, kind: UnackedKind, code: number | null, cmd: string }} Unacked */
+/**
+ * repo と profile は、後の成功で自動に確認済みにするための手がかり(0.5.0 以前の state.json には無い)。
+ * @typedef {{ jobId: string, kind: UnackedKind, code: number | null, cmd: string, repo?: string, profile?: string }} Unacked
+ */
 /** @typedef {{ jobId: string, position: number, reason: string, etaAt: number | null }} QueueNote */
 
 /**
@@ -67,7 +70,7 @@
  *   { type: 'orphanGone', now: number, jobId: string } |
  *   { type: 'resume', now: number, jobId: string, pid: number | null, pgid: number | null } |
  *   { type: 'ack', now: number, session: string, jobId: string } |
- *   { type: 'unmanagedExit', now: number, session: string, jobId: string, code: number | null, cmd: string } |
+ *   { type: 'unmanagedExit', now: number, session: string, jobId: string, code: number | null, cmd: string, repo?: string, profile?: string } |
  *   { type: 'tick', now: number }
  * )} Event
  */

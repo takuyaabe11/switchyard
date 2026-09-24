@@ -93,6 +93,13 @@ describe('preToolUse(設計 §9.2)', () => {
     assert.equal(decision('SWITCHYARD_IN_JOB=1 git status'), null);
   });
 
+  it('仮想環境・node_modules/.bin の実行ファイルは、shim の語でもパスで呼んでよい(プロジェクトの道具を選んでいる)', () => {
+    const decision = (/** @type {string} */ c) => /** @type {any} */ (preToolUse(bash(c), { profilesFor: () => DEFAULT_PROFILES }))?.hookSpecificOutput?.permissionDecision ?? null;
+    for (const c of ['.venv/bin/pytest -x', '/home/u/p/.venv/bin/python -m pytest', 'venv/bin/python3 -m pytest', '.tox/py312/bin/pytest']) assert.notEqual(decision(c), 'deny', c);
+    assert.equal(decision('/usr/bin/python3 -m pytest'), 'deny');
+    assert.equal(decision('/usr/local/bin/mvn test'), 'deny');
+  });
+
   it('パスで呼ぶ git commit は拒否し、git commit は通す', () => {
     assert.equal(/** @type {any} */ (preToolUse(bash('/usr/bin/git commit -m x'), opts)).hookSpecificOutput.permissionDecision, 'deny');
     assert.equal(/** @type {any} */ (preToolUse(bash('/usr/bin/git -C . commit -m x'), opts)).hookSpecificOutput.permissionDecision, 'deny');

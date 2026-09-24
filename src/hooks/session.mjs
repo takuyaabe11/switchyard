@@ -1,11 +1,12 @@
 // @ts-check
 // SessionStart と Stop の hooks(設計 §9.2)。
-import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ask, connectDaemon, DaemonUnavailableError } from '../client/connect.mjs';
 import { switchyardHome, pathsOf } from '../daemon/paths.mjs';
 import { VERSION } from '../version.mjs';
+import { t } from '../i18n.mjs';
 
 /** @typedef {import('../protocol/messages.mjs').Snapshot} Snapshot */
 /** @typedef {import('../core/types.mjs').Unacked} Unacked */
@@ -62,19 +63,82 @@ function writeFileAtomic(file, text) {
   renameSync(tmp, file);
 }
 
+/** 最新の版を問う先(公開の repo の plugin.json) */
+export const LATEST_URL = 'https://raw.githubusercontent.com/takuyaabe11/switchyard/main/.claude-plugin/plugin.json';
+/** 最新の版を問い直すまでの間(1 日) */
+const UPDATE_CHECK_TTL_MS = 86_400_000;
+
+/** `1.2.3` の形の版を比べる。a が新しければ正 @param {string} a @param {string} b @returns {number} */
+export function compareVersions(a, b) {
+  const pa = a.split('.').map((x) => Number.parseInt(x, 10) || 0);
+  const pb = b.split('.').map((x) => Number.parseInt(x, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+/**
+ * 新しい版が出ていれば、知らせる 1 行。SWITCHYARD_UPDATE_CHECK=1 のときだけ、1 日に 1 回だけ外へ問う(既定では外へ出ない)。
+ * 問えなければ何も言わない(セッションの始まりを止めない)。
+ * @param {{ env: NodeJS.ProcessEnv, version: string, fetchLatest?: () => Promise<string | null>, now?: () => number }} opts
+ * @returns {Promise<string | null>}
+ */
+export async function updateNotice({ env, version, fetchLatest = defaultFetchLatest, now = Date.now }) {
+  if (env.SWITCHYARD_UPDATE_CHECK !== '1') return null;
+  const cache = join(switchyardHome(env), 'update-check.json');
+  /** @type {string | null} */
+  let latest = null;
+  try {
+    const c = JSON.parse(readFileSync(cache, 'utf8'));
+    if (typeof c.latest === 'string' && typeof c.checkedAt === 'number' && now() - c.checkedAt < UPDATE_CHECK_TTL_MS) latest = c.latest;
+  } catch {
+    // 控えが無い・読めない: 問い直す
+  }
+  if (latest === null) {
+    latest = await fetchLatest().catch(() => null);
+    if (latest === null) return null;
+    try {
+      mkdirSync(switchyardHome(env), { recursive: true });
+      writeFileAtomic(cache, JSON.stringify({ latest, checkedAt: now() }));
+    } catch {
+      // 控えられなくても知らせる
+    }
+  }
+  if (compareVersions(latest, version) <= 0) return null;
+  return t(
+    `[switchyard] 新しい版 ${latest} が出ている(いまは ${version})。/plugin marketplace update switchyard の後に /reload-plugins、その後 switchyard restart で入れ替わる`,
+    `[switchyard] version ${latest} is available (this is ${version}). Run /plugin marketplace update switchyard, then /reload-plugins, then switchyard restart`,
+  );
+}
+
+/** @returns {Promise<string | null>} */
+async function defaultFetchLatest() {
+  const res = await fetch(LATEST_URL, { signal: AbortSignal.timeout(1_500) });
+  if (!res.ok) return null;
+  const body = /** @type {Record<string, unknown>} */ (await res.json());
+  return typeof body.version === 'string' ? body.version : null;
+}
+
 /**
  * SessionStart: shims を PATH の先頭へ足し、知らせることがあれば行で返す(Claude の文脈に入る)。
  * @param {Record<string, unknown>} _input
- * @param {{ env?: NodeJS.ProcessEnv, connect?: typeof connectDaemon, root?: string, version?: string }} [opts]
+ * @param {{ env?: NodeJS.ProcessEnv, connect?: typeof connectDaemon, root?: string, version?: string, fetchLatest?: () => Promise<string | null> }} [opts]
  * @returns {Promise<string[]>}
  */
-export async function sessionStart(_input, { env = process.env, connect = connectDaemon, root = PLUGIN_ROOT, version = VERSION } = {}) {
+export async function sessionStart(_input, { env = process.env, connect = connectDaemon, root = PLUGIN_ROOT, version = VERSION, fetchLatest } = {}) {
   if (env.SWITCHYARD_THINKER === '1') return [];
   /** @type {string[]} */
   const lines = [];
   const envFile = env.CLAUDE_ENV_FILE;
   if (envFile === undefined || envFile === '') {
-    lines.push('[switchyard] shim を PATH に足せない(CLAUDE_ENV_FILE が無い)ので、このセッションの重い走行は switchyard に管理されない');
+    lines.push(
+      t(
+        '[switchyard] shim を PATH に足せない(CLAUDE_ENV_FILE が無い)ので、このセッションの重い走行は switchyard に管理されない',
+        '[switchyard] cannot put the shims on PATH (no CLAUDE_ENV_FILE), so heavy runs in this session are not managed by switchyard',
+      ),
+    );
   } else {
     const line = pathExportLine(root);
     let text = existsSync(envFile) ? readFileSync(envFile, 'utf8') : '';
@@ -84,7 +148,12 @@ export async function sessionStart(_input, { env = process.env, connect = connec
     if (dead.length > 0) {
       text = pruneShimLines(text, dead);
       writeFileAtomic(envFile, text);
-      lines.push(`[switchyard] PATH から、もう無い shims を指す行を外した: ${dead.join(' / ')}(plugin の更新か置き場の移動で残ったもの)`);
+      lines.push(
+        t(
+          `[switchyard] PATH から、もう無い shims を指す行を外した: ${dead.join(' / ')}(plugin の更新か置き場の移動で残ったもの)`,
+          `[switchyard] removed PATH lines pointing at shims that no longer exist: ${dead.join(' / ')} (left over from a plugin update or move)`,
+        ),
+      );
     }
     // resume / clear / compact でも呼ばれるので、同じ行を 2 度足さない
     if (!text.split('\n').includes(line)) appendFileSync(envFile, `${line}\n`);
@@ -95,19 +164,39 @@ export async function sessionStart(_input, { env = process.env, connect = connec
     const m = await ask(conn, { t: 'status' }, (x) => x.t === 'status');
     const snap = /** @type {Snapshot} */ (m.snapshot);
     const measure = snap.leases.find((l) => l.class === 'measure');
-    if (measure !== undefined) lines.push(`[switchyard] 計測 ${measure.id}(${measure.cmd})が走っている。重い走行は計測が終わるまで待ちになる`);
+    if (measure !== undefined) {
+      lines.push(
+        t(
+          `[switchyard] 計測 ${measure.id}(${measure.cmd})が走っている。重い走行は計測が終わるまで待ちになる`,
+          `[switchyard] measurement ${measure.id} (${measure.cmd}) is running; heavy runs wait until it ends`,
+        ),
+      );
+    }
     if (snap.version !== version) {
       // 版を snapshot に載せ始めたのは 0.2.0 なので、名乗らないデーモンは 0.1.0 以前
-      lines.push(`[switchyard] 走っているデーモンの版 ${snap.version ?? '0.1.0 以前'} と plugin の版 ${version} が違う。switchyard restart で入れ替わる`);
+      lines.push(
+        t(
+          `[switchyard] 走っているデーモンの版 ${snap.version ?? '0.1.0 以前'} と plugin の版 ${version} が違う。switchyard restart で入れ替わる`,
+          `[switchyard] the running daemon is ${snap.version ?? '0.1.0 or older'} but the plugin is ${version}; switchyard restart replaces it`,
+        ),
+      );
     }
   } catch (e) {
-    lines.push(`[switchyard] デーモンに届かない(${e instanceof Error ? e.message : String(e)})。このセッションの重い走行は管理なしで走る`);
+    const why = e instanceof Error ? e.message : String(e);
+    lines.push(t(`[switchyard] デーモンに届かない(${why})。このセッションの重い走行は管理なしで走る`, `[switchyard] cannot reach the daemon (${why}); heavy runs in this session run unmanaged`));
   }
+  const update = await updateNotice({ env, version, ...(fetchLatest === undefined ? {} : { fetchLatest }) });
+  if (update !== null) lines.push(update);
   return lines;
 }
 
-/** @type {Record<UnackedKind, string>} */
-const KIND = { failed: '失敗', killed: '呼び出し元の信号で終了', orphan: '包みを失った(子は走行中)', lost: '包みを見失った' };
+/** @type {() => Record<UnackedKind, string>} */
+const KIND = () => ({
+  failed: t('失敗', 'failed'),
+  killed: t('呼び出し元の信号で終了', 'ended by the caller\'s signal'),
+  orphan: t('包みを失った(子は走行中)', 'lost its wrapper (child still running)'),
+  lost: t('包みを見失った', 'wrapper lost'),
+});
 
 /**
  * Stop: 自分のセッションに ack されていないジョブがあれば、停止を差し戻す(設計 §9.2・§9.4)。
@@ -131,11 +220,20 @@ export async function stop(input, { env = process.env, connect = connectDaemon }
     throw e;
   }
   if (jobs.length === 0) return null;
-  const list = jobs.map((j) => `- ${j.jobId} ${KIND[j.kind]}(終了コード ${j.code ?? 'なし'}): ${j.cmd}`).join('\n');
+  const kind = KIND();
+  const list = jobs
+    .map((j) => t(`- ${j.jobId} ${kind[j.kind]}(終了コード ${j.code ?? 'なし'}): ${j.cmd}`, `- ${j.jobId} ${kind[j.kind]} (exit code ${j.code ?? 'none'}): ${j.cmd}`))
+    .join('\n');
   return {
     decision: 'block',
     reason:
-      `[switchyard] このセッションのジョブに、まだ確認されていない終わり方がある:\n${list}\n` +
-      `記録: ${pathsOf(home).events}(switchyard why <job> でも読める)。中身を確かめて直すか、直さないと決めたら switchyard ack <job> で確認済みにする。`,
+      t(
+        `[switchyard] このセッションのジョブに、まだ確認されていない終わり方がある:\n${list}\n` +
+          `記録: ${pathsOf(home).events}(switchyard why <job> でも読める)。中身を確かめて直すか、直さないと決めたら switchyard ack <job> で確認済みにする。` +
+          '同じコマンドを直して走らせ直し、成功すれば自動で確認済みになる。',
+        `[switchyard] jobs in this session ended in a way nobody has looked at yet:\n${list}\n` +
+          `Log: ${pathsOf(home).events} (also readable with switchyard why <job>). Look at it and fix it, or decide not to and mark it with switchyard ack <job>. ` +
+          'Re-running the same command successfully after a fix clears it automatically.',
+      ),
   };
 }

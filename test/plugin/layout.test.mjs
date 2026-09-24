@@ -52,7 +52,7 @@ describe('plugin の形(設計 §9・§9.6)', () => {
     assert.equal(out, '');
   });
 
-  it('shims/ の実行ファイルは、PreToolUse が知っている 11 語とちょうど同じ', () => {
+  it('shims/ の実行ファイルは、PreToolUse が知っている 21 語とちょうど同じ', () => {
     const files = readdirSync(join(ROOT, 'shims')).filter((f) => !f.startsWith('_'));
     assert.deepEqual(files.sort(), [...SHIM_WORDS].sort());
     for (const f of files) assert.ok(executable(`shims/${f}`), f);
@@ -60,7 +60,15 @@ describe('plugin の形(設計 §9・§9.6)', () => {
 
   it('bin/switchyard は実行でき、CLI へつながる', () => {
     assert.ok(executable('bin/switchyard'));
-    assert.match(execFileSync(join(ROOT, 'bin/switchyard'), ['help'], { encoding: 'utf8', env: { PATH: BASE_PATH } }), /^使い方:/);
+    assert.match(execFileSync(join(ROOT, 'bin/switchyard'), ['help'], { encoding: 'utf8', env: { PATH: BASE_PATH, SWITCHYARD_LANG: 'ja' } }), /^使い方:/);
+  });
+
+  it('言語の指定が無く、ロケールも日本語でなければ英語で出す。LANG が ja なら日本語', () => {
+    const help = (/** @type {Record<string, string>} */ env) => execFileSync(join(ROOT, 'bin/switchyard'), ['help'], { encoding: 'utf8', env: { PATH: BASE_PATH, ...env } });
+    assert.match(help({}), /^Usage:/);
+    assert.match(help({ LANG: 'en_US.UTF-8' }), /^Usage:/);
+    assert.match(help({ LANG: 'ja_JP.UTF-8' }), /^使い方:/);
+    assert.match(help({ LANG: 'ja_JP.UTF-8', SWITCHYARD_LANG: 'en' }), /^Usage:/);
   });
 
   it('skill switchyard は名前と説明を持つ', () => {

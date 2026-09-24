@@ -9,6 +9,7 @@ import { createInterface } from 'node:readline';
 import { headWord, preToolUse, SHIM_WORDS } from '../hooks/pretooluse.mjs';
 import { simpleCommands } from '../hooks/shell.mjs';
 import { decideShim } from '../shim/decide.mjs';
+import { t } from '../i18n.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
 /** @typedef {{ id: string, command: string, runInBackground: boolean, cwd: string, timestamp: string }} BashCall */
@@ -181,43 +182,53 @@ function oneLine(command) {
  * @param {Report} r @param {{ cwdPrefix: string | null, sinceDays: number | null, examples: number }} filters @returns {string}
  */
 export function formatReport(r, { cwdPrefix, sinceDays, examples }) {
+  const sep = t('・', ', ');
   /** @type {string[]} */
   const lines = [];
   if (r.calls === 0 || r.first === null || r.last === null) {
-    lines.push(`対象: 記録 ${r.files} 本・Bash の呼び出しは 0 件`);
+    lines.push(t(`対象: 記録 ${r.files} 本・Bash の呼び出しは 0 件`, `Scope: ${r.files} logs, no Bash calls`));
   } else {
-    lines.push(`対象: 記録 ${r.files} 本・Bash の呼び出し ${r.calls} 件(${r.first.slice(0, 10)} 〜 ${r.last.slice(0, 10)})`);
+    const span = `${r.first.slice(0, 10)} 〜 ${r.last.slice(0, 10)}`;
+    lines.push(t(`対象: 記録 ${r.files} 本・Bash の呼び出し ${r.calls} 件(${span})`, `Scope: ${r.files} logs, ${r.calls} Bash calls (${span})`));
   }
   /** @type {string[]} */
   const filtersText = [];
-  if (cwdPrefix !== null) filtersText.push(`cwd が ${cwdPrefix} で始まる`);
-  if (sinceDays !== null) filtersText.push(`直近 ${sinceDays} 日`);
-  if (filtersText.length > 0) lines.push(`絞り込み: ${filtersText.join('・')}`);
+  if (cwdPrefix !== null) filtersText.push(t(`cwd が ${cwdPrefix} で始まる`, `cwd starts with ${cwdPrefix}`));
+  if (sinceDays !== null) filtersText.push(t(`直近 ${sinceDays} 日`, `last ${sinceDays} days`));
+  if (filtersText.length > 0) lines.push(t(`絞り込み: ${filtersText.join(sep)}`, `Filters: ${filtersText.join(sep)}`));
 
   if (r.calls > 0) {
-    const share = (/** @type {number} */ n) => `${n} 件(${((n / r.calls) * 100).toFixed(1)}%)`;
+    const pct = (/** @type {number} */ n) => ((n / r.calls) * 100).toFixed(1);
+    const share = (/** @type {number} */ n) => t(`${n} 件(${pct(n)}%)`, `${n} (${pct(n)}%)`);
     lines.push('PreToolUse');
-    lines.push(`  拒否: ${share(r.hook.deny)}`);
-    lines.push(`  背景へ書き換え: ${share(r.hook.background)}`);
-    lines.push(`  既に背景の重い走行: ${share(r.hook.alreadyBackground)}`);
-    lines.push(`  何もしない: ${share(r.hook.none)}`);
+    lines.push(t(`  拒否: ${share(r.hook.deny)}`, `  refused: ${share(r.hook.deny)}`));
+    lines.push(t(`  背景へ書き換え: ${share(r.hook.background)}`, `  sent to background: ${share(r.hook.background)}`));
+    lines.push(t(`  既に背景の重い走行: ${share(r.hook.alreadyBackground)}`, `  heavy and already in background: ${share(r.hook.alreadyBackground)}`));
+    lines.push(t(`  何もしない: ${share(r.hook.none)}`, `  nothing to do: ${share(r.hook.none)}`));
 
     const runs = Object.entries(r.shim.run).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
     const runTotal = runs.reduce((n, [, k]) => n + k, 0);
-    lines.push(`shim(shim の語で始まる単純コマンド ${runTotal + r.shim.lock + r.shim.pass} 件)`);
-    lines.push(`  包む: ${runTotal} 件${runs.length > 0 ? `(${runs.map(([p, k]) => `${p} ${k}`).join('・')})` : ''}`);
-    lines.push(`  鍵だけ: ${r.shim.lock} 件`);
-    lines.push(`  素通し: ${r.shim.pass} 件`);
+    const byProfile = runs.length > 0 ? t(`(${runs.map(([p, k]) => `${p} ${k}`).join('・')})`, ` (${runs.map(([p, k]) => `${p} ${k}`).join(', ')})`) : '';
+    const words = runTotal + r.shim.lock + r.shim.pass;
+    lines.push(t(`shim(shim の語で始まる単純コマンド ${words} 件)`, `shim (${words} simple commands starting with a shimmed word)`));
+    lines.push(t(`  包む: ${runTotal} 件${byProfile}`, `  wrapped: ${runTotal}${byProfile}`));
+    lines.push(t(`  鍵だけ: ${r.shim.lock} 件`, `  locks only: ${r.shim.lock}`));
+    lines.push(t(`  素通し: ${r.shim.pass} 件`, `  passed through: ${r.shim.pass}`));
 
     for (const [label, xs] of /** @type {Array<[string, Example[]]>} */ ([
-      ['拒否', r.examples.deny],
-      ['背景へ書き換え', r.examples.background],
+      [t('拒否', 'Refused'), r.examples.deny],
+      [t('背景へ書き換え', 'Sent to background'), r.examples.background],
     ])) {
       if (xs.length === 0) continue;
-      lines.push(`${label}の例(新しい順に最大 ${examples} 件)`);
+      lines.push(t(`${label}の例(新しい順に最大 ${examples} 件)`, `${label}: examples (newest first, up to ${examples})`));
       for (const x of xs) lines.push(`  ${x.timestamp.slice(0, 16).replace('T', ' ')}  ${x.cwd}  ${oneLine(x.command)}`);
     }
   }
-  lines.push('注: 時刻は記録のまま(UTC)。shim の欄は、パスで呼んだ node のスクリプトと bash -c の引用の中を数えない近似');
+  lines.push(
+    t(
+      '注: 時刻は記録のまま(UTC)。shim の欄は、パスで呼んだ node のスクリプトと bash -c の引用の中を数えない近似',
+      'Note: times are as logged (UTC). The shim counts are approximate: node scripts called by path and the inside of bash -c quotes are not counted',
+    ),
+  );
   return `${lines.join('\n')}\n`;
 }

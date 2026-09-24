@@ -10,8 +10,20 @@ queue instead of collide. A switchyard is where trains are sorted onto the right
 one at a time — that is what this does for heavy runs.
 
 You do not change how you type commands. A `PATH` shim in front of `npm`, `npx`, `node`,
-`yarn`, `pnpm`, `bun`, `cargo`, `pytest`, `go`, `make` and `git` classifies each command and routes it through
-switchyard automatically.
+`yarn`, `pnpm`, `bun`, `cargo`, `pytest`, `python`, `python3`, `uv`, `poetry`, `go`, `mvn`, `gradle`, `dotnet`,
+`bundle`, `rspec`, `deno`, `make` and `git` classifies each command and routes it through switchyard automatically.
+
+## When it helps
+
+Measured on a 4-core machine ([details](docs/verification/2026-09-24-effect.md)):
+
+- **Benchmarks stay meaningful.** Beside four CPU-bound runs, a fixed benchmark ran 20–50% slower and varied widely.
+  As a `measure` job it waited for those runs to finish (about 4 s) and then matched its alone-time.
+- **The first result comes back sooner.** Three CPU-bound test suites started together all finished at about 11.9 s.
+  Through switchyard they finished at 4.3 s, 8.4 s and 12.4 s: about 30% sooner on average, about 4% longer overall.
+- **It does not help runs that mostly wait.** Three copies of a suite that is mostly process start-up and waiting took
+  15 s side by side and 25 s through switchyard, with no failures either way. Mark such commands `quick` in
+  `switchyard.json`, or leave them out of your profiles.
 
 ## Install
 
@@ -20,9 +32,10 @@ switchyard automatically.
 /plugin install switchyard@switchyard
 ```
 
-Requires Node.js >= 20, macOS or Linux. Messages that switchyard prints while you work —
-the queue notes, the hook verdicts, the reason a session is held back — are in Japanese.
-Everything you type (commands, flags, `switchyard.json`) is in English. The daemon starts on demand; there is nothing
+Requires Node.js >= 20, macOS or Linux (Windows is not supported; use WSL). Messages that switchyard prints
+while you work — the queue notes, the hook verdicts, the reason a session is held back — are in English,
+or in Japanese when your locale (`LANG`, `LC_ALL`, `LC_MESSAGES`) starts with `ja`. `SWITCHYARD_LANG=en` or
+`SWITCHYARD_LANG=ja` picks one explicitly. The daemon starts on demand; there is nothing
 to run by hand. A daemon that never handed out a single slot shuts itself down after a
 couple of quiet minutes, so a throwaway `SWITCHYARD_HOME` does not leave one behind.
 Set `SWITCHYARD_IDLE_EXIT_MS=0` to keep it resident.
@@ -32,7 +45,7 @@ Once installed, every new Claude Code session gets three hooks:
 | Hook | What it does |
 |---|---|
 | `SessionStart` | Puts `shims/` at the front of `PATH` for the session |
-| `PreToolUse` (Bash) | Sends CPU-holding runs to the background; rejects bypasses that call the real binary by path |
+| `PreToolUse` (Bash) | Sends a CPU-holding run to the background when it would have to wait (a queue, a measurement, a held lock, not enough free CPU); rejects bypasses that call the real binary by path. `SWITCHYARD_BACKGROUND=always` sends every heavy run to the background, `never` sends none |
 | `Stop` | Holds the session back if one of its jobs ended in a way nobody has looked at |
 
 ## Commands
@@ -46,7 +59,8 @@ switchyard ack <job> [--session <id>] # mark a failed job as looked at
 switchyard run --why "..." -- <cmd> # run something through switchyard explicitly
 switchyard probe <seconds> -- <cmd> # measure a command to pick cpus/class
 switchyard replay [--since 7d]      # re-run past decisions against a config
-switchyard report [--since 7d]      # aggregate decisions and hook verdicts
+switchyard report [--since 7d]      # aggregate decisions and hook verdicts, and what the queue saved
+switchyard init [--write]           # suggest switchyard.json profiles from your past sessions in this repo
 ```
 
 `switchyard run` flags: `--profile <name>`, `--class quick|batch|measure`,
@@ -55,7 +69,10 @@ switchyard report [--since 7d]      # aggregate decisions and hook verdicts
 
 ## Per-project configuration
 
-Drop a `switchyard.json` at the repo root to classify that project's commands:
+Drop a `switchyard.json` at the repo root to classify that project's commands. `switchyard init` reads your past
+Claude Code sessions in the repo (`~/.claude/projects`), finds commands that ran repeatedly and took long but match
+no profile, and prints them as profiles; `switchyard init --write` adds them to `switchyard.json` without touching
+the profiles already there.
 
 ```json
 {
@@ -101,10 +118,15 @@ Drop a `switchyard.json` at the repo root to classify that project's commands:
 
 Without a `switchyard.json`, a built-in table covers the usual commands: `npm test` / `npm t` /
 `npm run test*` / `npm run build*`, the same for `yarn`, `pnpm` and `bun`, `npx vitest run`, `npx jest`,
-`npx playwright test`, `cargo build|test|nextest|clippy|check`, `pytest`, `go test|build` and `make`.
+`npx playwright test`, `npx tsc`, `cargo build|test|nextest|clippy|check`, `pytest`, `python -m pytest`,
+`uv run pytest`, `poetry run pytest`, `go test|build`, `mvn test|verify|package|install`, `gradle test|build|check`,
+`dotnet test|build`, `bundle exec rspec`, `rspec`, `deno test` and `make`.
 A script under `node_modules/.bin` (`./node_modules/.bin/vitest run`) is classified as its `npx` form.
-Anything else — `python -m pytest`, `uv run pytest`, `tsc` — is not classified unless your
-`switchyard.json` names it, and runs outside the queue.
+A run that keeps watching (`--watch`, `--watchAll`, `tsc -w`) is never classified: it would hold its CPU share forever.
+Anything else is not classified unless your `switchyard.json` names it, and runs outside the queue. Wrappers that
+run a script by path (`./gradlew`, `./mvnw`) and tools in a virtualenv you activated (`source .venv/bin/activate`
+puts them before the shims) are not seen by the shims; name them in `switchyard.json` and call them through
+`switchyard run -- …` if they should queue.
 
 `git` takes the repository's index lock for the subcommands that write the index: `commit`, `merge`,
 `rebase`, `cherry-pick`, `stash`, `am`, `add`, `rm`, `mv`, `reset`, `restore`, `checkout`, `switch`,
@@ -133,6 +155,11 @@ The same works in the VS Code extension, where `/plugins` opens the Manage plugi
 After an update the daemon that is already running keeps the old version; the next session says so,
 and `switchyard restart` brings the new one up. `PATH` lines that point at the old install are
 removed by the next `SessionStart`.
+
+To hear about new releases, set `SWITCHYARD_UPDATE_CHECK=1` (for example in the `env` of your Claude Code settings).
+`SessionStart` then compares this version with the one published on GitHub, at most once a day, and says when a newer
+one is out. It is off by default, so nothing leaves the machine unless you turn it on. What changed in each release
+is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Turning it off, and taking it out
 
@@ -165,7 +192,8 @@ Everything lives under `~/.switchyard` (or `SWITCHYARD_HOME`).
 Commands are stored verbatim, so anything you type on a command line — including a secret
 passed as an argument — ends up in `events.jsonl`. The journals are capped: past 8MB the
 current one is rolled to `<name>.1` and a new one starts, so at most two generations are
-kept. Nothing is sent anywhere; these files never leave the machine.
+kept. Nothing is sent anywhere; these files never leave the machine. The only network access is the opt-in
+update check (`SWITCHYARD_UPDATE_CHECK=1`), which fetches `plugin.json` from GitHub and sends nothing else.
 
 ### Why the tests ship with it
 
@@ -198,8 +226,20 @@ MIT. See [LICENSE](LICENSE).
 (ポート・git の index・任意の名前)を割り振り、それらの走行をぶつけずに順番へ流す。
 switchyard は操車場のこと。重い走行を 1 本ずつ、正しい線路へ振り分ける。
 
-コマンドの打ち方は変えない。`npm` / `npx` / `node` / `yarn` / `pnpm` / `bun` / `cargo` / `pytest` / `go` / `make` /
-`git` の前に入る `PATH` の shim が、打たれたコマンドを分類して自動で switchyard に通す。
+コマンドの打ち方は変えない。`npm` / `npx` / `node` / `yarn` / `pnpm` / `bun` / `cargo` / `pytest` / `python` / `python3` /
+`uv` / `poetry` / `go` / `mvn` / `gradle` / `dotnet` / `bundle` / `rspec` / `deno` / `make` / `git` の前に入る `PATH` の shim が、
+打たれたコマンドを分類して自動で switchyard に通す。
+
+## 効く場面
+
+4 コアの機械での実測([詳細](docs/verification/2026-09-24-effect.md)):
+
+- **計測の数字が意味を保つ。** CPU を使う走行 4 本の横では、固定量のベンチが 20〜50% 遅くなり、ばらつきも大きかった。
+  `measure` として走らせると、4 本が終わるまで約 4 秒待ってから、単独と同じ数字で走った。
+- **最初の結果が早く返る。** CPU を使うテストの全件を 3 本同時に始めると、3 本とも約 11.9 秒で終わった。
+  switchyard を通すと 4.3 秒・8.4 秒・12.4 秒で終わり、平均は約 30% 早く、全体は約 4% 延びただけだった。
+- **待ちが中心の走行には効かない。** 子プロセスの起動と待ちが中心の全件を 3 本同時に走らせると、素のままで 15 秒、
+  switchyard を通すと 25 秒かかった(どちらも失敗なし)。そういうコマンドは `switchyard.json` で `quick` にするか、profile から外す。
 
 ## 導入
 
@@ -208,7 +248,9 @@ switchyard は操車場のこと。重い走行を 1 本ずつ、正しい線路
 /plugin install switchyard@switchyard
 ```
 
-必要なのは Node.js 20 以上、macOS か Linux。デーモンは必要になった時に自分で起動する。
+必要なのは Node.js 20 以上、macOS か Linux(Windows は非対応。WSL なら動く)。作業中に switchyard が出す文言(待ちの知らせ・hook の判断・
+差し戻しの理由)は英語で、ロケール(`LANG`・`LC_ALL`・`LC_MESSAGES`)が `ja` で始まれば日本語になる。
+`SWITCHYARD_LANG=ja` / `SWITCHYARD_LANG=en` で明示的に選べる。デーモンは必要になった時に自分で起動する。
 手で立ち上げるものはない。一度も割り振りを出していないデーモンは、静かなまま数分たつと自分で終わる
 (使い捨ての `SWITCHYARD_HOME` でデーモンが残らないようにするため)。常駐させたいときは
 `SWITCHYARD_IDLE_EXIT_MS=0`。
@@ -218,7 +260,7 @@ switchyard は操車場のこと。重い走行を 1 本ずつ、正しい線路
 | Hook | すること |
 |---|---|
 | `SessionStart` | そのセッションの `PATH` の先頭に `shims/` を足す |
-| `PreToolUse` (Bash) | CPU を持つ走行を背景実行に回す。本物の実行ファイルをパスで直に呼ぶ抜け道を拒否する |
+| `PreToolUse` (Bash) | CPU を持つ走行が待たされる見込み(待ち列・計測・使われている鍵・CPU の空き不足)のときだけ背景実行に回す。本物の実行ファイルをパスで直に呼ぶ抜け道を拒否する。`SWITCHYARD_BACKGROUND=always` で重い走行を必ず背景へ、`never` で回さない |
 | `Stop` | そのセッションのジョブに、まだ誰も確かめていない終わり方があれば止まるのを差し戻す |
 
 ## コマンド
@@ -232,7 +274,8 @@ switchyard ack <job> [--session <id>] # 失敗したジョブを確認済みに�
 switchyard run --why "..." -- <cmd> # 明示的に switchyard を通して走らせる
 switchyard probe <秒> -- <cmd>      # cpus / class を決めるためにコマンドを計測する
 switchyard replay [--since 7d]      # 過去の決定を、今の設定でやり直して見る
-switchyard report [--since 7d]      # 決定と hook の判断を集計する
+switchyard report [--since 7d]      # 決定と hook の判断、順番待ちの効果を集計する
+switchyard init [--write]           # この repo の過去のセッションから switchyard.json の profile を提案する
 ```
 
 `switchyard run` の旗: `--profile <名前>`、`--class quick|batch|measure`、
@@ -241,7 +284,9 @@ switchyard report [--since 7d]      # 決定と hook の判断を集計する
 
 ## repo ごとの設定
 
-repo の根に `switchyard.json` を置くと、その repo のコマンドの分類を決められる。
+repo の根に `switchyard.json` を置くと、その repo のコマンドの分類を決められる。`switchyard init` は、その repo での
+過去の Claude Code のセッション(`~/.claude/projects`)を読み、繰り返し走っていて長いのにどの profile にも当たらない
+コマンドを profile として出す。`switchyard init --write` で、既にある profile を変えずに `switchyard.json` へ書き足す。
 形式は上の英語側の例と同じ。
 
 - `class`: `quick` は素通し、`batch` は CPU を取り、絞られることがある。
@@ -261,9 +306,14 @@ repo の根に `switchyard.json` を置くと、その repo のコマンドの�
 
 `switchyard.json` が無ければ、組み込みの既定表がよくあるコマンドを見る: `npm test` / `npm t` /
 `npm run test*` / `npm run build*` と、`yarn` / `pnpm` / `bun` の同じ形、`npx vitest run`・`npx jest`・
-`npx playwright test`、`cargo build|test|nextest|clippy|check`、`pytest`、`go test|build`、`make`。
+`npx playwright test`・`npx tsc`、`cargo build|test|nextest|clippy|check`、`pytest`・`python -m pytest`・
+`uv run pytest`・`poetry run pytest`、`go test|build`、`mvn test|verify|package|install`、`gradle test|build|check`、
+`dotnet test|build`、`bundle exec rspec`・`rspec`、`deno test`、`make`。
 `node_modules/.bin` の下のスクリプト(`./node_modules/.bin/vitest run`)は `npx` の形として分類する。
-それ以外(`python -m pytest`・`uv run pytest`・`tsc` など)は、`switchyard.json` で名指ししない限り分類されず、順番待ちの外で走る。
+見張り続ける走行(`--watch`・`--watchAll`・`tsc -w`)は分類しない。包むと CPU の取り分を握ったまま終わらない。
+それ以外は、`switchyard.json` で名指ししない限り分類されず、順番待ちの外で走る。スクリプトをパスで呼ぶ包み
+(`./gradlew`・`./mvnw`)と、有効にした仮想環境の道具(`source .venv/bin/activate` は shim より前に置く)は shim から
+見えない。順番に乗せたいなら `switchyard.json` で名指しし、`switchyard run -- …` で呼ぶ。
 
 `git` は index を書き換えるサブコマンド(`commit`・`merge`・`rebase`・`cherry-pick`・`stash`・`am`・
 `add`・`rm`・`mv`・`reset`・`restore`・`checkout`・`switch`・`pull`・`revert`)のとき、その repo の index の鍵を取る。
@@ -288,6 +338,10 @@ Claude Code が新しい版に気づくのは、`plugin.json` の `version` が�
 VS Code の拡張でも同じで、`/plugins` で Manage plugins の画面が開く。
 更新しても、走っているデーモンは古い版のまま残る。次のセッションがそれを知らせるので、`switchyard restart` で入れ替える。
 古い置き場を指す `PATH` の行は、次の `SessionStart` が取り除く。
+
+新しい版が出たことを知りたければ、`SWITCHYARD_UPDATE_CHECK=1` を設定する(Claude Code の設定の `env` など)。
+`SessionStart` がいまの版と GitHub で公開されている版を 1 日に 1 回まで比べ、新しい版が出ていれば知らせる。
+既定では無効で、有効にしない限り機械の外へは何も出ない。各版の変更は [CHANGELOG.md](CHANGELOG.md) にある。
 
 ## 切る・外す
 
@@ -314,7 +368,7 @@ plugin を外しても、走っているデーモンは止まらず、`PATH` の
 | `hooks.jsonl` | `PreToolUse` の判断。コマンドの文字列と作業ディレクトリつき |
 | `unmanaged.jsonl` | デーモンに届かない間に走ったもの |
 
-コマンドはそのままの文字列で残る。引数に渡した秘密も `events.jsonl` に入る。記録には上限があり、8MB を超えると `<名前>.1` へ回して新しく始めるので、残るのは 2 世代まで。どこにも送信しない。機械の外へは出ない。
+コマンドはそのままの文字列で残る。引数に渡した秘密も `events.jsonl` に入る。記録には上限があり、8MB を超えると `<名前>.1` へ回して新しく始めるので、残るのは 2 世代まで。どこにも送信しない。機械の外へは出ない。外へ問い合わせるのは、有効にしたときの更新の確認(`SWITCHYARD_UPDATE_CHECK=1`)だけで、GitHub から `plugin.json` を取ってくる以外は何も送らない。
 
 ### テストを同梱している理由
 

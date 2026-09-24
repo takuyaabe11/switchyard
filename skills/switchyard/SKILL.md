@@ -10,7 +10,7 @@ switchyard は、同じマシンで動く Claude Code のセッションが重�
 ## 何もしなくてよいこと
 
 - 重いコマンド(`npm test`・`npm run build`・`npx vitest run`・`npx playwright test`・`cargo build` / `cargo test`・`pytest`・`go test`・`make`。repo の `switchyard.json` があればその分類)は、PATH の先頭に入った shim が自動で switchyard に通す。コマンドを書き換える必要はない。計測(ベンチ)として単独で走らせるのは、`switchyard.json` で宣言されたものだけ。
-- 前景で打っても、switchyard が背景実行に切り替える。`bash -c "…"`・`( … )` の中、`switchyard run -- …` で包んだコマンド、`scripts/probe-run.sh gates npm run lint` のようにスクリプトの引数に渡した重いコマンドも、同じく背景に回る。背景タスクの終わりを待ってから結果を読む。
+- 待たされる見込みがあるとき(待ち列・計測・使われている鍵・CPU の空き不足)は、前景で打っても switchyard が背景実行に切り替える。空いていれば前景のまま走る。`bash -c "…"`・`( … )` の中、`switchyard run -- …` で包んだコマンド、`scripts/probe-run.sh gates npm run lint` のようにスクリプトの引数に渡した重いコマンドも、同じく背景に回る。背景タスクの終わりを待ってから結果を読む。
 - `node -e '…'` のようなその場のスクリプトは、コードの中身の単語では重い走行と見なさない。
 - `git commit` / `merge` / `rebase` / `cherry-pick` / `stash` / `am` は、同じ作業ツリーの index を別のセッションと同時に書き換えないよう、順番に通る。
 
@@ -28,7 +28,7 @@ switchyard は、同じマシンで動く Claude Code のセッションが重�
 
 ## 拒否されたとき
 
-- 拒否されるのは、shim の語(`npm` / `npx` / `node` / `yarn` / `pnpm` / `bun` / `cargo` / `pytest` / `go` / `make` / `git`)の実行ファイルをパスで直に呼んだとき(`/usr/local/bin/npm test`・`/usr/bin/git commit`)と、管理対象のコマンドに `PATH` の差し替え(`$PATH` を残さない形)・`env -i`・`SWITCHYARD_IN_JOB` / `SWITCHYARD_HELD_LOCKS` を付けたとき。
+- 拒否されるのは、shim の語(`npm` / `npx` / `node` / `yarn` / `pnpm` / `bun` / `cargo` / `pytest` / `python` / `uv` / `go` / `mvn` / `gradle` / `dotnet` / `rspec` / `deno` / `make` / `git` など)の実行ファイルを、仮想環境・`node_modules/.bin` の外のパスで直に呼んだとき(`/usr/local/bin/npm test`・`/usr/bin/git commit`)と、管理対象のコマンドに `PATH` の差し替え(`$PATH` を残さない形)・`env -i`・`SWITCHYARD_IN_JOB` / `SWITCHYARD_HELD_LOCKS` を付けたとき。
 - パスを付けずに名前で呼ぶ形(例: `npm test`・`git commit`)に書き直す。書き直せないときだけ `switchyard run -- <その部分>` で包む(包んだコマンドには普段どおり権限の確認が出る)。
 - スクリプトをパスで呼ぶ形(`scripts/probe-run.sh …`・`./node_modules/.bin/vitest run`)は拒否されない。`cat` / `grep` / `ls` / `cd` のような読むだけのコマンドは、引数に `bench` や `measure` があっても何もされない。包まない(包むと重い走行として順番を待つ)。
 

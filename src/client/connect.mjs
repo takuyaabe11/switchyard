@@ -7,6 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pathsOf } from '../daemon/paths.mjs';
 import { createDecoder, encode } from '../protocol/ndjson.mjs';
+import { t } from '../i18n.mjs';
 
 /** @typedef {import('node:net').Socket} Socket */
 /** @typedef {Record<string, unknown>} Msg */
@@ -38,7 +39,7 @@ export async function connectDaemon({ home, autoStart = true, timeoutMs = 2_000,
   try {
     return await tryConnect(p.sock);
   } catch (e) {
-    if (!autoStart) throw new DaemonUnavailableError(`デーモンに届かない: ${e instanceof Error ? e.message : String(e)}`);
+    if (!autoStart) throw new DaemonUnavailableError(t(`デーモンに届かない: ${e instanceof Error ? e.message : String(e)}`, `cannot reach the daemon: ${e instanceof Error ? e.message : String(e)}`));
   }
   mkdirSync(home, { recursive: true });
   const log = openSync(p.log, 'a');
@@ -62,7 +63,9 @@ export async function connectDaemon({ home, autoStart = true, timeoutMs = 2_000,
       last = e;
     }
   }
-  throw new DaemonUnavailableError(`デーモンを起動したが ${timeoutMs}ms 以内に接続できない(ログ: ${p.log}): ${String(last)}`);
+  throw new DaemonUnavailableError(
+    t(`デーモンを起動したが ${timeoutMs}ms 以内に接続できない(ログ: ${p.log}): ${String(last)}`, `started the daemon but could not connect within ${timeoutMs}ms (log: ${p.log}): ${String(last)}`),
+  );
 }
 
 /**
@@ -110,7 +113,7 @@ export function ask(conn, msg, pred, timeoutMs = 2_000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       ch.close();
-      reject(new Error(`デーモンの応答が ${timeoutMs}ms 無い`));
+      reject(new Error(t(`デーモンの応答が ${timeoutMs}ms 無い`, `no answer from the daemon for ${timeoutMs}ms`)));
     }, timeoutMs);
     ch.onMessage((m) => {
       if (m.t === 'error') {

@@ -11,11 +11,13 @@ import { stopDaemon } from '../daemon/control.mjs';
 import { switchyardHome, pathsOf } from '../daemon/paths.mjs';
 import { readJournal } from '../daemon/store.mjs';
 import { formatReport, replay } from '../replay/replay.mjs';
+import { foregroundCalls, formatInit, merged, suggest, writeConfig } from '../init/init.mjs';
 import { formatReport as formatSummary, summarize } from '../report/report.mjs';
 import { probe } from '../run/probe.mjs';
 import { runJob } from '../run/run.mjs';
 import { parseArgs, UsageError, USAGE } from './args.mjs';
 import { renderProbe, renderTop, renderWhy } from './render.mjs';
+import { t } from '../i18n.mjs';
 
 /** @typedef {import('../protocol/messages.mjs').Snapshot} Snapshot */
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
@@ -80,14 +82,19 @@ export async function cli(args, opts = {}) {
       }
     case 'top': {
       const snap = await status();
-      stdout(snap === null ? 'デーモンは動いていない(走行も待ちも無い)\n' : renderTop(snap, now()));
+      stdout(snap === null ? t('デーモンは動いていない(走行も待ちも無い)\n', 'the daemon is not running (nothing running or waiting)\n') : renderTop(snap, now()));
       return 0;
     }
     case 'stop': {
       // 走っているものがあれば、何を落とすのかを先に出す(包みは死なず、次のデーモンへ resume で戻る)
       const snap = await status();
       if (snap !== null && (snap.leases.length > 0 || snap.waiting.length > 0)) {
-        stdout(`走行 ${snap.leases.length} 本・待ち ${snap.waiting.length} 本を抱えたまま止める(包みは走り続け、次のデーモンにリースを取り戻す)\n`);
+        stdout(
+          t(
+            `走行 ${snap.leases.length} 本・待ち ${snap.waiting.length} 本を抱えたまま止める(包みは走り続け、次のデーモンにリースを取り戻す)\n`,
+            `stopping with ${snap.leases.length} running and ${snap.waiting.length} waiting (the wrappers keep running and reclaim their leases from the next daemon)\n`,
+          ),
+        );
       }
       const r = await stopDaemon({ home });
       stdout(`${r.reason}\n`);
@@ -99,22 +106,22 @@ export async function cli(args, opts = {}) {
         stderr(`${r.reason}\n`);
         return 1;
       }
-      stdout(`${r.stopped ? r.reason : 'デーモンは動いていなかった'}。新しいデーモンを起動する\n`);
+      stdout(t(`${r.stopped ? r.reason : 'デーモンは動いていなかった'}。新しいデーモンを起動する\n`, `${r.stopped ? r.reason : 'the daemon was not running'}; starting a new one\n`));
       try {
         const conn = await connect({ home, env });
         const m = await ask(conn, { t: 'status' }, (x) => x.t === 'status');
         const snap = /** @type {Snapshot} */ (m.snapshot);
-        stdout(`起動した(版 ${snap.version ?? '不明'})\n`);
+        stdout(t(`起動した(版 ${snap.version ?? '不明'})\n`, `started (version ${snap.version ?? 'unknown'})\n`));
         return 0;
       } catch (e) {
-        stderr(`新しいデーモンを起動できない: ${e instanceof Error ? e.message : String(e)}\n`);
+        stderr(t(`新しいデーモンを起動できない: ${e instanceof Error ? e.message : String(e)}\n`, `cannot start a new daemon: ${e instanceof Error ? e.message : String(e)}\n`));
         return 1;
       }
     }
     case 'why': {
       const snap = await status();
       if (snap === null) {
-        stdout('デーモンは動いていない\n');
+        stdout(t('デーモンは動いていない\n', 'the daemon is not running\n'));
         return 1;
       }
       const r = renderWhy(snap, command.jobId, now());
@@ -124,7 +131,7 @@ export async function cli(args, opts = {}) {
     case 'ack': {
       const own = sessionId(env);
       if (command.session !== null && command.session !== own && isClaudeSession(env)) {
-        stderr('他のセッションのジョブは、Claude のセッションからは確認済みにできない(人の端末から実行する)\n');
+        stderr(t('他のセッションのジョブは、Claude のセッションからは確認済みにできない(人の端末から実行する)\n', "a Claude session cannot ack another session's job (run it from your own terminal)\n"));
         return 2;
       }
       // Claude のセッションからは自分のセッションのジョブだけ。人の端末からは --session を省けば、ジョブ id でどのセッションのものでも確認済みにする
@@ -138,29 +145,29 @@ export async function cli(args, opts = {}) {
         acked = typeof m.session === 'string' ? m.session : String(session);
       } catch (e) {
         if (e instanceof DaemonUnavailableError) {
-          stderr('デーモンは動いていない\n');
+          stderr(t('デーモンは動いていない\n', 'the daemon is not running\n'));
           return 1;
         }
-        stderr(`確認済みにできない: ${e instanceof Error ? e.message : String(e)}\n`);
+        stderr(t(`確認済みにできない: ${e instanceof Error ? e.message : String(e)}\n`, `cannot ack: ${e instanceof Error ? e.message : String(e)}\n`));
         return 1;
       }
-      stdout(`確認済みにした: ${command.jobId}(セッション ${acked})\n`);
+      stdout(t(`確認済みにした: ${command.jobId}(セッション ${acked})\n`, `acked: ${command.jobId} (session ${acked})\n`));
       return 0;
     }
     case 'replay': {
       // 過去のセッション記録を、PreToolUse と shim の分類器で空回しする。記録は読むだけで、デーモンは要らない
       const dir = command.dir ?? join(env.HOME ?? homedir(), '.claude', 'projects');
       if (!existsSync(dir)) {
-        stderr(`記録の置き場所が無い: ${dir}\n`);
+        stderr(t(`記録の置き場所が無い: ${dir}\n`, `no session logs at: ${dir}\n`));
         return 1;
       }
       /** @type {(cwd: string) => NamedProfile[]} */
       let profilesFor;
       if (command.config !== null) {
         const file = resolve(cwd, command.config);
-        const loaded = existsSync(file) ? loadProfilesFile(file) : { profiles: [], error: 'ファイルが無い' };
+        const loaded = existsSync(file) ? loadProfilesFile(file) : { profiles: [], error: t('ファイルが無い', 'no such file') };
         if (loaded.error !== null) {
-          stderr(`--config の設定を読めない: ${file}: ${loaded.error}\n`);
+          stderr(t(`--config の設定を読めない: ${file}: ${loaded.error}\n`, `cannot read --config: ${file}: ${loaded.error}\n`));
           return 2;
         }
         profilesFor = () => loaded.profiles;
@@ -191,12 +198,31 @@ export async function cli(args, opts = {}) {
       stdout(formatSummary(s, { repoPrefix: command.repoPrefix, sinceDays: command.sinceDays }));
       return 0;
     }
+    case 'init': {
+      // 過去のセッション記録から、この repo の profile を提案する。記録は読むだけで、--write のときだけ switchyard.json に書き足す
+      const repo = repoRoot(cwd);
+      const dir = command.dir ?? join(env.HOME ?? homedir(), '.claude', 'projects');
+      const since = command.sinceDays === null ? null : now() - command.sinceDays * 86_400_000;
+      const calls = await foregroundCalls({ dir, repo, since });
+      const suggestions = suggest({ calls, profiles: loadProfiles(repo).profiles, minCount: command.minCount, minMs: command.minSeconds * 1000 });
+      const file = join(repo, 'switchyard.json');
+      if (command.write && suggestions.length > 0) {
+        try {
+          writeConfig(file, merged(file, suggestions));
+        } catch (e) {
+          stderr(t(`${file} を書けない: ${e instanceof Error ? e.message : String(e)}\n`, `cannot write ${file}: ${e instanceof Error ? e.message : String(e)}\n`));
+          return 1;
+        }
+      }
+      stdout(formatInit({ repo, suggestions, calls: calls.length, write: command.write && suggestions.length > 0, file }));
+      return 0;
+    }
     case 'probe': {
       try {
         stdout(renderProbe(await probe({ argv: command.argv, seconds: command.seconds, cwd, env })));
         return 0;
       } catch (e) {
-        stderr(`[switchyard] probe に失敗: ${e instanceof Error ? e.message : String(e)}\n`);
+        stderr(t(`[switchyard] probe に失敗: ${e instanceof Error ? e.message : String(e)}\n`, `[switchyard] probe failed: ${e instanceof Error ? e.message : String(e)}\n`));
         return 1;
       }
     }

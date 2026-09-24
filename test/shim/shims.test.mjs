@@ -15,7 +15,7 @@ import { tempHome } from '../../testkit/tmp.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const SHIMS = realpathSync(join(ROOT, 'shims'));
-const SHIM_WORDS = ['npm', 'npx', 'node', 'cargo', 'pytest', 'go', 'make', 'git', 'yarn', 'pnpm', 'bun'];
+const SHIM_WORDS = ['npm', 'npx', 'node', 'cargo', 'pytest', 'go', 'make', 'git', 'yarn', 'pnpm', 'bun', 'python', 'python3', 'uv', 'poetry', 'mvn', 'gradle', 'dotnet', 'bundle', 'rspec', 'deno'];
 
 /** 呼び出し元の PATH から shims を除いたもの(このテスト自体が shim の下で走っても本物を指す) */
 const BASE_PATH = (process.env.PATH ?? '')
@@ -91,7 +91,7 @@ function shimsWithClassifier(decideSource) {
 }
 
 describe('shims(設計 §9.1)', () => {
-  it('shims に 11 語がそろい、どれも実行できる', () => {
+  it('shims に 21 語がそろい、どれも実行できる', () => {
     for (const word of SHIM_WORDS) assert.ok((statSync(join(SHIMS, word)).mode & 0o111) !== 0, word);
   });
 
@@ -129,6 +129,23 @@ describe('shims(設計 §9.1)', () => {
     const r = await sh('./node_modules/.bin/vitest run', { cwd, home });
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, /^fake-vitest run job=j\S+$/m);
+    assert.deepEqual(history(home).map((h) => h.profile), ['default:batch']);
+  });
+
+  it('python は -m pytest のときだけ分類器にかけ、それ以外は node を起動せずに本物へ直行する', async () => {
+    const { home } = await daemon();
+    const cwd = plainDir();
+    const fake = fakeBin();
+    writeFileSync(join(fake, 'python3'), '#!/bin/sh\necho "fake-python3 $* job=${SWITCHYARD_JOB_ID:-none}"\n');
+    chmodSync(join(fake, 'python3'), 0o755);
+    // node を PATH に置かない: ふるいで直行するなら、それでも本物が走る
+    const noNode = await sh('python3 script.py', { cwd, home, path: `${SHIMS}:${fake}:/usr/bin:/bin` });
+    assert.equal(noNode.stdout.trim(), 'fake-python3 script.py job=none');
+    const otherModule = await sh('python3 -m http.server', { cwd, home, path: `${SHIMS}:${fake}:/usr/bin:/bin` });
+    assert.equal(otherModule.stdout.trim(), 'fake-python3 -m http.server job=none', 'pytest 以外の -m も node を起動しない');
+    const r = await sh('python3 -m pytest -q', { cwd, home, path: `${SHIMS}:${fake}:${BASE_PATH}` });
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /^fake-python3 -m pytest -q job=j\S+$/m);
     assert.deepEqual(history(home).map((h) => h.profile), ['default:batch']);
   });
 
