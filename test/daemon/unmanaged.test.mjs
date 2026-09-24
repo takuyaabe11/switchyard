@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { connectDaemon, DaemonUnavailableError } from '../../src/client/connect.mjs';
 import { decide, initialState } from '../../src/core/decide.mjs';
 import { pathsOf } from '../../src/daemon/paths.mjs';
@@ -136,6 +136,6 @@ describe('管理なしの走行の控え(設計 §4.2・§4.3 の 8)', () => {
     assert.equal(code, 3);
     await runJob({ argv: [process.execPath, '-e', 'process.exit(4)'], flags: { locks: ['g'] }, home, cwd, env: cleanEnv({ SWITCHYARD_IN_JOB: '1', SWITCHYARD_HELD_LOCKS: 'g' }), out: () => {}, connect: unavailable });
     const lines = readFileSync(pathsOf(home).unmanaged, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
-    assert.deepEqual(lines.map((l) => [l.session, l.code, l.profile]), [['sessUnmg', 3, `cmd:${process.execPath.split('/').pop()} -e`]]);
+    assert.deepEqual(lines.map((l) => [l.session, l.code, l.profile]), [['sessUnmg', 3, `cmd:${basename(process.execPath)} -e`]]);
   });
 });

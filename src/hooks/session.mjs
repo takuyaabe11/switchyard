@@ -8,6 +8,7 @@ import { ensurePrivateDir, switchyardHome, pathsOf } from '../daemon/paths.mjs';
 import { VERSION } from '../version.mjs';
 import { t } from '../i18n.mjs';
 import { isOff } from './off.mjs';
+import { fromBashPath, IS_WINDOWS, toBashPath } from '../platform.mjs';
 
 /** @typedef {import('../protocol/messages.mjs').Snapshot} Snapshot */
 /** @typedef {import('../core/types.mjs').Unacked} Unacked */
@@ -19,9 +20,14 @@ export const PLUGIN_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 /** sh の単一引用符で囲む @param {string} s */
 const shQuote = (s) => `'${s.split("'").join("'\\''")}'`;
 
-/** CLAUDE_ENV_FILE に書く 1 行(shims を PATH の先頭へ足す。設計 §9.1) @param {string} root */
-export function pathExportLine(root) {
-  return `export PATH=${shQuote(join(root, 'shims'))}:"$PATH"`;
+/**
+ * CLAUDE_ENV_FILE に書く 1 行(shims を PATH の先頭へ足す。設計 §9.1)。
+ * Windows では Bash ツールの Git Bash が読むので、/c/… の形で書く(C:\… のままだと : で PATH が切れる)。
+ * @param {string} root @param {boolean} [windows]
+ */
+export function pathExportLine(root, windows = IS_WINDOWS) {
+  const shims = join(root, 'shims');
+  return `export PATH=${shQuote(windows ? toBashPath(shims) : shims)}:"$PATH"`;
 }
 
 /** 書いた行から shims のパスを取り出す(`export PATH='…/shims':"$PATH"`) */
@@ -40,7 +46,7 @@ export function deadShimPaths(text, own = join(PLUGIN_ROOT, 'shims')) {
   const dead = [];
   for (const line of text.split('\n')) {
     const m = SHIMS_LINE.exec(line.trim());
-    if (m !== null && m[1] !== own && !existsSync(m[1]) && !dead.includes(m[1])) dead.push(m[1]);
+    if (m !== null && m[1] !== own && m[1] !== toBashPath(own) && !existsSync(IS_WINDOWS ? fromBashPath(m[1]) : m[1]) && !dead.includes(m[1])) dead.push(m[1]);
   }
   return dead;
 }

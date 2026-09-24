@@ -926,7 +926,7 @@ const SUITES = {
       {
         name: 'A11 worktree の本体をたどらない',
         file: 'src/config/context.mjs',
-        from: "return basename(real) === '.git' ? dirname(real) : real;",
+        from: "return basename(canon) === '.git' ? dirname(canon) : canon;",
         to: 'return root;',
       },
       {

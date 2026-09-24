@@ -11,6 +11,7 @@
 # だから、コマンドの文字列にこれらの語が語として現れず、cwd から上に設定ファイルが無ければ、node を起動するまでもない。
 # 語の一覧は test/hooks/sieve.test.mjs が SHIM_WORDS・defaultHeadWords との食い違いを止める。
 # 読めない形(command や cwd が見つからない・エスケープを含む cwd)は、迷わず 1 を返す。
+# Windows の cwd(C:\\Users\\a。JSON では \ が \\ になる)は / の形(C:/Users/a)に直して見る。
 
 function exists(f,    line, r) {
   r = (getline line < f)
@@ -41,12 +42,19 @@ END {
   # git は index を書き換えるサブコマンド(src/shim/decide.mjs の GIT_LOCK_SUBCOMMANDS)の語があるときだけ見る(git status・git diff は素通し)
   if (ENVIRON["SWITCHYARD_GIT"] == "1" && cmd ~ /(^|[^A-Za-z0-9_-])git([^A-Za-z0-9_-]|$)/ && cmd ~ /(^|[^A-Za-z0-9_-])(commit|merge|rebase|cherry-pick|stash|am|add|rm|mv|reset|restore|checkout|switch|pull|revert)([^A-Za-z0-9_-]|$)/) exit 1
   cwd = field(s, "cwd")
-  if (cwd == "\001" || cwd !~ /^\// || cwd ~ /\\/) exit 1
+  if (cwd ~ /^[A-Za-z]:(\\\\|\/)/) {
+    gsub(/\\\\/, "/", cwd)
+    sub(/\/$/, "", cwd)
+  } else if (cwd !~ /^\//) exit 1
+  if (cwd == "\001" || cwd ~ /\\/) exit 1
   d = cwd
   while (1) {
     if (exists(d "/switchyard.json") || exists(d "/conductor.json")) exit 1
     if (d == "") break
+    prev = d
     sub(/\/[^\/]*$/, "", d)
+    # Windows のドライブの根(C:)まで来た
+    if (d == prev) break
   }
   exit 0
 }

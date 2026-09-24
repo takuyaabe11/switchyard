@@ -24,7 +24,24 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       # 走行の面倒(プロセスグループ・信号・ps の読み方)は土台ごとに違うので、全件を回す
-      - run: npm test
+      - run: npm test -- --test-timeout=60000
+
+  windows:
+    # Windows(Git for Windows 入り)。Claude Code は Git Bash で Bash ツールを動かすので、npm のスクリプトも Git Bash で走らせる
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - run: npm config set script-shell "C:\\Program Files\\Git\\bin\\bash.exe"
+      - run: npm run typecheck
+      - run: npm test -- --test-timeout=60000
 
   mutate:
     # 門番の検出力。遅いので main への push だけ

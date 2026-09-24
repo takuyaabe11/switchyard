@@ -49,7 +49,7 @@ export async function connectDaemon({ home, autoStart = true, timeoutMs = 2_000,
   delete daemonEnv.SWITCHYARD_IN_JOB;
   delete daemonEnv.SWITCHYARD_HELD_LOCKS;
   delete daemonEnv.SWITCHYARD_JOB_ID;
-  const child = spawn(process.execPath, [daemonEntry], { detached: true, stdio: ['ignore', log, log], env: daemonEnv });
+  const child = spawn(process.execPath, [daemonEntry], { detached: true, windowsHide: true, stdio: ['ignore', log, log], env: daemonEnv });
   child.unref();
   closeSync(log);
   const until = Date.now() + timeoutMs;

@@ -94,7 +94,7 @@ describe('decideShim(設計 §9.1)', () => {
 
   it('git commit は git-dir の実パスの鍵を持つ lock', () => {
     const dir = gitDir();
-    assert.deepEqual(decideShim({ word: 'git', args: ['commit', '-m', 'x'], cwd: dir, env: { SWITCHYARD_GIT: '1' } }), { kind: 'lock', lock: `git-index:${realpathSync(join(dir, '.git'))}` });
+    assert.deepEqual(decideShim({ word: 'git', args: ['commit', '-m', 'x'], cwd: dir, env: { SWITCHYARD_GIT: '1' } }), { kind: 'lock', lock: `git-index:${realpathSync.native(join(dir, '.git'))}` });
   });
 
   it('index を書き換えない git は、git-dir を読まずに pass', () => {
@@ -104,13 +104,13 @@ describe('decideShim(設計 §9.1)', () => {
 
   it('祖先が同じ git の鍵を持っていれば pass', () => {
     const dir = gitDir();
-    const lock = `git-index:${realpathSync(join(dir, '.git'))}`;
+    const lock = `git-index:${realpathSync.native(join(dir, '.git'))}`;
     assert.deepEqual(decideShim({ word: 'git', args: ['stash'], cwd: dir, env: { SWITCHYARD_GIT: '1', SWITCHYARD_HELD_LOCKS: `other,${lock}` } }), { kind: 'pass' });
   });
 
   it('大域オプション(-C dir・-c k=v・--no-pager)の後ろのサブコマンドでも鍵を取り、鍵は -C の先の repo の git-dir', () => {
     const dir = gitDir();
-    const lock = { kind: 'lock', lock: `git-index:${realpathSync(join(dir, '.git'))}` };
+    const lock = { kind: 'lock', lock: `git-index:${realpathSync.native(join(dir, '.git'))}` };
     // cwd は git の外。-C で指した repo の鍵になる
     assert.deepEqual(decideShim({ word: 'git', args: ['-C', dir, 'commit', '-m', 'x'], cwd: plainDir(), env: { SWITCHYARD_GIT: '1' } }), lock);
     assert.deepEqual(decideShim({ word: 'git', args: ['-c', 'user.name=x', '--no-pager', 'commit'], cwd: dir, env: { SWITCHYARD_GIT: '1' } }), lock);

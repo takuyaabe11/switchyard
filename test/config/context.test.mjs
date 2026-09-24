@@ -6,9 +6,10 @@ import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { heldLocks, repoFamily, repoRoot } from '../../src/config/context.mjs';
+import { fileURLToPath } from 'node:url';
 
 /** @returns {string} */
-const tmp = () => realpathSync(mkdtempSync(join(tmpdir(), 'switchyard-context-')));
+const tmp = () => realpathSync.native(mkdtempSync(join(tmpdir(), 'switchyard-context-')));
 
 describe('repoRoot(設計 §4.5)', () => {
   it('.git を持つ最も近い祖先を返す', () => {
@@ -53,7 +54,7 @@ describe('repoRoot(設計 §4.5)', () => {
   });
 
   it('本物の repo では git rev-parse --show-toplevel と同じ答えを返す', () => {
-    const here = realpathSync(new URL('..', import.meta.url).pathname);
+    const here = realpathSync(fileURLToPath(new URL('..', import.meta.url)));
     const fromGit = realpathSync(execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: here, encoding: 'utf8' }).trim());
     assert.equal(repoRoot(here), fromGit);
   });

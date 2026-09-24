@@ -3,6 +3,21 @@
 All notable changes to switchyard. Versions follow `plugin.json`; Claude Code only offers an update when that
 version goes up.
 
+## 0.17.0
+
+### Added
+- Native Windows, with Git for Windows (Claude Code's Bash tool then runs in Git Bash, and the shims and hooks run
+  there). The daemon listens on a named pipe; a run is started directly when it is a Windows program and under Git
+  Bash otherwise, and stopping it ends its whole process tree with `taskkill /T`. Windows has no process groups and
+  Git Bash reports no CPU time for Windows programs, so `preempt` is always `never`, children that leave a run are
+  not detected, `switchyard probe` is unavailable, and run sizes and memory peaks are not learned there. A Windows CI
+  job runs the tests; it has not been tried under a real Claude Code session on Windows yet.
+
+### Fixed
+- Line endings are pinned to LF (`.gitattributes`), so a checkout with `core.autocrlf` cannot break the sh shims.
+- A `switchyard run` whose command ended while it was failing to reconnect to the daemon no longer waits out one
+  more reconnect delay before exiting.
+
 ## 0.16.0
 
 ### Changed

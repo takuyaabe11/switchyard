@@ -7,11 +7,12 @@ import { join } from 'node:path';
 import { pathsOf } from '../../src/daemon/paths.mjs';
 import { startDaemon } from '../../src/daemon/server.mjs';
 import { appendRecord } from '../../src/daemon/store.mjs';
+import { POSIX_ONLY } from '../../testkit/platform.mjs';
 
 /** @param {string} p */
 const mode = (p) => statSync(p).mode & 0o777;
 
-describe('記録の権限(コマンドの全文が入るので、持ち主だけが読める)', () => {
+describe('記録の権限(コマンドの全文が入るので、持ち主だけが読める)', { skip: POSIX_ONLY }, () => {
   it('記録を書くと、置き場所は 0700・ファイルは 0600 で作られる', () => {
     const home = join(mkdtempSync(join(tmpdir(), 'cperm-')), 'home');
     appendRecord(pathsOf(home).events, { kind: 'x', cmd: 'deploy --token=secret' });

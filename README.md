@@ -107,7 +107,8 @@ On a 4-core, 16 GB machine ([0.6–0.8](docs/verification/2026-09-24-effect.md),
   `switchyard report --share` prints the same as counts only (no repository, path, command, project profile name or
   session id) for a [field report](https://github.com/takuyaabe11/switchyard/issues/new?template=field-report.md);
   posting one is the fastest way to replace these numbers with real ones.
-- macOS and Linux only (Windows through WSL).
+- Native Windows is new and less capable (see [Windows](#windows)). Its tests run in CI, but it has not yet been
+  run under a real Claude Code session on Windows.
 
 ## Install
 
@@ -116,13 +117,31 @@ On a 4-core, 16 GB machine ([0.6–0.8](docs/verification/2026-09-24-effect.md),
 /plugin install switchyard@switchyard
 ```
 
-Requires Node.js >= 20, macOS or Linux (Windows is not supported; use WSL). Messages that switchyard prints
+Requires Node.js >= 20, and macOS, Linux, or Windows with [Git for Windows](https://gitforwindows.org/) (see
+[Windows](#windows); WSL works as Linux). Messages that switchyard prints
 while you work — the queue notes, the hook verdicts, the reason a session is held back — are in English,
 or in Japanese when your locale (`LANG`, `LC_ALL`, `LC_MESSAGES`) starts with `ja`. `SWITCHYARD_LANG=en` or
 `SWITCHYARD_LANG=ja` picks one explicitly. The daemon starts on demand; there is nothing
 to run by hand. A daemon that never handed out a single slot shuts itself down after a
 couple of quiet minutes, so a throwaway `SWITCHYARD_HOME` does not leave one behind.
 Set `SWITCHYARD_IDLE_EXIT_MS=0` to keep it resident.
+
+### Windows
+
+switchyard runs on native Windows when Git for Windows is installed: Claude Code's Bash tool then runs in Git Bash,
+and the shims and the hooks are sh scripts run by that bash. Without Git for Windows, Claude Code uses PowerShell
+and the shims are never on its PATH, so heavy runs go unmanaged. If Git is not in its usual place, point
+`SWITCHYARD_BASH` (or Claude Code's `CLAUDE_CODE_GIT_BASH_PATH`) at `bash.exe`.
+
+What works the same: CPU shares and the queue, locks, learned durations, packing into measured spare CPU, the
+PreToolUse hook, the Stop notice, `report` and `replay`. The daemon listens on a named pipe instead of a socket.
+
+What is weaker, because Windows has no process groups and Git Bash does not report CPU time for Windows programs:
+- Stopping a run (Ctrl-C, a killed session) ends its whole process tree with `taskkill /T`; there is no gentler
+  SIGTERM first.
+- `preempt: pause` and `throttle` never apply: runs are not paused for a measurement.
+- Children that leave the run are not detected, and `switchyard probe` is not available.
+- Run sizes are not learned from CPU use (right-sizing), and memory admission has no per-run peaks to learn from.
 
 Once installed, every new Claude Code session gets three hooks:
 
@@ -475,7 +494,8 @@ node bin/switchyard.mjs replay --since 14d
   `switchyard report --share` は同じものを数だけ(repo・パス・コマンド・profile の名前・セッション id を含まない)で出す。
   [利用報告](https://github.com/takuyaabe11/switchyard/issues/new?template=field-report.md)に貼ってもらえると、
   上の数字を本物の数字に置き換えられる。
-- macOS と Linux だけ(Windows は WSL で)。
+- Windows ネイティブへの対応は新しく、できることも少ない([Windows](#windows-1) を参照)。テストは CI で回しているが、
+  Windows の実物の Claude Code ではまだ通していない。
 
 ## 導入
 
@@ -484,12 +504,29 @@ node bin/switchyard.mjs replay --since 14d
 /plugin install switchyard@switchyard
 ```
 
-必要なのは Node.js 20 以上、macOS か Linux(Windows は非対応。WSL なら動く)。作業中に switchyard が出す文言(待ちの知らせ・hook の判断・
+必要なのは Node.js 20 以上と、macOS・Linux・[Git for Windows](https://gitforwindows.org/) の入った Windows のどれか
+([Windows](#windows-1) を参照。WSL は Linux として動く)。作業中に switchyard が出す文言(待ちの知らせ・hook の判断・
 差し戻しの理由)は英語で、ロケール(`LANG`・`LC_ALL`・`LC_MESSAGES`)が `ja` で始まれば日本語になる。
 `SWITCHYARD_LANG=ja` / `SWITCHYARD_LANG=en` で明示的に選べる。デーモンは必要になった時に自分で起動する。
 手で立ち上げるものはない。一度も割り振りを出していないデーモンは、静かなまま数分たつと自分で終わる
 (使い捨ての `SWITCHYARD_HOME` でデーモンが残らないようにするため)。常駐させたいときは
 `SWITCHYARD_IDLE_EXIT_MS=0`。
+
+### Windows
+
+Git for Windows が入っていれば、Windows ネイティブで動く。そのとき Claude Code の Bash ツールは Git Bash で走り、
+shim と hook はその bash が走らせる sh のスクリプトになる。Git for Windows が無いと Claude Code は PowerShell を使い、
+shim が PATH に載らないので、重い走行は管理されない。Git がいつもの場所に無ければ、`SWITCHYARD_BASH`
+(または Claude Code の `CLAUDE_CODE_GIT_BASH_PATH`)に `bash.exe` を指す。
+
+同じように効くもの: CPU の割り振りと待ち行列・鍵・所要の学習・実測の空きへの詰め込み・PreToolUse の hook・Stop の知らせ・
+`report` と `replay`。デーモンは socket の代わりに名前付きパイプで待ち受ける。
+
+弱まるもの(Windows にはプロセスグループが無く、Git Bash は Windows のプログラムの CPU 時間を返さないため):
+- 走行を止める(Ctrl-C・セッションが切れる)と、`taskkill /T` で子の木ごと終わる。先に穏やかな SIGTERM を送る段が無い。
+- `preempt: pause` と `throttle` は効かない。計測のために走行を止めない。
+- 走行から抜けた子を見つけない。`switchyard probe` は使えない。
+- CPU の使い方から割り振りを小さくする学習(right-sizing)をしない。メモリの受け入れも、走行ごとのピークを学ばない。
 
 入れると、新しいセッションごとに 3 つの hook が付く。
 

@@ -1,9 +1,14 @@
 // @ts-check
 // 子を別のプロセスグループで起動し、そのグループにだけ信号を送る(設計 §4.3 / §7.1)。
+// Windows にはプロセスグループが無い。グループを確かめない(null)ので、呼び出し側は子へ直に(taskkill /T で子の木ごと)伝える
 import { execFile, execFileSync, spawn } from 'node:child_process';
+import { statSync } from 'node:fs';
+import { join } from 'node:path';
+import { findGitBash, IS_WINDOWS } from '../platform.mjs';
 
 /** @param {number} pid @returns {number | null} */
 export function readPgid(pid) {
+  if (IS_WINDOWS) return null;
   try {
     const n = Number(execFileSync('ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8' }).trim());
     return Number.isInteger(n) && n > 0 ? n : null;
@@ -18,6 +23,7 @@ export function readPgid(pid) {
  */
 export function spawnInOwnGroup(argv, opts = {}) {
   if (argv.length === 0) throw new Error('起動するコマンドが無い');
+  if (IS_WINDOWS) return spawn(gitBash(opts.env), ['-c', '"$@"', 'bash', ...argv], { env: opts.env, cwd: opts.cwd, stdio: opts.stdio ?? 'inherit', windowsHide: true });
   return spawn(argv[0], argv.slice(1), { detached: true, env: opts.env, cwd: opts.cwd, stdio: opts.stdio ?? 'inherit' });
 }
 
@@ -57,6 +63,15 @@ export function parseTimes(text) {
 }
 
 /**
+ * Windows で子を起動する bash(Git for Windows)。npm などは bash のスクリプトとしても入っているので、Bash ツールと同じ解決になる。
+ * 見つからなければ PATH の bash に任せる(起動できなければ呼び出し側に 'error' が届く)。
+ * @param {NodeJS.ProcessEnv} [env] @returns {string}
+ */
+function gitBash(env = process.env) {
+  return findGitBash(env) ?? 'bash';
+}
+
+/**
  * spawnInOwnGroup と同じく別のプロセスグループで起動し、子の実際の pid と、終わったときの子と子孫の CPU 時間(ms)を返す約束を付ける。
  * sh が信号で終わった・times を読めなかったときは null。
  * @param {string[]} argv
@@ -65,6 +80,7 @@ export function parseTimes(text) {
  */
 export function spawnMeasured(argv, opts = {}) {
   if (argv.length === 0) throw new Error('起動するコマンドが無い');
+  if (IS_WINDOWS) return spawnMeasuredWindows(argv, opts);
   const child = spawn('/bin/sh', ['-c', MEASURE_SCRIPT, 'sh', ...argv], { detached: true, env: opts.env, cwd: opts.cwd, stdio: ['inherit', 'inherit', 'inherit', 'pipe'] });
   const pipe = /** @type {import('node:stream').Readable | null} */ (child.stdio[3]);
   let text = '';
@@ -85,6 +101,47 @@ export function spawnMeasured(argv, opts = {}) {
     return Number.isInteger(n) && n > 1 ? n : null;
   };
   return { child, commandPid, cpuMs: /** @type {Promise<number | null>} */ (cpuMs) };
+}
+
+/**
+ * Windows 版の spawnMeasured。
+ * - 実行ファイル(.exe)はそのまま起動する。Git Bash を挟むと、引数が MSYS の変換を 2 度通って壊れることがある
+ *   (CI の実測: Git Bash を通した node -e が、引数で渡したパスにファイルを書かなかった)
+ * - それ以外(npm のような bash のスクリプト・拡張子の無い名前)は Git Bash の下で起動する(Bash ツールと同じ解決)
+ * CPU 時間は測らない(null)。Git Bash の times は Windows の子の CPU 時間を数えない(CI の実測: 忙しく回る子で 15ms)。
+ * MSYS の pid は Windows の pid と別物なので、コマンドの pid も返さない(止めるときは子の木ごと taskkill /T)。
+ * @param {string[]} argv @param {{ env?: NodeJS.ProcessEnv, cwd?: string }} opts
+ * @returns {{ child: import('node:child_process').ChildProcess, commandPid: () => number | null, cpuMs: Promise<number | null> }}
+ */
+function spawnMeasuredWindows(argv, opts) {
+  const exe = windowsExe(argv[0], opts.env);
+  const child =
+    exe === null
+      ? spawn(gitBash(opts.env), ['-c', '"$@"', 'bash', ...argv], { env: opts.env, cwd: opts.cwd, stdio: 'inherit', windowsHide: true })
+      : spawn(exe, argv.slice(1), { env: opts.env, cwd: opts.cwd, stdio: 'inherit', windowsHide: true });
+  return { child, commandPid: () => null, cpuMs: Promise.resolve(null) };
+}
+
+/**
+ * Windows で、名前かパスが指す .exe を探す。見つからなければ null(bash のスクリプトや .cmd は Git Bash に任せる)。
+ * @param {string} cmd @param {NodeJS.ProcessEnv} [env] @returns {string | null}
+ */
+export function windowsExe(cmd, env = process.env) {
+  const isExe = (/** @type {string} */ p) => {
+    try {
+      return statSync(p).isFile();
+    } catch {
+      return false;
+    }
+  };
+  const names = /\.exe$/i.test(cmd) ? [cmd] : [`${cmd}.exe`];
+  if (/[\\/]/.test(cmd)) return names.find(isExe) ?? null;
+  const pathKey = Object.keys(env).find((k) => k.toUpperCase() === 'PATH');
+  for (const dir of (pathKey === undefined ? '' : env[pathKey] ?? '').split(';')) {
+    if (dir === '') continue;
+    for (const n of names) if (isExe(join(dir, n))) return join(dir, n);
+  }
+  return null;
 }
 
 /**
@@ -177,6 +234,7 @@ export async function waitGroupGone(pgid, timeoutMs, stepMs = 20) {
  * @returns {Promise<Map<number, number>>}
  */
 export function rssByGroup() {
+  if (IS_WINDOWS) return Promise.resolve(new Map());
   return new Promise((resolve) => {
     execFile('ps', ['-A', '-o', 'pgid=,rss=,stat='], { encoding: 'utf8' }, (err, out) => {
       /** @type {Map<number, number>} */

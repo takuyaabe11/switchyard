@@ -15,6 +15,7 @@ import { appendRecord } from '../daemon/store.mjs';
 import { readPgid, renicePriority, signalGroup, spawnMeasured, verifiedGroup, waitGroupGone } from './group.mjs';
 import { createEscapeTracker, nextWatchMs } from './watch.mjs';
 import { t } from '../i18n.mjs';
+import { IS_WINDOWS, killTree } from '../platform.mjs';
 
 /** @typedef {import('../core/types.mjs').JobClass} JobClass */
 /** @typedef {import('../core/types.mjs').CpuRange} CpuRange */
@@ -101,7 +102,8 @@ export function buildRequest({ argv, flags, env, cwd }) {
       locks: declaredLocks.filter((k) => !held.has(k)),
       // 既定は never。宣言していないジョブは、計測のために止められない(設計 §6.7)。
       // 止める / 降格するのは、そのジョブが中断に耐えると書いた人だけ
-      preempt: flags.preempt ?? base?.preempt ?? 'never',
+      // Windows では子を止められない(プロセスグループが無い)。譲ると言うと、計測が止まっていない走行の横で走る
+      preempt: IS_WINDOWS ? 'never' : (flags.preempt ?? base?.preempt ?? 'never'),
       why: flags.why ?? null,
       ...(parent !== null ? { parent } : {}),
     },
@@ -176,6 +178,11 @@ export function runJob(opts) {
     let commandPid = () => null;
     /** グループを確かめられないとき: sh(TERM を子へ送り直す)とコマンドそのものへ送る @param {NodeJS.Signals} sig */
     const signalDirect = (sig) => {
+      // Windows: 信号は届かない(TerminateProcess になる)ので、bash とその下の木ごと止める
+      if (IS_WINDOWS) {
+        if (child?.pid !== undefined && child.exitCode === null) killTree(child.pid);
+        return;
+      }
       const p = commandPid();
       if (p !== null) {
         try {
@@ -335,14 +342,14 @@ export function runJob(opts) {
       });
       if (c.pid === undefined) return;
       pgid = verifyGroup(c.pid, ownPgid);
-      if (pgid === null) {
+      if (pgid === null && !IS_WINDOWS) {
         out(
           t(
             '[switchyard] 子のプロセスグループを確かめられないので、グループへの信号は送らない(呼び出し元の終了だけを子に伝える)',
             "[switchyard] cannot confirm the child's process group, so no signal goes to the group (only the caller's exit is passed to the child)",
           ),
         );
-      } else {
+      } else if (pgid !== null) {
         // どのコマンドでも、子孫がグループから抜けるかを実行中に見る(設計 §13 V6)。
         // 顔ぶれが変わらない間は間隔を倍にして伸ばす(ps は 1 回が安くない。watch.mjs の nextWatchMs)
         const tr = createEscapeTracker({ rootPid: c.pid, pgid });
@@ -487,6 +494,8 @@ export function runJob(opts) {
           out(t('[switchyard] つなぎ直した', '[switchyard] reconnected'));
           return;
         } catch {
+          // つなぎ直しを試している間に子が終わった: 待ちのタイマーを新しく掛けない(掛けるとプロセスの終了がその分遅れる)
+          if (over()) return;
           if (phase === 'waiting' && Date.now() - lostAt > unmanagedAfterMs) {
             out(t(`[switchyard] ${unmanagedAfterMs}ms つなげないので、管理なしで実行する(二重貸し防止などの保証なし)`, `[switchyard] no connection for ${unmanagedAfterMs}ms; running unmanaged (no guarantee against double allocation)`));
             unmanaged = true;
