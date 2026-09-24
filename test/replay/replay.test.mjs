@@ -195,6 +195,18 @@ describe('formatReport(端末に出す文面)', () => {
     assert.doesNotMatch(text, /NaN|拒否の例/);
   });
 
+  it('ヒアドキュメントの本文は数えず、例には判定を起こした部分を添える', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'crep-'));
+    mkdirSync(join(root, 'p'));
+    const heredocOnly = "cat > notes.md <<'EOF'\nrun npm test and cargo build here\nEOF";
+    const thenTest = "cat > notes.md <<'EOF'\nsome text\nEOF\nnpm test";
+    writeFileSync(join(root, 'p', 's.jsonl'), [bashLine({ id: 'h1', command: heredocOnly }), bashLine({ id: 'h2', command: thenTest })].join('\n') + '\n');
+    const r = await replay({ dir: root, cwdPrefix: null, since: null, profilesFor: defaults, examples: 5, git: true });
+    assert.equal(r.hook.background, 1, '本文の中の npm test は数えない');
+    assert.equal(r.examples.background[0].trigger, 'npm test');
+    assert.match(formatReport(r, { cwdPrefix: null, sinceDays: null, examples: 5 }), /→ 判定した部分: npm test/);
+  });
+
   it('例のコマンドは 1 行にまとめ、長ければ 120 字で切る', async () => {
     const root = mkdtempSync(join(tmpdir(), 'crep-'));
     mkdirSync(join(root, 'p'));

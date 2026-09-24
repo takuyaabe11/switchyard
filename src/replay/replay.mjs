@@ -16,7 +16,8 @@ import { t } from '../i18n.mjs';
 /** @typedef {{ id: string, command: string, runInBackground: boolean, cwd: string, timestamp: string }} BashCall */
 /** @typedef {'deny' | 'background' | 'already-background' | 'none'} HookVerdict */
 /** @typedef {{ hook: HookVerdict, shims: Array<{ word: string, answer: string }> }} Judgement */
-/** @typedef {{ timestamp: string, cwd: string, command: string }} Example */
+/** trigger は、判定を起こした部分(単純コマンド 1 つ)。コマンド全体と同じなら省く */
+/** @typedef {{ timestamp: string, cwd: string, command: string, trigger?: string }} Example */
 /**
  * @typedef {{
  *   files: number,
@@ -144,7 +145,13 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
         report.calls += 1;
         if (report.first === null || c.timestamp < report.first) report.first = c.timestamp;
         if (report.last === null || c.timestamp > report.last) report.last = c.timestamp;
+        /** @type {Example} */
         const example = { timestamp: c.timestamp, cwd: c.cwd, command: c.command };
+        if (j.hook === 'deny' || j.hook === 'background') {
+          // 長いコマンド(ヒアドキュメントで書いてから走らせる形など)は、先頭だけ見ても何が重いのか分からない。判定を起こした部分を添える
+          const trigger = triggerOf(c, { profilesFor, git });
+          if (trigger !== null && trigger !== c.command.trim()) example.trigger = trigger;
+        }
         if (j.hook === 'deny') {
           report.hook.deny += 1;
           all.deny.push(example);
@@ -176,6 +183,19 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
 }
 
 /** 例に出すコマンド: 空白の並び(改行を含む)を 1 つにまとめ、長ければ切る @param {string} command @returns {string} */
+/**
+ * 判定を起こした部分: 単純コマンドを 1 つずつ判定し、最初に何かをする(拒否・背景)ものを返す。
+ * @param {BashCall} call @param {{ profilesFor: (cwd: string) => NamedProfile[], git: boolean }} opts @returns {string | null}
+ */
+function triggerOf(call, opts) {
+  for (const words of simpleCommands(call.command)) {
+    const part = words.join(' ');
+    if (judgeCall({ ...call, command: part, runInBackground: false }, opts).hook !== 'none') return part;
+  }
+  return null;
+}
+
+/** @param {string} command */
 function oneLine(command) {
   const flat = command.replace(/\s+/g, ' ').trim();
   return flat.length > EXAMPLE_WIDTH ? `${flat.slice(0, EXAMPLE_WIDTH)}…` : flat;
@@ -225,7 +245,10 @@ export function formatReport(r, { cwdPrefix, sinceDays, examples }) {
     ])) {
       if (xs.length === 0) continue;
       lines.push(t(`${label}の例(新しい順に最大 ${examples} 件)`, `${label}: examples (newest first, up to ${examples})`));
-      for (const x of xs) lines.push(`  ${x.timestamp.slice(0, 16).replace('T', ' ')}  ${x.cwd}  ${oneLine(maskSecrets(x.command))}`);
+      for (const x of xs) {
+        lines.push(`  ${x.timestamp.slice(0, 16).replace('T', ' ')}  ${x.cwd}  ${oneLine(maskSecrets(x.command))}`);
+        if (x.trigger !== undefined) lines.push(t(`      → 判定した部分: ${oneLine(maskSecrets(x.trigger))}`, `      → the part that triggered it: ${oneLine(maskSecrets(x.trigger))}`));
+      }
     }
   }
   lines.push(
