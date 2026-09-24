@@ -13,6 +13,20 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 const real = (p) => (process.platform === 'win32' ? realpathSync.native(p) : realpathSync(p));
 
 /**
+ * 記録に残ったパス(セッション記録の cwd など)を、repoRoot の答えと比べられる形にする。
+ * Windows だけ実パスへ直す(短い名前・大文字小文字の違い)。無いパス・POSIX はそのまま(これまでと同じ)。
+ * @param {string} p @returns {string}
+ */
+export function comparablePath(p) {
+  if (process.platform !== 'win32') return p;
+  try {
+    return realpathSync.native(p);
+  } catch {
+    return p;
+  }
+}
+
+/**
  * git の作業ツリーの根。git の外なら cwd。
  * `git rev-parse --show-toplevel` を起動せず、`.git`(ディレクトリでも、worktree / submodule のファイルでも)を上へ探す。
  * 分類器と PreToolUse が 1 コマンドごとに呼ぶ経路なので、ここで外部プロセスを 1 本起動すると

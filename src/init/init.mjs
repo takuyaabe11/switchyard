@@ -4,9 +4,10 @@
 // 所要は、Bash の tool_use の時刻から、その tool_result の時刻まで(前景で走ったものだけ。背景へ回したものは結果がすぐ返るので数えない)。
 // 記録は読むだけ。書くのは --write のときの switchyard.json だけで、既にある profile は変えない。
 import { createReadStream, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { createInterface } from 'node:readline';
 import { classifiableCommand, classify } from '../config/profiles.mjs';
+import { comparablePath } from '../config/context.mjs';
 import { headWord, SHIM_WORDS } from '../hooks/pretooluse.mjs';
 import { simpleCommands } from '../hooks/shell.mjs';
 import { maskSecrets } from '../redact.mjs';
@@ -90,7 +91,16 @@ export async function foregroundCalls({ dir, repo, since }) {
   const out = [];
   /** @type {Set<string>} */
   const done = new Set();
-  const inRepo = (/** @type {string} */ cwd) => cwd === repo || cwd.startsWith(`${repo}/`);
+  /** @type {Map<string, string>} 記録の cwd ごとに 1 度だけ直す(Windows では実パスを引く) */
+  const seen = new Map();
+  const inRepo = (/** @type {string} */ raw) => {
+    let cwd = seen.get(raw);
+    if (cwd === undefined) {
+      cwd = comparablePath(raw);
+      seen.set(raw, cwd);
+    }
+    return cwd === repo || cwd.startsWith(`${repo}${sep}`);
+  };
   for (const file of files) {
     const lines = createInterface({ input: createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
     for await (const line of lines) {
