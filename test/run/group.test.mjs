@@ -3,7 +3,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readPgid, signalGroup, spawnInOwnGroup, verifiedGroup, waitGroupGone } from '../../src/run/group.mjs';
+import { parseTimes, readPgid, signalGroup, spawnInOwnGroup, spawnMeasured, verifiedGroup, waitGroupGone } from '../../src/run/group.mjs';
 import { killGroupLeftovers, pidsInGroup } from '../../testkit/procs.mjs';
 import { waitFor } from '../../testkit/wait.mjs';
 
@@ -119,5 +119,34 @@ describe('別グループでの起動(V4)', () => {
     await new Promise((resolve) => child.once('exit', resolve));
     await waitFor(() => pidsInGroup(pid).length === 0);
     assert.equal(signalGroup(pid, 'SIGTERM'), false);
+  });
+});
+
+describe('spawnMeasured(子と子孫の CPU 時間を測る)', () => {
+  it('parseTimes は pid の行と times の 2 行から、最後の行(回収した子)の user + sys を ms で取る(dash と bash の形)', () => {
+    assert.equal(parseTimes('123\n0m0.000000s 0m0.000000s\n0m1.630000s 0m0.050000s\n'), 1680);
+    assert.equal(parseTimes('123\n0m0.000s 0m0.000s\n1m2.500s 0m0.500s\n'), 63000);
+    assert.equal(parseTimes('123\n'), null);
+    assert.equal(parseTimes(''), null);
+  });
+
+  it('子の終了コードを返し、CPU を使った子孫の時間を数え、子自身の pid を教える', async () => {
+    const { child, cpuMs, commandPid } = spawnMeasured([process.execPath, '-e', 'const e=Date.now()+700;while(Date.now()<e){} process.exit(3)']);
+    const code = await new Promise((r) => child.once('exit', (c) => r(c)));
+    assert.equal(code, 3);
+    const ms = await cpuMs;
+    assert.ok(ms !== null && ms >= 400, `CPU 時間 ${ms}`);
+    const pid = commandPid();
+    assert.ok(pid !== null && pid !== child.pid, '子自身の pid は sh とは別');
+  });
+
+  it('標準入力を子へ渡し、子には番号 3 を渡さない', () => {
+    const script = [
+      `import { spawnMeasured } from ${JSON.stringify(new URL('../../src/run/group.mjs', import.meta.url).href)};`,
+      "const { child } = spawnMeasured(['sh', '-c', 'read x; [ -e /dev/fd/3 ] && echo leaked; echo \"got:$x\"']);",
+      "child.once('exit', (c) => process.exit(c ?? 1));",
+    ].join('\n');
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], { input: 'hello\n', encoding: 'utf8', timeout: 10_000 });
+    assert.equal(out.trim(), 'got:hello');
   });
 });

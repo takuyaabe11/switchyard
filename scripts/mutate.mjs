@@ -26,8 +26,33 @@ const SUITES = {
       'test/core/schedule.measure.test.mjs',
       'test/core/schedule.preempt.test.mjs',
       'test/core/score.test.mjs',
+      'test/core/usage.test.mjs',
     ],
     mutations: [
+      {
+        name: 'M40 割り振りを使い切る走行も縮める(割り振りの少なさを学んで縮み続ける)',
+        file: 'src/core/usage.mjs',
+        from: 'if (median(list.map((x) => x.ratio)) >= UNDERUSE_RATIO) return null;',
+        to: '',
+      },
+      {
+        name: 'M41 実測に合わせて宣言より上げる',
+        file: 'src/core/usage.mjs',
+        from: 'const min = Math.min(job.cpus.min, n);',
+        to: 'const min = n;',
+      },
+      {
+        name: 'M42 計測も縮める',
+        file: 'src/core/usage.mjs',
+        from: "if (cores === null || job.class !== 'batch' || job.cpus.max === 0) return job;",
+        to: 'if (cores === null || job.cpus.max === 0) return job;',
+      },
+      {
+        name: 'M43 失敗した走行も使い方に数える',
+        file: 'src/core/usage.mjs',
+        from: 'if (code !== 0 || cpuMs === null || cpus <= 0 || durationMs < USAGE_MIN_DURATION_MS) return;',
+        to: 'if (cpuMs === null || cpus <= 0 || durationMs < USAGE_MIN_DURATION_MS) return;',
+      },
       {
         name: 'M30 後の成功で前の失敗を片付けない',
         file: 'src/core/decide.mjs',
@@ -626,7 +651,7 @@ function runTests(dir, tests) {
   return new Promise((resolve) => {
     // SWITCHYARD_HOME は写しの中へ向ける(env を渡さないと、テストの試算が実際の ~/.switchyard/ を汚す)
     // テストは日本語の文言で照合する(package.json の npm test と同じ)
-    const env = { ...process.env, SWITCHYARD_HOME: join(dir, '.switchyard-home'), SWITCHYARD_LANG: 'ja' };
+    const env = { ...process.env, SWITCHYARD_HOME: join(dir, '.switchyard-home'), SWITCHYARD_LANG: 'ja', SWITCHYARD_UPDATE_CHECK: '0' };
     // 入れ子の印を落とす(package.json の `env -u` と同じ)。この script 自身が switchyard に包まれて走ると
     // SWITCHYARD_IN_JOB=1 が立ち、それが test へ漏れると、その印を読む側の振る舞いを試す試験が別物になる
     delete env.SWITCHYARD_IN_JOB;

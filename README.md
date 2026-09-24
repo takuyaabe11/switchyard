@@ -21,9 +21,11 @@ Measured on a 4-core machine ([details](docs/verification/2026-09-24-effect.md))
   As a `measure` job it waited for those runs to finish (about 4 s) and then matched its alone-time.
 - **The first result comes back sooner.** Three CPU-bound test suites started together all finished at about 11.9 s.
   Through switchyard they finished at 4.3 s, 8.4 s and 12.4 s: about 30% sooner on average, about 4% longer overall.
-- **It does not help runs that mostly wait.** Three copies of a suite that is mostly process start-up and waiting took
-  15 s side by side and 25 s through switchyard, with no failures either way. Mark such commands `quick` in
-  `switchyard.json`, or leave them out of your profiles.
+- **Runs that mostly wait are sized down, not held back.** switchyard measures how much CPU each run really uses. A
+  profile whose runs keep using less than half of what they were given is admitted with a smaller share from then on
+  (never a larger one). Three copies of a suite that averages 0.78 cores took 25 s through switchyard when it took
+  their declared 2 cores at face value, and 18 s once it had learned (16 s side by side without switchyard). A run
+  that uses all it is given is never sized down. `SWITCHYARD_ADAPTIVE=0` keeps the declared shares.
 
 ## Install
 
@@ -156,10 +158,9 @@ After an update the daemon that is already running keeps the old version; the ne
 and `switchyard restart` brings the new one up. `PATH` lines that point at the old install are
 removed by the next `SessionStart`.
 
-To hear about new releases, set `SWITCHYARD_UPDATE_CHECK=1` (for example in the `env` of your Claude Code settings).
-`SessionStart` then compares this version with the one published on GitHub, at most once a day, and says when a newer
-one is out. It is off by default, so nothing leaves the machine unless you turn it on. What changed in each release
-is in [CHANGELOG.md](CHANGELOG.md).
+`SessionStart` compares this version with the one published on GitHub, at most once a day, and says when a newer one
+is out. Set `SWITCHYARD_UPDATE_CHECK=0` (for example in the `env` of your Claude Code settings) to turn that off. What
+changed in each release is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Turning it off, and taking it out
 
@@ -192,8 +193,9 @@ Everything lives under `~/.switchyard` (or `SWITCHYARD_HOME`).
 Commands are stored verbatim, so anything you type on a command line — including a secret
 passed as an argument — ends up in `events.jsonl`. The journals are capped: past 8MB the
 current one is rolled to `<name>.1` and a new one starts, so at most two generations are
-kept. Nothing is sent anywhere; these files never leave the machine. The only network access is the opt-in
-update check (`SWITCHYARD_UPDATE_CHECK=1`), which fetches `plugin.json` from GitHub and sends nothing else.
+kept. Nothing is sent anywhere; these files never leave the machine. The only network access is the update check,
+which fetches `plugin.json` from GitHub at most once a day and sends nothing else (`SWITCHYARD_UPDATE_CHECK=0` turns
+it off).
 
 ### Why the tests ship with it
 
@@ -238,8 +240,10 @@ switchyard は操車場のこと。重い走行を 1 本ずつ、正しい線路
   `measure` として走らせると、4 本が終わるまで約 4 秒待ってから、単独と同じ数字で走った。
 - **最初の結果が早く返る。** CPU を使うテストの全件を 3 本同時に始めると、3 本とも約 11.9 秒で終わった。
   switchyard を通すと 4.3 秒・8.4 秒・12.4 秒で終わり、平均は約 30% 早く、全体は約 4% 延びただけだった。
-- **待ちが中心の走行には効かない。** 子プロセスの起動と待ちが中心の全件を 3 本同時に走らせると、素のままで 15 秒、
-  switchyard を通すと 25 秒かかった(どちらも失敗なし)。そういうコマンドは `switchyard.json` で `quick` にするか、profile から外す。
+- **待ちが中心の走行は、並ばせずに取り分を縮める。** switchyard は走行ごとに実際の CPU の使用量を測る。割り振られた量の
+  半分も使わない走行が続く profile は、次から小さい取り分で入場させる(大きくはしない)。平均 0.78 コアの全件を 3 本同時に
+  走らせると、宣言どおり 2 コアずつ取っていた間は 25 秒、学んだ後は 18 秒だった(switchyard なしで同時に走らせて 16 秒)。
+  割り振りを使い切る走行は縮めない。`SWITCHYARD_ADAPTIVE=0` で宣言どおりに並べる。
 
 ## 導入
 
@@ -339,9 +343,8 @@ VS Code の拡張でも同じで、`/plugins` で Manage plugins の画面が開
 更新しても、走っているデーモンは古い版のまま残る。次のセッションがそれを知らせるので、`switchyard restart` で入れ替える。
 古い置き場を指す `PATH` の行は、次の `SessionStart` が取り除く。
 
-新しい版が出たことを知りたければ、`SWITCHYARD_UPDATE_CHECK=1` を設定する(Claude Code の設定の `env` など)。
 `SessionStart` がいまの版と GitHub で公開されている版を 1 日に 1 回まで比べ、新しい版が出ていれば知らせる。
-既定では無効で、有効にしない限り機械の外へは何も出ない。各版の変更は [CHANGELOG.md](CHANGELOG.md) にある。
+止めるには `SWITCHYARD_UPDATE_CHECK=0` を設定する(Claude Code の設定の `env` など)。各版の変更は [CHANGELOG.md](CHANGELOG.md) にある。
 
 ## 切る・外す
 
@@ -368,7 +371,7 @@ plugin を外しても、走っているデーモンは止まらず、`PATH` の
 | `hooks.jsonl` | `PreToolUse` の判断。コマンドの文字列と作業ディレクトリつき |
 | `unmanaged.jsonl` | デーモンに届かない間に走ったもの |
 
-コマンドはそのままの文字列で残る。引数に渡した秘密も `events.jsonl` に入る。記録には上限があり、8MB を超えると `<名前>.1` へ回して新しく始めるので、残るのは 2 世代まで。どこにも送信しない。機械の外へは出ない。外へ問い合わせるのは、有効にしたときの更新の確認(`SWITCHYARD_UPDATE_CHECK=1`)だけで、GitHub から `plugin.json` を取ってくる以外は何も送らない。
+コマンドはそのままの文字列で残る。引数に渡した秘密も `events.jsonl` に入る。記録には上限があり、8MB を超えると `<名前>.1` へ回して新しく始めるので、残るのは 2 世代まで。どこにも送信しない。機械の外へは出ない。外へ問い合わせるのは更新の確認だけで、1 日に 1 回まで GitHub から `plugin.json` を取ってくる以外は何も送らない(`SWITCHYARD_UPDATE_CHECK=0` で止まる)。
 
 ### テストを同梱している理由
 

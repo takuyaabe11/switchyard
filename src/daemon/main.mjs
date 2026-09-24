@@ -157,6 +157,8 @@ export async function main(env = process.env) {
       heartbeatTimeoutMs: positiveInt(env.SWITCHYARD_HEARTBEAT_TIMEOUT_MS),
       recoveryGraceMs: positiveInt(env.SWITCHYARD_RECOVERY_GRACE_MS),
       idleExitMs: env.SWITCHYARD_IDLE_EXIT_MS === '0' ? null : positiveInt(env.SWITCHYARD_IDLE_EXIT_MS),
+      // 実測の CPU の使い方で要求を小さくする(既定で有効。0 で宣言どおりに並べる)
+      adaptive: env.SWITCHYARD_ADAPTIVE !== '0',
       // 一度も仕事をしないまま静かなら、自分で終わる(次の要求で自動起動する)
       onIdleExit: () => {
         void shutdown?.();

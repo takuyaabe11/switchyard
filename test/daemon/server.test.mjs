@@ -411,3 +411,34 @@ describe('daemon server', () => {
     assert.match(String((await c.next((m) => m.t === 'error')).message), /job.class/);
   });
 });
+
+describe('実測の CPU の使い方で要求を縮める(right-sizing)', () => {
+  const runOnce = async (/** @type {any} */ d, /** @type {number} */ cpuMs, /** @type {Partial<import('../../src/protocol/messages.mjs').JobRequest>} */ over = {}) => {
+    const c = await client(d.sock);
+    c.send({ t: 'request', job: jobRequest({ profile: 'unit', cpus: { min: 2, max: 4 }, ...over }) });
+    const acc = await c.next((m) => m.t === 'accepted');
+    const grant = await c.next((m) => m.t === 'grant');
+    c.send({ t: 'exit', jobId: acc.jobId, code: 0, killedByCaller: false, durationMs: 10_000, cpuMs });
+    await c.next((m) => m.t === 'ok');
+    return grant.cpus;
+  };
+
+  it('割り振りの半分も使わない成功が 3 回続いた profile は、次から実測に合わせた要求で並べ、記録に CPU 時間を残す', async () => {
+    const { d, home } = await daemon({ capacity: 4 });
+    for (let i = 0; i < 3; i += 1) assert.equal(await runOnce(d, 8_000), 4, '縮める前は宣言どおり(空きを max まで配る)');
+    assert.equal(await runOnce(d, 8_000), 1, '平均 0.8 コア → 1 コア');
+    const history = readFileSync(pathsOf(home).events, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.kind === 'history');
+    assert.deepEqual(history.map((h) => h.cpuMs), [8_000, 8_000, 8_000, 8_000]);
+    const req = readFileSync(pathsOf(home).events, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.kind === 'event' && r.event.type === 'request').pop();
+    assert.deepEqual([req.event.job.cpus, req.event.job.sizedFrom, req.event.job.measuredCores], [{ min: 1, max: 1 }, { min: 2, max: 4 }, 0.8]);
+  });
+
+  it('adaptive: false なら宣言どおり。計測は縮めない。再起動しても記録から学び直す', async () => {
+    const off = await daemon({ capacity: 4, adaptive: false });
+    for (let i = 0; i < 4; i += 1) assert.equal(await runOnce(off.d, 8_000), 4);
+    await off.d.close();
+    const on = await daemon({ capacity: 4, home: off.home });
+    assert.equal(await runOnce(on.d, 8_000), 1, '同じ home の記録から学んでいる');
+    assert.equal(await runOnce(on.d, 8_000, { class: 'measure' }), 4, '計測は縮めない');
+  });
+});

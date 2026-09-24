@@ -3,6 +3,18 @@
 All notable changes to switchyard. Versions follow `plugin.json`; Claude Code only offers an update when that
 version goes up.
 
+## 0.7.0
+
+### Added
+- switchyard measures how much CPU each run really uses (user + sys time of the command and everything it started).
+  A `batch` profile whose successful runs keep using less than half of what they were given is admitted with a share
+  sized to what it uses (never more than declared). Runs that use all they are given, measurements and locks-only
+  jobs are left as declared. `top` and `why` show when a run was sized down. `SWITCHYARD_ADAPTIVE=0` turns it off.
+
+### Changed
+- The update check is on by default. `SessionStart` fetches `plugin.json` from GitHub at most once a day and says when
+  a newer version is out; `SWITCHYARD_UPDATE_CHECK=0` turns it off.
+
 ## 0.6.0
 
 ### Added
@@ -15,8 +27,7 @@ version goes up.
   and how many measurements ran alone.
 - Messages are in English by default, and in Japanese when the locale starts with `ja`. `SWITCHYARD_LANG=en|ja`
   picks one explicitly.
-- `SWITCHYARD_UPDATE_CHECK=1` makes `SessionStart` say when a newer version is published (checked at most once a day;
-  off by default, so nothing leaves the machine unless you turn it on).
+- `SWITCHYARD_UPDATE_CHECK=1` makes `SessionStart` say when a newer version is published (checked at most once a day).
 
 ### Changed
 - A failed run is marked as looked at automatically when the same command later succeeds in the same session, so

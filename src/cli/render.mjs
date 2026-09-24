@@ -30,6 +30,15 @@ const unackedText = (u) => `${u.kind}${u.code === null ? '' : t(`(終了コー�
 /** @param {boolean} inGroup */
 const groupWord = (inGroup) => (inGroup ? t('グループ内', 'in group') : t('グループ外', 'outside group'));
 
+/**
+ * 実測で要求を小さくしたときの一言(宣言 2..4 → 実測 0.8 コア)
+ * @param {{ sizedFrom?: { min: number, max: number } | null, measuredCores?: number | null }} v
+ */
+const sizedText = (v) =>
+  v.sizedFrom === undefined || v.sizedFrom === null || v.measuredCores === undefined || v.measuredCores === null
+    ? ''
+    : t(`宣言 ${v.sizedFrom.min}..${v.sizedFrom.max} を実測 ${v.measuredCores} コアに合わせて縮めた`, `sized down from ${v.sizedFrom.min}..${v.sizedFrom.max} to fit a measured ${v.measuredCores} cores`);
+
 const RECONNECT = () => t('再起動したデーモンが包みの再接続を待っている', 'the restarted daemon is waiting for the wrapper to reconnect');
 
 /** @param {Snapshot} snap @param {number} nowWall @returns {string} */
@@ -51,6 +60,7 @@ export function renderTop(snap, nowWall) {
         l.why === null ? '' : t(`目的: ${l.why}`, `why: ${l.why}`),
         l.locks.length === 0 ? '' : t(`鍵: ${l.locks.join(', ')}`, `locks: ${l.locks.join(', ')}`),
         l.escapes.length === 0 ? '' : t(`抜ける子: ${l.escapes.join(', ')}`, `escaping children: ${l.escapes.join(', ')}`),
+        sizedText(l),
       ].filter((x) => x !== '');
       lines.push(`  ${l.id} [${label[l.class]}] ${phase} CPU ${l.cpus} ${duration(nowWall - l.sinceWall)}  ${l.cmd}${extras.length === 0 ? '' : `  (${extras.join(' / ')})`}`);
     }
@@ -117,7 +127,11 @@ function whyText(snap, jobId, nowWall) {
     }
     const state = l.recovering ? RECONNECT() : l.phase === 'granted' ? t('割り振り済みで、子の起動を待っている', 'granted and waiting for the child to start') : t('走行中', 'running');
     const since = duration(nowWall - l.sinceWall);
-    return { text: t(`${jobId} は${state}(CPU ${l.cpus}・${since})。\n`, `${jobId} is ${state} (CPU ${l.cpus}, ${since}).\n`), found: true };
+    const sized = sizedText(l);
+    return {
+      text: t(`${jobId} は${state}(CPU ${l.cpus}・${since})。\n`, `${jobId} is ${state} (CPU ${l.cpus}, ${since}).\n`) + (sized === '' ? '' : `${sized}\n`),
+      found: true,
+    };
   }
   const i = snap.waiting.findIndex((x) => x.id === jobId);
   if (i >= 0) {

@@ -3,6 +3,7 @@
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { EstimateBook } from '../core/estimate.mjs';
+import { UsageBook } from '../core/usage.mjs';
 
 /** @typedef {import('../core/types.mjs').State} State */
 /** @typedef {{ at: number, session: string, repo: string, profile: string, cmd: string, code: number | null, durationMs: number }} UnmanagedRun */
@@ -176,6 +177,20 @@ export function loadEstimates(records) {
     if (r.kind !== 'history') continue;
     if (typeof r.repo !== 'string' || typeof r.profile !== 'string' || typeof r.durationMs !== 'number') continue;
     book.record(r.repo, r.profile, r.durationMs, typeof r.code === 'number' ? r.code : null);
+  }
+  return book;
+}
+
+/**
+ * 記録の history 行から、repo × profile ごとの CPU の使い方の帳簿を作る(cpuMs を持たない古い行は数えない)。
+ * @param {Record<string, unknown>[]} records @returns {UsageBook}
+ */
+export function loadUsage(records) {
+  const book = new UsageBook();
+  for (const r of records) {
+    if (r.kind !== 'history' || typeof r.repo !== 'string' || typeof r.profile !== 'string') continue;
+    if (typeof r.durationMs !== 'number' || typeof r.cpus !== 'number') continue;
+    book.record(r.repo, r.profile, { durationMs: r.durationMs, cpuMs: typeof r.cpuMs === 'number' ? r.cpuMs : null, cpus: r.cpus, code: typeof r.code === 'number' ? r.code : null });
   }
   return book;
 }
