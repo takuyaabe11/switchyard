@@ -125,10 +125,12 @@ Without a `switchyard.json`, a built-in table covers the usual commands: `npm te
 `dotnet test|build`, `bundle exec rspec`, `rspec`, `deno test` and `make`.
 A script under `node_modules/.bin` (`./node_modules/.bin/vitest run`) is classified as its `npx` form.
 A run that keeps watching (`--watch`, `--watchAll`, `tsc -w`) is never classified: it would hold its CPU share forever.
-Anything else is not classified unless your `switchyard.json` names it, and runs outside the queue. Wrappers that
-run a script by path (`./gradlew`, `./mvnw`) and tools in a virtualenv you activated (`source .venv/bin/activate`
-puts them before the shims) are not seen by the shims; name them in `switchyard.json` and call them through
-`switchyard run -- …` if they should queue.
+Anything else is not classified unless your `switchyard.json` names it, and runs outside the queue.
+
+Some heavy runs cannot be seen by a shim: `./gradlew test` and `./mvnw verify` (scripts called by path), tools inside a
+Python virtualenv (`.venv/bin/pytest`), and `pytest` or `python -m pytest` after `source .venv/bin/activate` (the
+virtualenv comes before the shims on `PATH`). `PreToolUse` refuses these and asks for `switchyard run -- <command>`,
+which puts them in the queue. Scripts under `node_modules/.bin` go through the `node` shim and need nothing.
 
 `git` takes the repository's index lock for the subcommands that write the index: `commit`, `merge`,
 `rebase`, `cherry-pick`, `stash`, `am`, `add`, `rm`, `mv`, `reset`, `restore`, `checkout`, `switch`,
@@ -315,9 +317,12 @@ repo の根に `switchyard.json` を置くと、その repo のコマンドの�
 `dotnet test|build`、`bundle exec rspec`・`rspec`、`deno test`、`make`。
 `node_modules/.bin` の下のスクリプト(`./node_modules/.bin/vitest run`)は `npx` の形として分類する。
 見張り続ける走行(`--watch`・`--watchAll`・`tsc -w`)は分類しない。包むと CPU の取り分を握ったまま終わらない。
-それ以外は、`switchyard.json` で名指ししない限り分類されず、順番待ちの外で走る。スクリプトをパスで呼ぶ包み
-(`./gradlew`・`./mvnw`)と、有効にした仮想環境の道具(`source .venv/bin/activate` は shim より前に置く)は shim から
-見えない。順番に乗せたいなら `switchyard.json` で名指しし、`switchyard run -- …` で呼ぶ。
+それ以外は、`switchyard.json` で名指ししない限り分類されず、順番待ちの外で走る。
+
+shim から見えない重い走行もある: パスで呼ぶスクリプト(`./gradlew test`・`./mvnw verify`)、Python の仮想環境の中の
+道具(`.venv/bin/pytest`)、`source .venv/bin/activate` の後の `pytest`・`python -m pytest`(仮想環境が `PATH` で shim より前に
+来る)。`PreToolUse` はこれらを拒否し、`switchyard run -- <コマンド>` で包むよう案内する(包めば順番待ちに乗る)。
+`node_modules/.bin` の下のスクリプトは `node` の shim を通るので、何もしなくてよい。
 
 `git` は index を書き換えるサブコマンド(`commit`・`merge`・`rebase`・`cherry-pick`・`stash`・`am`・
 `add`・`rm`・`mv`・`reset`・`restore`・`checkout`・`switch`・`pull`・`revert`)のとき、その repo の index の鍵を取る。

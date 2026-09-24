@@ -31,6 +31,31 @@ export const SHIM_WORDS = [
  */
 const isProjectLocal = (path) => /(^|\/)(\.?venv[^/]*|\.tox|\.nox|node_modules\/\.bin)\//.test(path);
 
+/**
+ * Python の仮想環境の中の実行ファイルか。node_modules/.bin と違い、shebang が仮想環境の python を直に指すので、
+ * shim を通らない(順番待ちに乗らない)。
+ * @param {string} path @returns {boolean}
+ */
+const isVenvPath = (path) => /(^|\/)(\.?venv[^/]*|\.tox|\.nox)\//.test(path);
+
+/** 仮想環境を有効にする形(source .venv/bin/activate・. venv/bin/activate)。以降の python・pytest は仮想環境の物が shim より先に引かれる */
+const isActivate = (/** @type {string} */ head, /** @type {string[]} */ rest) => (head === 'source' || head === '.') && /(^|\/)bin\/activate$/.test(rest[0] ?? '');
+
+/**
+ * パスで呼ぶビルドの包み(./gradlew・./mvnw)の重いサブコマンド。shim を置けないので、順番待ちに乗せるには switchyard run で包む。
+ * @type {Record<string, string[]>}
+ */
+const WRAPPER_SCRIPTS = {
+  gradlew: ['test', 'build', 'check', 'assemble', 'integrationTest', 'connectedCheck'],
+  mvnw: ['test', 'verify', 'package', 'install', 'integration-test'],
+};
+
+/** @param {string} base @param {string[]} rest @returns {boolean} */
+const isHeavyWrapperScript = (base, rest) => {
+  const subs = WRAPPER_SCRIPTS[base];
+  return subs !== undefined && rest.some((w) => !w.startsWith('-') && subs.some((sub) => w === sub || w.endsWith(`:${sub}`)));
+};
+
 /** `-c 文字列` の文字列をコマンドとして走らせるシェル */
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
 /** 後ろにコマンドが続くシェルの予約語 */
@@ -222,6 +247,10 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
   const unshimmed = [];
   /** @type {string[]} 環境変数で shim を素通りさせる部分 */
   const overridden = [];
+  /** @type {string[]} shim から見えない重い部分(./gradlew test・仮想環境の実行ファイル・activate の後の pytest) */
+  const invisible = [];
+  /** この単純コマンドより前で仮想環境を有効にしたか */
+  let activated = false;
 
   /**
    * 単純コマンド 1 つを判定する。
@@ -230,6 +259,10 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
   const visit = (words, wrapped) => {
     const { head, rest, bypass } = headOf(words);
     if (head === '') return;
+    if (isActivate(head, rest)) {
+      activated = true;
+      return;
+    }
     const base = basename(head);
     const text = [head, ...rest].join(' ');
     const bypassText = `${bypass.join(' ')} ${text}`;
@@ -266,6 +299,8 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
       if (!pathHead || isProjectLocal(head)) {
         if (hit.profile.class !== 'quick') heavy.push(needOf(hit.profile, hit.name));
         if (!wrapped && bypass.length > 0) overridden.push(bypassText);
+        // 仮想環境の実行ファイル(パスで呼ぶ・有効にした後に名前で呼ぶ)は shim を通らない。包めば順番待ちに乗る
+        else if (!wrapped && hit.profile.class !== 'quick' && (isVenvPath(head) || (activated && !pathHead))) invisible.push(text);
       } else if (!wrapped) {
         unshimmed.push(text);
       }
@@ -274,6 +309,12 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
     // shim の語でない部分は拒否しない。中で PATH の shim を通る(scripts/probe-run.sh の中の npm・#!/usr/bin/env node の node_modules/.bin)か、
     // shim の無いツールで、どちらも拒否しても順番待ちには乗らない。管理対象を起動する形なら背景に回すだけ:
     // パスで呼ぶか、当たった glob がその語で始まる(cat benchmarks/x・grep measure のように glob が語の途中に当たっただけの部分は起動しない)
+    // ./gradlew test・./mvnw verify: パスで呼ぶビルドの包みには shim を置けない
+    if (!wrapped && isHeavyWrapperScript(base, rest)) {
+      invisible.push(text);
+      heavy.push({ jobClass: 'batch', cpusMin: 1, locks: [] });
+      return;
+    }
     const ownText = classifiableCommand([head, ...rest]);
     const hit = classify(ownText, profiles) ?? (pathHead ? classify(classifiableCommand([base, ...rest]), profiles) : null);
     const launches = pathHead || profiles.some((np) => np.profile.match.some((g) => leadWord(g) === head && globMatch(g, ownText)));
@@ -299,6 +340,20 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
             'パスを付けずに名前で呼ぶ(例: npm test)か、`switchyard run -- <その部分>` で包んでから実行する(包んだコマンドには普段どおり権限の確認が出る)。',
           `[switchyard] calling a shimmed binary (${SHIM_WORDS.join(' / ')}) by path skips the shim and the queue: ${unshimmed.join(' / ')}. ` +
             'Call it by name (e.g. npm test), or wrap it as `switchyard run -- <that part>` (the wrapped command still goes through the usual permission check).',
+        ),
+      },
+    };
+  }
+  if (invisible.length > 0) {
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: t(
+          `[switchyard] この形は shim から見えず、順番待ちを通らない: ${invisible.join(' / ')}。` +
+            '`switchyard run -- <その部分>` で包んでから実行する(例: `switchyard run -- ./gradlew test`・`switchyard run -- .venv/bin/pytest`)。',
+          `[switchyard] the shims cannot see this, so it would skip the queue: ${invisible.join(' / ')}. ` +
+            'Wrap it as `switchyard run -- <that part>` (e.g. `switchyard run -- ./gradlew test`, `switchyard run -- .venv/bin/pytest`).',
         ),
       },
     };

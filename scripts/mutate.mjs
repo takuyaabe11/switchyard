@@ -464,6 +464,18 @@ const SUITES = {
         to: 'return true;',
       },
       {
+        name: 'H23 shim から見えない重い形を拒否しない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: 'if (invisible.length > 0) {',
+        to: 'if (false) {',
+      },
+      {
+        name: 'H24 仮想環境を有効にした後の走行を見逃す',
+        file: 'src/hooks/pretooluse.mjs',
+        from: '(isVenvPath(head) || (activated && !pathHead))',
+        to: 'isVenvPath(head)',
+      },
+      {
         name: 'H22 待ちの見込みに、実測で縮めた要求を使わない',
         file: 'src/hooks/pretooluse.mjs',
         from: "const min = cores === undefined ? h.cpusMin : rightSize({ class: h.jobClass, cpus: { min: h.cpusMin, max: h.cpusMin } }, cores).cpus.min;",
@@ -492,7 +504,7 @@ const SUITES = {
         // 改善 2: 直す前の形。shim の語でないものをパスで呼ぶ形(scripts/probe-run.sh)と shim の無い語も拒否する
         name: 'H10 shim の語でないものをパスで呼ぶ形・shim の無い語も拒否へ戻す',
         file: 'src/hooks/pretooluse.mjs',
-        from: "if (!wrapped && hit !== null && launches && hit.profile.class !== 'quick') heavy.push(needOf(hit.profile));",
+        from: "if (!wrapped && hit !== null && launches && hit.profile.class !== 'quick') heavy.push(needOf(hit.profile, hit.name));",
         to: 'if (!wrapped && hit !== null && launches) unshimmed.push(text);',
       },
       {
