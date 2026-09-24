@@ -1,6 +1,6 @@
 {
   "name": "switchyard",
-  "description": "switchyard: a traffic controller for heavy runs across Claude Code sessions on one machine",
+  "description": "switchyard: keeps heavy test and build runs from colliding when several Claude Code sessions share one machine",
   "owner": {
     "name": "twoyearsold",
     "url": "https://github.com/takuyaabe11"
@@ -8,7 +8,7 @@
   "plugins": [
     {
       "name": "switchyard",
-      "description": "Keeps Claude Code sessions on one machine from fighting over heavy runs, by handing out CPU shares and exclusive locks.",
+      "description": "For running several Claude Code sessions or agents on one machine: queues heavy test and build runs so they take turns instead of colliding (CPU shares, memory, exclusive locks, clean benchmarks).",
       "version": "0.9.0",
       "source": "./"
     }

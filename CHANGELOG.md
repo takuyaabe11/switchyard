@@ -23,6 +23,11 @@ version goes up.
 - Two runs (was three) are enough to size a profile down to its measured CPU use.
 - `PreToolUse` expects no wait for a single heavy run that fits in the measured spare CPU.
 
+### Docs
+- The README (English and Japanese) now opens with who switchyard is for and who can skip it, how to check with
+  `switchyard replay` before installing, what changes once it is installed, and what it does not do. The plugin
+  description and keywords say the same. `docs/marketplace-submission.md` holds the directory submission text.
+
 ## 0.8.0
 
 ### Security
