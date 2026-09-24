@@ -211,19 +211,21 @@ describe('daemon server', () => {
   });
 
   it('長く待ったジョブは、grant の直後に started が tick をまたいで遅れても、心拍の途絶と判定されない(C1)', async () => {
-    const { d } = await daemon({ heartbeatTimeoutMs: 150, isAlive: () => false });
+    // 途絶の猶予(300ms)より長く B を待たせる(700ms)。心拍の間隔(30ms)に対して猶予は 10 倍あり、
+    // 負荷のかかった CI でも A 自身は途絶しない(猶予 150ms・心拍を B の要求の後から送る形では、CI で A が途絶して落ちた)
+    const { d } = await daemon({ heartbeatTimeoutMs: 300, isAlive: () => false });
     const a = await client(d.sock);
     a.send({ t: 'request', job: jobRequest({ session: 'sA', locks: ['port:4173'] }) });
     const accA = await a.next((m) => m.t === 'accepted');
     await a.next((m) => m.t === 'grant');
     a.send({ t: 'started', jobId: accA.jobId, pid: 1, pgid: null });
+    // A は started の直後から心拍を送り続けて自分のリースを保つ(待っている B は、実装どおり心拍を送らない)
+    const hb = setInterval(() => a.send({ t: 'hb', jobId: accA.jobId }), 30);
     const b = await client(d.sock);
     b.send({ t: 'request', job: jobRequest({ session: 'sB', locks: ['port:4173'] }) });
     const accB = await b.next((m) => m.t === 'accepted');
     await b.next((m) => m.t === 'queued');
-    // A は心拍を送り続けて自分のリースを保つ(待っている B は、実装どおり心拍を送らない)
-    const hb = setInterval(() => a.send({ t: 'hb', jobId: accA.jobId }), 30);
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 700));
     clearInterval(hb);
     a.send({ t: 'exit', jobId: accA.jobId, code: 0, killedByCaller: false, durationMs: 1 });
     await a.next((m) => m.t === 'ok');
