@@ -58,8 +58,8 @@ overlapped, it says so, and you can take it out with `switchyard uninstall`.
   are written as `***`. The command itself runs unchanged.
 - **Commands a shim cannot see are wrapped for you.** `./gradlew test`, `./mvnw verify` or `.venv/bin/pytest` on a line
   of its own is rewritten to `switchyard run -- ./gradlew test` and runs in the queue. Claude Code checks permission on
-  the rewritten command, so an allow rule for `./gradlew test` alone does not approve it; you are asked, or allow
-  `Bash(switchyard run:*)`. Chained forms (`cd app && ./gradlew test`) are refused with the exact `switchyard run -- …`
+  the rewritten command, so an allow rule for `./gradlew test` alone does not approve it: you are asked, or add the
+  same rule for the wrapped form (`Bash(switchyard run -- ./gradlew test)`). Chained forms (`cd app && ./gradlew test`) are refused with the exact `switchyard run -- …`
   to use instead, and Claude follows it on its own. `SWITCHYARD_WRAP=0` refuses every form instead of rewriting.
 - **Runs keep to their share.** The share a run is given reaches the tool as its thread or worker count
   (`CARGO_BUILD_JOBS`, `RUST_TEST_THREADS`, `RAYON_NUM_THREADS`, `GOMAXPROCS`, `OMP_NUM_THREADS`,
@@ -301,6 +301,14 @@ nothing else.
   itself is still given every core; set `SWITCHYARD_CAPACITY` lower, or `SWITCHYARD_THREAD_ENV=0`, if that is too much.
 - **Git worktrees?** Each worktree has its own index, so the git lock (off by default) never makes them wait. Test and
   build runs from different worktrees do share the CPU queue, which is the point.
+- **What does allowing `switchyard run` approve?** Allow the wrapped forms you actually use, the way you allow the
+  unwrapped ones: `Bash(switchyard run -- ./gradlew test)`, or `Bash(switchyard run -- ./gradlew:*)` for every Gradle
+  task. A broad `Bash(switchyard run:*)` would let any command through inside the wrapper, so `PreToolUse` narrows it:
+  when what `switchyard run` wraps is not a test or build switchyard itself would queue (the built-in table, your
+  `switchyard.json`, or a form like `./gradlew test`), you are asked to approve it whatever your allow rules say.
+  `--profile` does not count, since it can be put in front of anything. A wrap you use on purpose (say
+  `switchyard run --lock db -- docker compose up -d`) is asked about each time until a profile in `switchyard.json`
+  matches it. This check stays on in observe mode; `SWITCHYARD_RUN_GUARD=0` turns it off.
 - **Headless `claude -p`?** The hooks run the same way. Nothing holds a session back by default, so a scripted run
   ends normally. Sending a run to the background makes little sense when nobody waits for the notice;
   `SWITCHYARD_BACKGROUND=never` keeps every run in the foreground (it still waits its turn). This has not been tested
@@ -385,7 +393,7 @@ node bin/switchyard.mjs replay --since 14d
   `Authorization:` ヘッダ・`sk-…`・`ghp_…`・`AKIA…` などのトークンの形)は `***` として記録する。走らせるコマンドは変えない。
 - **shim から見えないコマンドは代わりに包む。** 1 行だけの `./gradlew test`・`./mvnw verify`・`.venv/bin/pytest` は
   `switchyard run -- ./gradlew test` に書き換えて順番待ちに乗せる。Claude Code は書き換えた後のコマンドで権限を確かめるので、
-  `./gradlew test` だけを許す設定ではそのまま通らない(承認を求められる。`Bash(switchyard run:*)` を許してもよい)。
+  `./gradlew test` だけを許す設定ではそのまま通らない(承認を求められる。包んだ形にも同じ許可を足す: `Bash(switchyard run -- ./gradlew test)`)。
   つないだ形(`cd app && ./gradlew test`)は拒否し、代わりに使う `switchyard run -- …` を示す。Claude は自分でそれに従う。
   `SWITCHYARD_WRAP=0` にすると、書き換えずにどの形も拒否する。
 - **走行は自分の取り分を守る。** 割り当てたコア数を、道具が読むスレッド数・ワーカー数として渡す(`CARGO_BUILD_JOBS`・
@@ -582,6 +590,13 @@ switchyard は hook を 3 つ入れる。作業を止めうるのは `PreToolUse
   switchyard の中で単独の走行にも全コアを渡すので、多すぎるなら `SWITCHYARD_CAPACITY` を下げるか `SWITCHYARD_THREAD_ENV=0` にする。
 - **git の worktree は。** worktree ごとに index は別なので、git の鍵(既定は無効)で待つことはない。別の worktree からのテストや
   ビルドは CPU の順番待ちを分け合う。それが狙い。
+- **`switchyard run` を許すと何が通るか。** 包まない形を許すのと同じように、使う包みの形だけを許す:
+  `Bash(switchyard run -- ./gradlew test)`、Gradle のタスクすべてなら `Bash(switchyard run -- ./gradlew:*)`。
+  `Bash(switchyard run:*)` と広く許すと、包みの中なら何でも通ってしまうので、`PreToolUse` が絞る: `switchyard run` が包むのが、
+  switchyard 自身も順番待ちに乗せるテストやビルド(既定の表・`switchyard.json`・`./gradlew test` のような形)でなければ、
+  許可の設定にかかわらず承認を求める。`--profile` は何の前にも付けられるので数えない。わざと包む形
+  (例: `switchyard run --lock db -- docker compose up -d`)は、`switchyard.json` の profile に当たるまで毎回承認を求められる。
+  観察だけのモードでもこの確認は働く。`SWITCHYARD_RUN_GUARD=0` で止める。
 - **headless の `claude -p` では。** hook は同じように動く。既定では何もセッションを差し戻さないので、スクリプトの走行は普通に
   終わる。知らせを待つ人がいないので背景に回す意味は薄く、`SWITCHYARD_BACKGROUND=never` で前景のまま走らせられる(順番は
   普段どおり待つ)。大規模にはまだ試していない。

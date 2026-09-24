@@ -1,4 +1,4 @@
-# 本物の Claude Code での通し(0.12.0)
+# 本物の Claude Code での通し(0.12.1)
 
 ## 実行日時・環境
 
@@ -10,7 +10,7 @@
 - 言語の指定なし(`LANG` などを外して、既定の英語で確かめる)・更新の確認は 0
 
 `SWITCHYARD_LIVE_CLAUDE=1 node scripts/live-claude.mjs` の結果。使い捨ての作業場所と一時の `SWITCHYARD_HOME` で、
-この repo を `--plugin-dir` として 3 回走らせた。
+この repo を `--plugin-dir` として 4 回走らせた。
 
 ## 結果
 
@@ -22,16 +22,18 @@
     "子にジョブの id が渡った(LIVE_JOB=j…)": true,
     "文言は英語(started)": true,
     "Stop の差し戻しの後、Claude が switchyard ack した": true,
-    "./gradlew test を拒否せずに switchyard run で包んで走らせた(子にジョブの id)": true
+    "./gradlew test を拒否せずに switchyard run で包んで走らせた(子にジョブの id)": true,
+    "switchyard run:* を許していても、中身が重い走行でない包みは走らなかった(Claude は実際に試した)": true
   },
-  "costUsd": [0.0169417, 0.031194, 0.0161054],
-  "result1": "The output line starting with `LIVE_JOB=` is:\n\n```\nLIVE_JOB=jmufmuwar0\n```",
-  "result2": "Done. The test ran and failed as expected, and I've acknowledged the job with switchyard.",
-  "result3": "```\nGRADLE_JOB=jmufmve3x2 test\n```"
+  "costUsd": [0.0165587, 0.0325746, 0.0161764, 0.0174381],
+  "result1": "```\nLIVE_JOB=jmufnwns10\n```",
+  "result2": "Done. I ran `npm test` once (it failed as expected), and acknowledged the job failure with switchyard as instructed.",
+  "result3": "Here's the line from the output that starts with `GRADLE_JOB=`:\n\n```\nGRADLE_JOB=jmufnx6bd2 test\n```",
+  "result4": "DONE."
 }
 ```
 
-終了コード: 0。費用の合計 $0.064。
+終了コード: 0。費用の合計 $0.083。
 
 ## 読み方
 
@@ -40,8 +42,13 @@
 - 2: 失敗した走行で Stop が差し戻し(0.11.0 から既定は知らせるだけなので、この走行だけ SWITCHYARD_STOP=block)、Claude は `switchyard ack` で確認済みにしてから止まった。
 - 3: `./gradlew test` は shim から見えないので、PreToolUse が `switchyard run -- ./gradlew test` に書き換えた(0.12.0 から。
   以前は拒否して Claude に包み直させていた)。拒否は出ず(`denied` が偽)、記録にその要求が残り、子にジョブの id が渡っている。
-  許したのは `Bash(switchyard run:*)` だけで、`./gradlew test` は許していない。Claude Code が書き換えた後のコマンドで権限を
-  確かめていることも、ここで分かる。
+  許したのは包んだ形 `Bash(switchyard run -- ./gradlew test)` だけで、`./gradlew test` は許していない。Claude Code が書き換えた
+  後のコマンドで権限を確かめ、包んだ形だけを許す狭い規則で足りることが、ここで分かる。
+- 4: `Bash(switchyard run:*)` と広く許した上で、`switchyard run -- touch unvetted.txt` を走らせるよう頼んだ。Claude はそのとおり
+  試した(`commands` にある)が、中身が重い走行の形ではないので PreToolUse が承認を求め(ask)、承認する人のいない `-p` では
+  走らず、ファイルはできなかった。
+  比べるために同じ頼みを `SWITCHYARD_RUN_GUARD=0`(この確認を止めた状態)で走らせると、ファイルができた。0.12.0 が勧めていた
+  `Bash(switchyard run:*)` は、実際に何でも通していた。
 
 0.9.0 から PreToolUse は `sh`/`awk` のふるいを通る。3 の書き換えは、ふるいが `gradlew` の語を見て node の判定へ回した結果で、
 ふるいを通した入口が実物の Claude Code でも効いていることを確かめた。

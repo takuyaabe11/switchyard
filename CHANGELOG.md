@@ -3,6 +3,18 @@
 All notable changes to switchyard. Versions follow `plugin.json`; Claude Code only offers an update when that
 version goes up.
 
+## 0.12.1
+
+### Security
+- `PreToolUse` now asks for approval when `switchyard run` wraps something that is not a test or build switchyard itself
+  would queue (the built-in table, `switchyard.json`, or a form like `./gradlew test`), whatever the allow rules say.
+  0.12.0 suggested allowing `Bash(switchyard run:*)` for the automatic wrapping, which would have approved
+  `switchyard run -- <anything>` without a prompt; that suggestion is withdrawn. Allow the wrapped forms you use
+  instead (`Bash(switchyard run -- ./gradlew test)`, `Bash(switchyard run -- ./gradlew:*)`). `--profile` does not make a
+  wrap count. When the wrapped run would be heavy, the move to the background comes with the prompt. The check also
+  works in observe mode; `SWITCHYARD_RUN_GUARD=0` turns it off. The hook log records these as `ask`, and
+  `switchyard replay` counts them.
+
 ## 0.12.0
 
 ### Added
@@ -22,7 +34,7 @@ version goes up.
 - A heavy command the shims cannot see (`./gradlew test`, `./mvnw verify`, `.venv/bin/pytest`) on a line of its own is
   now rewritten to `switchyard run -- …` instead of being refused, saving Claude a round trip. Claude Code checks
   permission on the rewritten command (confirmed with the real CLI), so this approves nothing new: an allow rule for
-  `./gradlew test` alone no longer covers it, and you are asked, or allow `Bash(switchyard run:*)`. Chained forms are
+  `./gradlew test` alone no longer covers it, and you are asked, or allow the wrapped form (see 0.12.1). Chained forms are
   still refused with the command to use. `SWITCHYARD_WRAP=0` refuses every form as before.
   `SWITCHYARD_BACKGROUND=never` keeps the rewrite and only drops the move to the background.
 - `switchyard replay` and the observe-mode summary count these rewrites separately ("wrapped in switchyard run").

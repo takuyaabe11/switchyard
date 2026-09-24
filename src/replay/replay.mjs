@@ -14,7 +14,7 @@ import { t } from '../i18n.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
 /** @typedef {{ id: string, command: string, runInBackground: boolean, cwd: string, timestamp: string }} BashCall */
-/** @typedef {'deny' | 'wrap' | 'background' | 'already-background' | 'none'} HookVerdict */
+/** @typedef {'deny' | 'ask' | 'wrap' | 'background' | 'already-background' | 'none'} HookVerdict */
 /** @typedef {{ hook: HookVerdict, shims: Array<{ word: string, answer: string }> }} Judgement */
 /** trigger は、判定を起こした部分(単純コマンド 1 つ)。コマンド全体と同じなら省く */
 /** @typedef {{ timestamp: string, cwd: string, command: string, trigger?: string }} Example */
@@ -24,7 +24,7 @@ import { t } from '../i18n.mjs';
  *   calls: number,
  *   first: string | null,
  *   last: string | null,
- *   hook: { deny: number, wrap: number, background: number, alreadyBackground: number, none: number },
+ *   hook: { deny: number, ask: number, wrap: number, background: number, alreadyBackground: number, none: number },
  *   shim: { run: Record<string, number>, lock: number, pass: number },
  *   examples: { deny: Example[], wrap: Example[], background: Example[] }
  * }} Report
@@ -74,6 +74,12 @@ function denied(out) {
   return h?.permissionDecision === 'deny';
 }
 
+/** @param {Record<string, unknown> | null} out @returns {boolean} */
+function asked(out) {
+  const h = out === null ? undefined : /** @type {Record<string, unknown> | undefined} */ (out.hookSpecificOutput);
+  return h?.permissionDecision === 'ask';
+}
+
 /** switchyard run -- で包む書き換えか @param {Record<string, unknown> | null} out @param {string} command @returns {boolean} */
 function wrapped(out, command) {
   const h = out === null ? undefined : /** @type {{ updatedInput?: { command?: unknown } } | undefined} */ (out.hookSpecificOutput);
@@ -92,12 +98,13 @@ export function judgeCall(call, { profilesFor, git = false }) {
   /** @type {HookVerdict} */
   let hook = 'none';
   if (denied(out)) hook = 'deny';
+  else if (asked(out)) hook = 'ask';
   else if (wrapped(out, call.command)) hook = 'wrap';
   else if (out !== null) hook = 'background';
   else if (call.runInBackground) {
     // 既に背景なら hook は何も返さない。前景だったら書き換えたかで、重い走行かを見分ける
     const asForeground = preToolUse(foreground, opts);
-    if (asForeground !== null && !denied(asForeground)) hook = 'already-background';
+    if (asForeground !== null && !denied(asForeground) && !asked(asForeground)) hook = 'already-background';
   }
 
   /** @type {Judgement['shims']} */
@@ -127,7 +134,7 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
     calls: 0,
     first: null,
     last: null,
-    hook: { deny: 0, wrap: 0, background: 0, alreadyBackground: 0, none: 0 },
+    hook: { deny: 0, ask: 0, wrap: 0, background: 0, alreadyBackground: 0, none: 0 },
     shim: { run: {}, lock: 0, pass: 0 },
     examples: { deny: [], wrap: [], background: [] },
   };
@@ -162,6 +169,8 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
         if (j.hook === 'deny') {
           report.hook.deny += 1;
           all.deny.push(example);
+        } else if (j.hook === 'ask') {
+          report.hook.ask += 1;
         } else if (j.hook === 'wrap') {
           report.hook.wrap += 1;
           all.wrap.push(example);
@@ -236,6 +245,7 @@ export function formatReport(r, { cwdPrefix, sinceDays, examples }) {
     const share = (/** @type {number} */ n) => t(`${n} 件(${pct(n)}%)`, `${n} (${pct(n)}%)`);
     lines.push('PreToolUse');
     lines.push(t(`  拒否: ${share(r.hook.deny)}`, `  refused: ${share(r.hook.deny)}`));
+    lines.push(t(`  switchyard run の中身に承認を求める: ${share(r.hook.ask)}`, `  asked to approve what switchyard run wraps: ${share(r.hook.ask)}`));
     lines.push(t(`  switchyard run で包む: ${share(r.hook.wrap)}`, `  wrapped in switchyard run: ${share(r.hook.wrap)}`));
     lines.push(t(`  背景へ書き換え: ${share(r.hook.background)}`, `  sent to background: ${share(r.hook.background)}`));
     lines.push(t(`  既に背景の重い走行: ${share(r.hook.alreadyBackground)}`, `  heavy and already in background: ${share(r.hook.alreadyBackground)}`));

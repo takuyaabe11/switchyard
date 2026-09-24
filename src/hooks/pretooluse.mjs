@@ -200,6 +200,23 @@ function wrapperOf(args, profiles) {
   return { ...need, argv };
 }
 
+/**
+ * switchyard run の `--` の後ろが、switchyard 自身も順番待ちに乗せる形か。
+ * 既定の表か switchyard.json の profile に当たる形と、shim から見えない重い形(./gradlew test・.venv/bin/pytest)だけを認める。
+ * `--profile` の名前は見ない(付ければ何でも通る)。パスで呼ぶ形は、ビルドの包み・node_modules/.bin・仮想環境・shim の語の実行ファイルだけ
+ * (拒否の案内が勧める `switchyard run -- /usr/local/bin/npm test` を通す)。
+ * @param {string[]} argv @param {NamedProfile[]} profiles @returns {boolean}
+ */
+function vettedInner(argv, profiles) {
+  const [head = '', ...rest] = argv;
+  if (head === '') return false;
+  if (!head.includes('/')) return classify(classifiableCommand(argv), profiles) !== null;
+  const base = basename(head);
+  if (isHeavyWrapperScript(base, rest)) return true;
+  if (isProjectLocal(head) && !isVenvPath(head)) return classify(classifiableCommand(argv), profiles) !== null;
+  return (isVenvPath(head) || SHIM_WORDS.includes(base)) && classify(classifiableCommand([base, ...rest]), profiles) !== null;
+}
+
 /** profile が要求する資源(buildRequest と同じ既定: CPU 1) @param {import('../config/profiles.mjs').Profile} p @returns {Heavy} */
 const needOf = (p, /** @type {string} */ name) => ({ jobClass: p.class, cpusMin: p.cpus?.min ?? 1, locks: p.locks ?? [], profile: name });
 
@@ -254,6 +271,8 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
   const overridden = [];
   /** @type {string[]} shim から見えない重い部分(./gradlew test・仮想環境の実行ファイル・activate の後の pytest) */
   const invisible = [];
+  /** @type {string[]} switchyard run で包んだ中身が、switchyard が順番待ちに乗せる形ではない部分 */
+  const unvetted = [];
   /** この単純コマンドより前で仮想環境を有効にしたか */
   let activated = false;
 
@@ -284,6 +303,7 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
     const run = switchyardRunArgs(head, rest);
     if (run !== null) {
       const w = wrapperOf(run, profiles);
+      if (!vettedInner(w.argv, profiles)) unvetted.push(text);
       if (w.jobClass !== 'quick') heavy.push({ jobClass: w.jobClass, cpusMin: w.cpusMin, locks: w.locks });
       visit(w.argv, true);
       return;
@@ -386,6 +406,26 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
             '差し替えを外すか(PATH を足すなら PATH=/足す場所:$PATH の形)、`switchyard run -- <その部分>` で包んでから実行する。',
           `[switchyard] overriding the environment (${BYPASS_VARS.join(' / ')}, env -i) keeps the shim from queueing: ${overridden.join(' / ')}. ` +
             'Drop the override (to add to PATH, use PATH=/extra:$PATH), or wrap it as `switchyard run -- <that part>`.',
+        ),
+      },
+    };
+  }
+  // switchyard run の中身が、switchyard が順番待ちに乗せる形でなければ、許可の設定にかかわらず承認を求める。
+  // Bash(switchyard run:*) を許すと `switchyard run -- <何でも>` が確かめられずに通ってしまうので、許可が及ぶのを重い走行の形だけに絞る。
+  // 拒否はしない(自分で包む形は正しい使い方でもある)。人が中身を見て決める。SWITCHYARD_RUN_GUARD=0 で止める
+  if (unvetted.length > 0 && env.SWITCHYARD_RUN_GUARD !== '0') {
+    // 承認の後に重い走行になるなら、背景へ回す書き換えも添える(ask と updatedInput は一緒に返せる)
+    const background = heavy.length > 0 && ti.run_in_background !== true && shouldBackground(heavy);
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        ...(background ? { updatedInput: { ...ti, run_in_background: true } } : {}),
+        permissionDecision: 'ask',
+        permissionDecisionReason: t(
+          `[switchyard] switchyard run の中身が、switchyard の順番待ちに乗せるテスト・ビルドの形ではない: ${unvetted.join(' / ')}。` +
+            'switchyard run を許す設定があっても、中身を確かめてから承認する(包む必要が無ければ、包まずに直接走らせる)。',
+          `[switchyard] this switchyard run does not wrap a test or build switchyard would queue: ${unvetted.join(' / ')}. ` +
+            'Approve it only after checking what it runs, even if switchyard run is allowed (if it does not need the queue, run it directly).',
         ),
       },
     };

@@ -54,7 +54,7 @@ const HEREDOC_COMMIT = `git commit -m "$(cat <<'EOF'\n${MESSAGE}\nEOF\n)"`;
  *   パスや PATH で呼んだ node のスクリプト(`#!/usr/bin/env node`)は、env が PATH の node を引くので node の shim を通る。
  * run: switchyard run の部分の `run` より後ろの引数と、包みが要求する性格。
  * hook: PreToolUse の答え。
- * @typedef {{ command: string, shims: Array<[string[], string]>, run?: [string[], string], hook: 'background' | 'deny' | null }} Row
+ * @typedef {{ command: string, shims: Array<[string[], string]>, run?: [string[], string], hook: 'background' | 'deny' | 'ask' | null }} Row
  */
 
 /** @type {Row[]} */
@@ -100,7 +100,8 @@ const ROWS = [
     command: 'switchyard run --lock port:4173 -- node scripts/e2e.mjs',
     shims: [[['node', CLI, 'run', '--lock', 'port:4173', '--', 'node', 'scripts/e2e.mjs'], 'pass']],
     run: [['--lock', 'port:4173', '--', 'node', 'scripts/e2e.mjs'], 'batch'],
-    hook: 'background',
+    // 中身が表に当たらない包みは、switchyard run を許す設定があっても承認を求める(背景へ回す書き換えも添える)
+    hook: 'ask',
   },
   {
     command: 'switchyard run -- ./node_modules/.bin/vitest run',
@@ -146,16 +147,20 @@ const ROWS = [
     command: 'switchyard run -- node -e \'console.log("measure-suite")\'',
     shims: [[['node', CLI, 'run', '--', 'node', '-e', 'console.log("measure-suite")'], 'pass']],
     run: [['--', 'node', '-e', 'console.log("measure-suite")'], 'batch'],
-    hook: 'background',
+    hook: 'ask',
   },
 ];
 
-/** @param {Record<string, unknown> | null} out @returns {'background' | 'deny' | null} */
+/** @param {Record<string, unknown> | null} out @returns {'background' | 'deny' | 'ask' | null} */
 function outcome(out) {
   if (out === null) return null;
   const h = /** @type {Record<string, unknown>} */ (out.hookSpecificOutput);
   assert.notEqual(h.permissionDecision, 'allow', 'PreToolUse は allow を返さない');
   if (h.permissionDecision === 'deny') return 'deny';
+  if (h.permissionDecision === 'ask') {
+    assert.equal(/** @type {Record<string, unknown>} */ (h.updatedInput).run_in_background, true, '承認の後に重い走行になるので背景へ回す');
+    return 'ask';
+  }
   assert.equal(h.permissionDecision, undefined);
   assert.equal(/** @type {Record<string, unknown>} */ (h.updatedInput).run_in_background, true);
   return 'background';

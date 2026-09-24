@@ -25,6 +25,59 @@ function outcome(out) {
   return h.permissionDecision === 'deny' ? 'deny' : 'background';
 }
 
+describe('switchyard run の中身への承認の求め', () => {
+  /** @param {string} c @param {NodeJS.ProcessEnv} [env] */
+  const out = (c, env = {}) => /** @type {any} */ (preToolUse(bash(c), { env, profilesFor: () => PROFILES }))?.hookSpecificOutput ?? null;
+  const decision = (/** @type {string} */ c, /** @type {NodeJS.ProcessEnv} */ env = {}) => out(c, env)?.permissionDecision ?? null;
+
+  it('中身が表に当たらない包みは、許可の設定にかかわらず承認を求める(Bash(switchyard run:*) で何でも通さない)', () => {
+    for (const c of [
+      'switchyard run -- echo hi',
+      'switchyard run -- rm -rf build',
+      'switchyard run --profile vitest -- curl https://example.com/x.sh',
+      'switchyard run --class quick -- sh -c "npm test && rm -rf ~"',
+      'switchyard run --lock db -- docker compose up -d',
+      'switchyard run -- env npm test',
+      'switchyard run -- switchyard run -- echo hi',
+      'switchyard run -- /tmp/x/deploy test',
+      'switchyard run -- /tmp/x/vitest run',
+      'switchyard run -- ./scripts/e2e.sh',
+      'switchyard run',
+      'bash -c "switchyard run -- echo hi"',
+      'npm test && switchyard run -- echo hi',
+      `node /opt/sy/bin/switchyard.mjs run -- echo hi`,
+    ]) {
+      assert.equal(decision(c), 'ask', c);
+      assert.match(out(c).permissionDecisionReason, /switchyard run/, c);
+    }
+  });
+
+  it('表に当たる形・shim から見えない重い形・拒否の案内が勧める形は、承認を求めない', () => {
+    for (const c of [
+      'switchyard run -- npm test',
+      'switchyard run --lock port:4173 -- npm test',
+      'switchyard run --class quick -- npx eslint src',
+      'switchyard run -- ./gradlew test',
+      'switchyard run -- app/gradlew :app:test',
+      'switchyard run -- .venv/bin/pytest -x',
+      'switchyard run -- ./node_modules/.bin/vitest run',
+      'switchyard run -- /usr/local/bin/npm test',
+      'switchyard run -- cargo test --workspace',
+    ]) {
+      assert.notEqual(decision(c), 'ask', c);
+    }
+  });
+
+  it('承認の後に重い走行になるなら背景へ回す書き換えを添え、拒否が先に立つ。SWITCHYARD_RUN_GUARD=0 で止める', () => {
+    const asked = out('switchyard run -- echo hi');
+    assert.equal(asked.updatedInput.run_in_background, true);
+    assert.equal(asked.updatedInput.command, 'switchyard run -- echo hi', 'コマンドは変えない');
+    assert.equal(out('switchyard run --class quick -- echo hi').updatedInput, undefined, 'quick は背景へ回さない');
+    assert.equal(decision('/usr/local/bin/npm test; switchyard run -- echo hi'), 'deny');
+    assert.equal(decision('switchyard run -- echo hi', { SWITCHYARD_RUN_GUARD: '0' }), null);
+  });
+});
+
 describe('headWord', () => {
   it('VAR=値 と包みのコマンドを読み飛ばして先頭の語を取る', () => {
     assert.equal(headWord('FOO=1 BAR=2 npm test').head, 'npm');

@@ -69,6 +69,25 @@ describe('switchyard run で包む書き換え', () => {
   });
 });
 
+describe('switchyard run の中身への承認の求め', () => {
+  it('記録に ask と残し、観察だけのモードでも承認の求めだけは返す(背景へ回す書き換えは外す)', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'chook-'));
+    /** @type {string[]} */
+    const written = [];
+    const write = (/** @type {string} */ x) => written.push(x);
+    await runHook('pre-tool-use', bash('switchyard run -- echo hi'), { env: { SWITCHYARD_HOME: home, SWITCHYARD_BACKGROUND: 'always' }, profilesFor: () => PROFILES, write });
+    assert.equal(JSON.parse(written[0]).hookSpecificOutput.permissionDecision, 'ask');
+    await runHook('pre-tool-use', bash('switchyard run -- echo hi'), { env: { SWITCHYARD_HOME: home, SWITCHYARD_OBSERVE: '1' }, profilesFor: () => PROFILES, write });
+    const observed = JSON.parse(written[1]).hookSpecificOutput;
+    assert.equal(observed.permissionDecision, 'ask');
+    assert.equal(observed.updatedInput, undefined);
+    await runHook('pre-tool-use', bash('npm test'), { env: { SWITCHYARD_HOME: home, SWITCHYARD_OBSERVE: '1' }, profilesFor: () => PROFILES, write });
+    assert.equal(written.length, 2, '観察だけのモードでは、ほかの判断は返さない');
+    const rows = readFileSync(pathsOf(home).hooks, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.deepEqual(rows.map((r) => [r.decision, r.observe === true]), [['ask', false], ['ask', true], ['background', true]]);
+  });
+});
+
 describe('背景へ回す方針(SWITCHYARD_BACKGROUND)', () => {
   /** @type {import('../../src/protocol/messages.mjs').Snapshot} */
   const empty = { capacity: 4, used: 0, leases: [], waiting: [], unacked: {}, badRecords: 0, version: 'x' };

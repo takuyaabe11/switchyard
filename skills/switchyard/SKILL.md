@@ -36,6 +36,7 @@ switchyard は、同じマシンで動く Claude Code のセッションが重�
 - 拒否されるのは、shim の語(`npm` / `npx` / `node` / `yarn` / `pnpm` / `bun` / `cargo` / `pytest` / `python` / `uv` / `go` / `mvn` / `gradle` / `dotnet` / `rspec` / `deno` / `make` / `git` など)の実行ファイルを、仮想環境・`node_modules/.bin` の外のパスで直に呼んだとき(`/usr/local/bin/npm test`。`git` は `SWITCHYARD_GIT=1` のときだけ)と、管理対象のコマンドに `PATH` の差し替え(`$PATH` を残さない形)・`env -i`・`SWITCHYARD_IN_JOB` / `SWITCHYARD_HELD_LOCKS` / `SWITCHYARD_OFF` を付けたとき。
 - shim から見えない重い形(`./gradlew test`・`./mvnw verify`・`.venv/bin/pytest`・`source .venv/bin/activate` の後の `pytest`)は、それだけの 1 行なら switchyard が `switchyard run -- …` に書き換えて走らせる(何もしなくてよい)。`&&` などでつないだ形や `SWITCHYARD_WRAP=0` のときは拒否されるので、その部分を `switchyard run -- <その部分>` で包んで実行する。
 - パスを付けずに名前で呼ぶ形(例: `npm test`・`git commit`)に書き直す。書き直せないときだけ `switchyard run -- <その部分>` で包む(包んだコマンドには普段どおり権限の確認が出る)。
+- `switchyard run -- …` で包むのは、switchyard が順番待ちに乗せるテストやビルドだけにする。それ以外(`echo`・`docker compose`・自作のスクリプト)を包むと、許可の設定にかかわらず承認を求められる。重い走行でないなら包まずに直接走らせる。
 - スクリプトをパスで呼ぶ形(`scripts/probe-run.sh …`・`./node_modules/.bin/vitest run`)は拒否されない。`cat` / `grep` / `ls` / `cd` のような読むだけのコマンドは、引数に `bench` や `measure` があっても何もされない。包まない(包むと重い走行として順番を待つ)。
 
 ## してはいけないこと

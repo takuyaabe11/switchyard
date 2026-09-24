@@ -723,8 +723,8 @@ const SUITES = {
         // 記録: 拒否も背景として記録する(種別が読めなくなる)
         name: 'H22 拒否を背景として記録する',
         file: 'src/hooks/main.mjs',
-        from: "const decision = h.permissionDecision === 'deny' ? 'deny' : updated !== undefined && updated.command !== ti.command ? 'wrap' : 'background';",
-        to: "const decision = h.permissionDecision === 'deny' ? 'deny' : 'background';",
+        from: "h.permissionDecision === 'deny' || h.permissionDecision === 'ask' ? h.permissionDecision : updated !== undefined && updated.command !== ti.command ? 'wrap' : 'background';",
+        to: "h.permissionDecision === 'deny' ? 'deny' : 'background';",
       },
       {
         // 記録: 何もしなかった分(out が null)まで書こうとする
@@ -854,7 +854,17 @@ const SUITES = {
     ],
   },
   trust: {
-    tests: ['test/redact.test.mjs', 'test/hooks/session.test.mjs', 'test/hooks/pretooluse.test.mjs', 'test/shim/decide.test.mjs', 'test/shim/shims.test.mjs', 'test/hooks/sieve.test.mjs'],
+    tests: [
+      'test/redact.test.mjs',
+      'test/hooks/session.test.mjs',
+      'test/hooks/pretooluse.test.mjs',
+      'test/hooks/main.test.mjs',
+      'test/hooks/agreement.test.mjs',
+      'test/replay/replay.test.mjs',
+      'test/shim/decide.test.mjs',
+      'test/shim/shims.test.mjs',
+      'test/hooks/sieve.test.mjs',
+    ],
     mutations: [
       {
         name: 'T1 秘密らしい名前の代入を隠さない',
@@ -927,6 +937,60 @@ const SUITES = {
         file: 'src/hooks/session.mjs',
         from: "if (env.SWITCHYARD_UPDATE_CHECK !== '1') return null;",
         to: "if (env.SWITCHYARD_UPDATE_CHECK === '0') return null;",
+      },
+      {
+        name: 'T13 switchyard run の中身を見ずに通す(Bash(switchyard run:*) で何でも通る)',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "if (unvetted.length > 0 && env.SWITCHYARD_RUN_GUARD !== '0') {",
+        to: 'if (false) {',
+      },
+      {
+        name: 'T14 SWITCHYARD_RUN_GUARD=0 を見ない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: " && env.SWITCHYARD_RUN_GUARD !== '0'",
+        to: '',
+      },
+      {
+        name: 'T15 --profile を付けた包みを中身を見ずに通す',
+        file: 'src/hooks/pretooluse.mjs',
+        from: 'if (!vettedInner(w.argv, profiles)) unvetted.push(text);',
+        to: "if (!vettedInner(w.argv, profiles) && !('profile' in w)) unvetted.push(text);",
+      },
+      {
+        name: 'T16 パスで呼ぶ任意の実行ファイルを、名前が表に当たれば通す',
+        file: 'src/hooks/pretooluse.mjs',
+        from: 'return (isVenvPath(head) || SHIM_WORDS.includes(base)) && classify(',
+        to: 'return classify(',
+      },
+      {
+        name: 'T17 ./gradlew test の包みにも承認を求める',
+        file: 'src/hooks/pretooluse.mjs',
+        from: '  if (isHeavyWrapperScript(base, rest)) return true;\n  if (isProjectLocal(head)',
+        to: '  if (isProjectLocal(head)',
+      },
+      {
+        name: 'T18 承認を求めるとき背景へ回す書き換えを落とす',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "        ...(background ? { updatedInput: { ...ti, run_in_background: true } } : {}),\n        permissionDecision: 'ask',",
+        to: "        permissionDecision: 'ask',",
+      },
+      {
+        name: 'T19 観察だけのモードで承認の求めを返さない',
+        file: 'src/hooks/main.mjs',
+        from: 'if (isAsk(observed)) {',
+        to: 'if (false) {',
+      },
+      {
+        name: 'T20 観察だけのモードで背景へ回す書き換えまで返す',
+        file: 'src/hooks/main.mjs',
+        from: 'write(JSON.stringify({ hookSpecificOutput: h }));',
+        to: 'write(JSON.stringify(observed));',
+      },
+      {
+        name: 'T21 replay が承認の求めを背景に数える',
+        file: 'src/replay/replay.mjs',
+        from: "  else if (asked(out)) hook = 'ask';\n",
+        to: '',
       },
     ],
   },
