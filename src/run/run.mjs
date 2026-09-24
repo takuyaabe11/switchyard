@@ -15,6 +15,7 @@ import { appendRecord } from '../daemon/store.mjs';
 import { readPgid, renicePriority, signalGroup, spawnMeasured, verifiedGroup, waitGroupGone } from './group.mjs';
 import { createEscapeTracker, nextWatchMs } from './watch.mjs';
 import { t } from '../i18n.mjs';
+import { IS_WINDOWS, killTree } from '../platform.mjs';
 
 /** @typedef {import('../core/types.mjs').JobClass} JobClass */
 /** @typedef {import('../core/types.mjs').CpuRange} CpuRange */
@@ -173,6 +174,11 @@ export function runJob(opts) {
     let commandPid = () => null;
     /** グループを確かめられないとき: sh(TERM を子へ送り直す)とコマンドそのものへ送る @param {NodeJS.Signals} sig */
     const signalDirect = (sig) => {
+      // Windows: 信号は届かない(TerminateProcess になる)ので、bash とその下の木ごと止める
+      if (IS_WINDOWS) {
+        if (child?.pid !== undefined && child.exitCode === null) killTree(child.pid);
+        return;
+      }
       const p = commandPid();
       if (p !== null) {
         try {
@@ -332,14 +338,14 @@ export function runJob(opts) {
       });
       if (c.pid === undefined) return;
       pgid = verifyGroup(c.pid, ownPgid);
-      if (pgid === null) {
+      if (pgid === null && !IS_WINDOWS) {
         out(
           t(
             '[switchyard] 子のプロセスグループを確かめられないので、グループへの信号は送らない(呼び出し元の終了だけを子に伝える)',
             "[switchyard] cannot confirm the child's process group, so no signal goes to the group (only the caller's exit is passed to the child)",
           ),
         );
-      } else {
+      } else if (pgid !== null) {
         // どのコマンドでも、子孫がグループから抜けるかを実行中に見る(設計 §13 V6)。
         // 顔ぶれが変わらない間は間隔を倍にして伸ばす(ps は 1 回が安くない。watch.mjs の nextWatchMs)
         const tr = createEscapeTracker({ rootPid: c.pid, pgid });

@@ -2,18 +2,18 @@
   "hooks": {
     "SessionStart": [
       {
-        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/switchyard-hook.mjs\" session-start" }]
+        "hooks": [{ "type": "command", "shell": "bash", "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/switchyard-hook.mjs\" session-start" }]
       }
     ],
     "PreToolUse": [
       {
         "matcher": "Bash",
-        "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/bin/switchyard-pretooluse.sh\"" }]
+        "hooks": [{ "type": "command", "shell": "bash", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/bin/switchyard-pretooluse.sh\"" }]
       }
     ],
     "Stop": [
       {
-        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/switchyard-hook.mjs\" stop" }]
+        "hooks": [{ "type": "command", "shell": "bash", "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/switchyard-hook.mjs\" stop" }]
       }
     ]
   }

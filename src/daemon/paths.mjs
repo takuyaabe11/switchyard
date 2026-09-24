@@ -2,6 +2,7 @@
 import { chmodSync, lstatSync, mkdirSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { IS_WINDOWS, socketPath } from '../platform.mjs';
 
 /** 記録の置き場所の権限。記録にはコマンドの全文(引数に渡した秘密も)が入るので、持ち主だけが読めるようにする */
 export const PRIVATE_DIR_MODE = 0o700;
@@ -15,6 +16,8 @@ export const PRIVATE_FILE_MODE = 0o600;
  */
 export function ensurePrivateDir(dir) {
   mkdirSync(dir, { recursive: true, mode: PRIVATE_DIR_MODE });
+  // Windows の権限はモードの数でなく ACL で決まる(置き場所はユーザーのプロファイルの下で、既定で本人だけが読める)
+  if (IS_WINDOWS) return;
   try {
     if ((lstatSync(dir).mode & 0o077) !== 0) chmodSync(dir, PRIVATE_DIR_MODE);
   } catch {
@@ -27,6 +30,7 @@ export function ensurePrivateDir(dir) {
  * @param {string} dir
  */
 export function tightenFiles(dir) {
+  if (IS_WINDOWS) return;
   /** @type {string[]} */
   let names = [];
   try {
@@ -56,7 +60,8 @@ export function switchyardHome(env = process.env) {
 export function pathsOf(home) {
   return {
     home,
-    sock: join(home, 'switchyardd.sock'),
+    // Windows は名前付きパイプ(src/platform.mjs)
+    sock: socketPath(home),
     lock: join(home, 'daemon.lock'),
     state: join(home, 'state.json'),
     events: join(home, 'events.jsonl'),

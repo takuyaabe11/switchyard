@@ -5,6 +5,8 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { connect } from 'node:net';
 import { pathsOf } from './paths.mjs';
+import { IS_WINDOWS, isNodePid } from '../platform.mjs';
+import { encode } from '../protocol/ndjson.mjs';
 import { t } from '../i18n.mjs';
 
 /** @typedef {{ stopped: boolean, pid: number | null, reason: string }} StopResult */
@@ -28,7 +30,8 @@ export function commandLooksLikeSwitchyardd(command) {
 
 /** socket に誰かが応答するか(応答すればデーモンが生きている) @param {string} sock @returns {Promise<boolean>} */
 export function answers(sock) {
-  if (!existsSync(sock)) return Promise.resolve(false);
+  // Windows の名前付きパイプはファイルとして見えない
+  if (!IS_WINDOWS && !existsSync(sock)) return Promise.resolve(false);
   return new Promise((resolve) => {
     const c = connect(sock);
     c.once('connect', () => {
@@ -51,11 +54,22 @@ export function lockPid(lock) {
 
 /** その pid が今 switchyardd として走っているか(pid の使い回しに備える。I1) @param {number} pid @returns {boolean} */
 export function isSwitchyarddPid(pid) {
+  if (IS_WINDOWS) return isNodePid(pid);
   try {
     return commandLooksLikeSwitchyardd(execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }));
   } catch {
     return false;
   }
+}
+
+/**
+ * 接続でデーモンに止まるよう頼む(Windows 用。Windows の SIGTERM は後片付けの機会の無い強制終了になる)。
+ * @param {string} sock
+ */
+export function requestShutdown(sock) {
+  const c = connect(sock);
+  c.on('error', () => {});
+  c.once('connect', () => c.end(encode({ t: 'shutdown' })));
 }
 
 /**
@@ -68,7 +82,7 @@ export async function stopDaemon({
   home,
   timeoutMs = 5_000,
   stepMs = 50,
-  signal = (pid) => process.kill(pid, 'SIGTERM'),
+  signal = IS_WINDOWS ? () => requestShutdown(pathsOf(home).sock) : (pid) => process.kill(pid, 'SIGTERM'),
   isDaemon = isSwitchyarddPid,
 }) {
   const p = pathsOf(home);

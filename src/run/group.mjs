@@ -1,9 +1,15 @@
 // @ts-check
 // 子を別のプロセスグループで起動し、そのグループにだけ信号を送る(設計 §4.3 / §7.1)。
+// Windows にはプロセスグループが無い。グループを確かめない(null)ので、呼び出し側は子へ直に(taskkill /T で子の木ごと)伝える
 import { execFile, execFileSync, spawn } from 'node:child_process';
+import { readFileSync, unlinkSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { findGitBash, IS_WINDOWS } from '../platform.mjs';
 
 /** @param {number} pid @returns {number | null} */
 export function readPgid(pid) {
+  if (IS_WINDOWS) return null;
   try {
     const n = Number(execFileSync('ps', ['-o', 'pgid=', '-p', String(pid)], { encoding: 'utf8' }).trim());
     return Number.isInteger(n) && n > 0 ? n : null;
@@ -18,6 +24,7 @@ export function readPgid(pid) {
  */
 export function spawnInOwnGroup(argv, opts = {}) {
   if (argv.length === 0) throw new Error('起動するコマンドが無い');
+  if (IS_WINDOWS) return spawn(gitBash(opts.env), ['-c', '"$@"', 'bash', ...argv], { env: opts.env, cwd: opts.cwd, stdio: opts.stdio ?? 'inherit', windowsHide: true });
   return spawn(argv[0], argv.slice(1), { detached: true, env: opts.env, cwd: opts.cwd, stdio: opts.stdio ?? 'inherit' });
 }
 
@@ -57,6 +64,17 @@ export function parseTimes(text) {
 }
 
 /**
+ * Windows で子を起動する bash(Git for Windows)。npm などは bash のスクリプトとしても入っているので、Bash ツールと同じ解決になる。
+ * 見つからなければ PATH の bash に任せる(起動できなければ呼び出し側に 'error' が届く)。
+ * @param {NodeJS.ProcessEnv} [env] @returns {string}
+ */
+function gitBash(env = process.env) {
+  return findGitBash(env) ?? 'bash';
+}
+
+let timesSeq = 0;
+
+/**
  * spawnInOwnGroup と同じく別のプロセスグループで起動し、子の実際の pid と、終わったときの子と子孫の CPU 時間(ms)を返す約束を付ける。
  * sh が信号で終わった・times を読めなかったときは null。
  * @param {string[]} argv
@@ -65,6 +83,7 @@ export function parseTimes(text) {
  */
 export function spawnMeasured(argv, opts = {}) {
   if (argv.length === 0) throw new Error('起動するコマンドが無い');
+  if (IS_WINDOWS) return spawnMeasuredWindows(argv, opts);
   const child = spawn('/bin/sh', ['-c', MEASURE_SCRIPT, 'sh', ...argv], { detached: true, env: opts.env, cwd: opts.cwd, stdio: ['inherit', 'inherit', 'inherit', 'pipe'] });
   const pipe = /** @type {import('node:stream').Readable | null} */ (child.stdio[3]);
   let text = '';
@@ -85,6 +104,40 @@ export function spawnMeasured(argv, opts = {}) {
     return Number.isInteger(n) && n > 1 ? n : null;
   };
   return { child, commandPid, cpuMs: /** @type {Promise<number | null>} */ (cpuMs) };
+}
+
+/**
+ * Windows 版の spawnMeasured。Git Bash の下で同じ台本を走らせ、番号 3 を一時ファイルへ向ける
+ * (Node から MSYS の bash へ番号 3 のパイプが渡るとは限らない)。台本の $0 がそのファイル、"$@" がコマンド。
+ * MSYS の pid は Windows の pid と別物なので、コマンドの pid は返さない(止めるときは bash の木ごと taskkill /T)。
+ * @param {string[]} argv @param {{ env?: NodeJS.ProcessEnv, cwd?: string }} opts
+ * @returns {{ child: import('node:child_process').ChildProcess, commandPid: () => number | null, cpuMs: Promise<number | null> }}
+ */
+function spawnMeasuredWindows(argv, opts) {
+  timesSeq += 1;
+  const file = join(tmpdir(), `switchyard-times-${process.pid}-${timesSeq}.txt`);
+  const script = `exec 3>"$0"\n${MEASURE_SCRIPT}`;
+  const child = spawn(gitBash(opts.env), ['-c', script, file, ...argv], { env: opts.env, cwd: opts.cwd, stdio: 'inherit', windowsHide: true });
+  const cpuMs = new Promise((resolve) => {
+    const read = () => {
+      /** @type {number | null} */
+      let ms = null;
+      try {
+        ms = parseTimes(readFileSync(file, 'utf8'));
+      } catch {
+        // 書かれなかった(bash が起動できなかった・信号で終わった)
+      }
+      try {
+        unlinkSync(file);
+      } catch {
+        // 無い
+      }
+      resolve(ms);
+    };
+    child.once('exit', read);
+    child.once('error', () => resolve(null));
+  });
+  return { child, commandPid: () => null, cpuMs: /** @type {Promise<number | null>} */ (cpuMs) };
 }
 
 /**
@@ -177,6 +230,7 @@ export async function waitGroupGone(pgid, timeoutMs, stepMs = 20) {
  * @returns {Promise<Map<number, number>>}
  */
 export function rssByGroup() {
+  if (IS_WINDOWS) return Promise.resolve(new Map());
   return new Promise((resolve) => {
     execFile('ps', ['-A', '-o', 'pgid=,rss=,stat='], { encoding: 'utf8' }, (err, out) => {
       /** @type {Map<number, number>} */

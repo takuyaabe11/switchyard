@@ -9,6 +9,7 @@ import { ensurePrivateDir, PRIVATE_FILE_MODE, switchyardHome, pathsOf } from './
 import { startDaemon } from './server.mjs';
 import { readJson } from './store.mjs';
 import { t } from '../i18n.mjs';
+import { IS_WINDOWS, isNodePid } from '../platform.mjs';
 
 /** 予約コアの初期値(設計 §5.1) @param {number} cores @returns {number} */
 export function defaultReserve(cores) {
@@ -62,6 +63,8 @@ function pidAlive(pid) {
  * @param {number} pid @returns {boolean}
  */
 function isSwitchyarddProcess(pid) {
+  // Windows には ps が無い。コマンドラインは安く読めないので、node として走っているかだけを見る
+  if (IS_WINDOWS) return isNodePid(pid);
   try {
     return commandLooksLikeSwitchyardd(execFileSync('ps', ['-o', 'command=', '-p', String(pid)], { encoding: 'utf8' }));
   } catch {
@@ -166,6 +169,10 @@ export async function main(env = process.env) {
       ...(positiveInt(env.SWITCHYARD_MEM_FLOOR_MB) === undefined ? {} : { memFloorMb: positiveInt(env.SWITCHYARD_MEM_FLOOR_MB) }),
       // 一度も仕事をしないまま静かなら、自分で終わる(次の要求で自動起動する)
       onIdleExit: () => {
+        void shutdown?.();
+      },
+      // switchyard stop(Windows では信号の代わりにこれで頼む)
+      onShutdown: () => {
         void shutdown?.();
       },
     });

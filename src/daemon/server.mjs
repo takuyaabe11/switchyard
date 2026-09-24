@@ -14,6 +14,7 @@ import { effectiveAvailableMb } from '../core/memory.mjs';
 import { environmentalReasons } from '../core/diagnose.mjs';
 import { VERSION } from '../version.mjs';
 import { ensurePrivateDir, pathsOf, SOCKET_PATH_LIMIT, tightenFiles } from './paths.mjs';
+import { IS_WINDOWS } from '../platform.mjs';
 import { rightSize } from '../core/usage.mjs';
 import { appendRecord, createStateWriter, loadEscapes, loadEstimates, loadMemory, loadUsage, parseState, readJournal, readJson, rotateRecords, takeUnmanaged } from './store.mjs';
 import { t } from '../i18n.mjs';
@@ -44,6 +45,7 @@ import { t } from '../i18n.mjs';
  *   readAvailableMb?: () => number,
  *   readRss?: () => Promise<Map<number, number>>,
  *   onIdleExit?: () => void,
+ *   onShutdown?: (() => void) | null,
  *   isAlive?: (pgid: number) => boolean,
  *   monoNow?: () => number,
  *   wallNow?: () => number
@@ -130,7 +132,8 @@ export function spareOf({ capacity, samples, leases }) {
 
 /** 残っている socket ファイルに誰かが応答すれば投げ、応答しなければ消す @param {string} sock */
 async function removeStaleSocket(sock) {
-  if (!existsSync(sock)) return;
+  // Windows の名前付きパイプはファイルとして残らない(待ち受けを閉じれば消える)。誰かが応答するかだけを見る
+  if (!IS_WINDOWS && !existsSync(sock)) return;
   const answered = await new Promise((resolve) => {
     const c = netConnect(sock);
     c.once('connect', () => {
@@ -140,7 +143,7 @@ async function removeStaleSocket(sock) {
     c.once('error', () => resolve(false));
   });
   if (answered) throw new Error(t(`別のデーモンが応答している: ${sock}`, `another daemon is answering: ${sock}`));
-  unlinkSync(sock);
+  if (!IS_WINDOWS) unlinkSync(sock);
 }
 
 /**
@@ -170,13 +173,15 @@ export async function startDaemon(opts) {
     readAvailableMb = availableMbOfMachine,
     readRss = rssByGroup,
     onIdleExit = null,
+    // 止める要求(switchyard stop)を受けたとき。Windows では SIGTERM が後片付けの機会の無い強制終了になるので、接続で頼む
+    onShutdown = null,
     isAlive = isGroupAlive,
     monoNow = defaultMono,
     wallNow = Date.now,
   } = opts;
   const p = pathsOf(home);
   const sockBytes = Buffer.byteLength(p.sock);
-  if (sockBytes > SOCKET_PATH_LIMIT) throw new Error(t(`socket のパスが長すぎる(${sockBytes} バイト > ${SOCKET_PATH_LIMIT}): ${p.sock}`, `socket path too long (${sockBytes} bytes > ${SOCKET_PATH_LIMIT}): ${p.sock}`));
+  if (!IS_WINDOWS && sockBytes > SOCKET_PATH_LIMIT) throw new Error(t(`socket のパスが長すぎる(${sockBytes} バイト > ${SOCKET_PATH_LIMIT}): ${p.sock}`, `socket path too long (${sockBytes} bytes > ${SOCKET_PATH_LIMIT}): ${p.sock}`));
   ensurePrivateDir(home);
   // 0.7.0 以前に他のユーザーからも読める権限で作った記録を締め直す
   tightenFiles(home);
@@ -493,6 +498,14 @@ export async function startDaemon(opts) {
         }
         case 'unacked':
           send(conn, { t: 'unacked', jobs: state.unacked[String(m.session)] ?? [] });
+          return;
+        case 'shutdown':
+          if (onShutdown === null) {
+            send(conn, { t: 'error', message: t('このデーモンは接続からは止められない', 'this daemon cannot be stopped over the connection') });
+            return;
+          }
+          send(conn, { t: 'ok', pid: process.pid });
+          setImmediate(onShutdown);
           return;
         default:
           send(conn, { t: 'error', message: t(`知らないメッセージ: ${String(m.t)}`, `unknown message: ${String(m.t)}`) });
