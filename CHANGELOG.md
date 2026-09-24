@@ -3,6 +3,27 @@
 All notable changes to switchyard. Versions follow `plugin.json`; Claude Code only offers an update when that
 version goes up.
 
+## 0.10.0
+
+### Added
+- The share a run is given now reaches the tool: `CARGO_BUILD_JOBS`, `RUST_TEST_THREADS`, `RAYON_NUM_THREADS`,
+  `GOMAXPROCS`, `OMP_NUM_THREADS`, `PYTEST_XDIST_AUTO_NUM_WORKERS` (`pytest -n auto`) and Vitest's `VITEST_MAX_THREADS`,
+  `VITEST_MAX_FORKS` and `VITEST_MAX_WORKERS` are set for runs the daemon admits, plus `SWITCHYARD_THREADS`. A value
+  already in the environment or in the profile's `env` wins. A run given the whole capacity gets every core; a run
+  sized down to its measured use keeps its declared maximum, since it mostly waits. `SWITCHYARD_THREAD_ENV=0` turns
+  it off.
+- Observe-only mode, `SWITCHYARD_OBSERVE=1`: nothing is held back, queued or refused. Heavy runs start at once and
+  their start and end go to `observed.jsonl`; `PreToolUse` verdicts are logged but not acted on; `Stop` never holds a
+  session. `switchyard report` then shows how many heavy runs overlapped, for how long and across how many sessions,
+  measurements that ran beside one, runs holding the same lock at once, and what `PreToolUse` would have done.
+- `switchyard uninstall [--dry-run] [--keep-logs]` stops the daemon, removes switchyard's shims `PATH` line from the
+  session env files, and deletes `~/.switchyard`. It only deletes files switchyard wrote; if the directory holds
+  anything else it deletes nothing there.
+
+### Changed
+- The built-in table and `switchyard init` suggestions use `cpus: { min: 2, max: "all" }` (was `2..4`); `"all"` is
+  accepted in `switchyard.json`. The daemon cuts a maximum above its capacity down to the capacity before sizing.
+
 ## 0.9.0
 
 ### Added

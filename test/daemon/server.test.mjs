@@ -440,6 +440,22 @@ describe('実測の CPU の使い方で要求を縮める(right-sizing)', () => 
     assert.deepEqual(snap.sized, { [JSON.stringify(['/repo', 'unit'])]: 0.8 });
   });
 
+  it('縮めた走行の grant には、宣言の最大(容量まで)をスレッド数として載せる。容量を超える上限は容量に切り詰めて記録する', async () => {
+    const { d, home } = await daemon({ capacity: 4, cores: 4 });
+    for (let i = 0; i < 2; i += 1) await runOnce(d, 8_000, { cpus: { min: 2, max: 65_536 } });
+    const c = await client(d.sock);
+    c.send({ t: 'request', job: jobRequest({ profile: 'unit', cpus: { min: 2, max: 65_536 } }) });
+    const grant = await c.next((m) => m.t === 'grant');
+    assert.deepEqual([grant.cpus, grant.threads], [1, 4]);
+    const reqs = readFileSync(pathsOf(home).events, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.kind === 'event' && r.event.type === 'request');
+    assert.deepEqual(reqs[0].event.job.cpus, { min: 2, max: 4 });
+    assert.deepEqual(reqs.at(-1).event.job.sizedFrom, { min: 2, max: 4 });
+    const plain = await client(d.sock);
+    plain.send({ t: 'request', job: jobRequest({ profile: 'other', cpus: { min: 1, max: 2 } }) });
+    const g2 = await plain.next((m) => m.t === 'grant');
+    assert.deepEqual([g2.cpus, g2.threads], [2, 2], '縮めていない走行は割り当てたコア数');
+  });
+
   it('adaptive: false なら宣言どおり。計測は縮めない。再起動しても記録から学び直す', async () => {
     const off = await daemon({ capacity: 4, adaptive: false });
     for (let i = 0; i < 4; i += 1) assert.equal(await runOnce(off.d, 8_000), 4);

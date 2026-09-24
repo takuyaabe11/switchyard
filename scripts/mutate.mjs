@@ -782,6 +782,77 @@ const SUITES = {
       },
     ],
   },
+  adopt: {
+    tests: ['test/run/threads.test.mjs', 'test/report/observe.test.mjs', 'test/cli/uninstall.test.mjs', 'test/daemon/server.test.mjs'],
+    mutations: [
+      {
+        name: 'A1 利用者が親の環境で決めた並列度を上書きする',
+        file: 'src/config/threads.mjs',
+        from: 'if (parent[name] === undefined) out[name]',
+        to: 'out[name]',
+      },
+      {
+        name: 'A2 管理なしで走る子にも並列度を渡す(宣言の最小に縛る)',
+        file: 'src/run/run.mjs',
+        from: "const parallel = managed && cpus > 0 && env.SWITCHYARD_THREAD_ENV !== '0'",
+        to: "const parallel = cpus > 0 && env.SWITCHYARD_THREAD_ENV !== '0'",
+      },
+      {
+        name: 'A3 profile の env より既定の並列度を優先する',
+        file: 'src/run/run.mjs',
+        from: '{ ...env, ...parallel, ...tpl.env, SWITCHYARD_CPUS',
+        to: '{ ...env, ...tpl.env, ...parallel, SWITCHYARD_CPUS',
+      },
+      {
+        name: 'A4 容量いっぱいの走行も予約のコアまで縛る',
+        file: 'src/daemon/server.mjs',
+        from: 'return n >= capacity ? Math.max(n, cores) : n;',
+        to: 'return n;',
+      },
+      {
+        name: 'A5 縮めた走行を縮めたコア数に縛る',
+        file: 'src/daemon/server.mjs',
+        from: 'const n = from === undefined ? lease.cpus : Math.max(lease.cpus, Math.min(from.max, capacity));',
+        to: 'const n = lease.cpus;',
+      },
+      {
+        name: 'B1 観察だけのモードでもデーモンに要求を出す',
+        file: 'src/run/run.mjs',
+        from: "if (env.SWITCHYARD_OBSERVE === '1') {\n      // 観察だけのモード",
+        to: "if (false) {\n      // 観察だけのモード",
+      },
+      {
+        name: 'B2 観察だけのモードの hook の行も普段の集計に数える',
+        file: 'src/report/report.mjs',
+        from: "if (str(r, 'kind') !== 'hook' || r.observe === true ||",
+        to: "if (str(r, 'kind') !== 'hook' ||",
+      },
+      {
+        name: 'B3 重なりに計測を数えない',
+        file: 'src/report/observe.mjs',
+        from: "if (r.cls === 'measure') measureDisturbed += 1;",
+        to: '',
+      },
+      {
+        name: 'C1 他の plugin の shims の行も消す',
+        file: 'src/cli/uninstall.mjs',
+        from: 'if (m !== null && isOurShims(m[1], own)) {',
+        to: 'if (m !== null) {',
+      },
+      {
+        name: 'C2 switchyard のものでないファイルがあっても消す',
+        file: 'src/cli/uninstall.mjs',
+        from: '    if (kept.length === 0) {\n      for (const name of names) {',
+        to: '    if (true) {\n      for (const name of names.filter((n) => OWN_FILE.test(n))) {',
+      },
+      {
+        name: 'C3 --dry-run でも書き換える',
+        file: 'src/cli/uninstall.mjs',
+        from: '    if (!dryRun) {\n      const tmp',
+        to: '    if (true) {\n      const tmp',
+      },
+    ],
+  },
   group: {
     tests: ['test/run/group.test.mjs'],
     mutations: [

@@ -13,6 +13,9 @@ import { readJournal } from '../daemon/store.mjs';
 import { formatReport, replay } from '../replay/replay.mjs';
 import { foregroundCalls, formatInit, merged, suggest, writeConfig } from '../init/init.mjs';
 import { formatReport as formatSummary, summarize } from '../report/report.mjs';
+import { formatObserved, summarizeObserved } from '../report/observe.mjs';
+import { cleanUp, formatUninstall } from './uninstall.mjs';
+import { PLUGIN_ROOT } from '../hooks/session.mjs';
 import { probe } from '../run/probe.mjs';
 import { runJob } from '../run/run.mjs';
 import { parseArgs, UsageError, USAGE } from './args.mjs';
@@ -99,6 +102,16 @@ export async function cli(args, opts = {}) {
       const r = await stopDaemon({ home });
       stdout(`${r.reason}\n`);
       return r.stopped || r.pid === null ? 0 : 1;
+    }
+    case 'uninstall': {
+      // plugin を外す前の後片付け: デーモンを止め、環境ファイルの shims の行と記録を消す
+      /** @type {string} */
+      let daemon;
+      if (command.dryRun) daemon = t('走っていれば止める', 'stop it if it is running');
+      else daemon = (await stopDaemon({ home })).reason;
+      const r = cleanUp({ home, env, ownShims: join(PLUGIN_ROOT, 'shims'), keepLogs: command.keepLogs, dryRun: command.dryRun });
+      stdout(formatUninstall(r, { home, daemon, keepLogs: command.keepLogs, dryRun: command.dryRun }));
+      return 0;
     }
     case 'restart': {
       const r = await stopDaemon({ home });
@@ -196,6 +209,9 @@ export async function cli(args, opts = {}) {
       // 回した 1 世代前も数に入れる(switchyard report が回転の前後で飛ばない)
       const s = summarize({ events: readJournal(p.events).records, hooks: readJournal(p.hooks).records, repoPrefix: command.repoPrefix, since });
       stdout(formatSummary(s, { repoPrefix: command.repoPrefix, sinceDays: command.sinceDays }));
+      // 観察だけのモードの記録があれば、入れていれば何が起きたかも出す
+      const observed = readJournal(p.observed).records;
+      if (observed.length > 0) stdout(formatObserved(summarizeObserved({ observed, hooks: readJournal(p.hooks).records, repoPrefix: command.repoPrefix, since })));
       return 0;
     }
     case 'init': {

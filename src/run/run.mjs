@@ -7,6 +7,7 @@ import { channel, connectDaemon, DaemonUnavailableError } from '../client/connec
 import { sessionId } from '../client/session.mjs';
 import { heldLocks, repoRoot } from '../config/context.mjs';
 import { applyTemplate, classifiableCommand, classify, loadProfiles } from '../config/profiles.mjs';
+import { threadEnv } from '../config/threads.mjs';
 import { pathsOf } from '../daemon/paths.mjs';
 import { appendRecord } from '../daemon/store.mjs';
 import { readPgid, renicePriority, signalGroup, spawnMeasured, verifiedGroup, waitGroupGone } from './group.mjs';
@@ -185,6 +186,8 @@ export function runJob(opts) {
     let killedByCaller = false;
     /** デーモンの管理の外で走った(届かなかった・見失われた)。終わったら控える(設計 §4.3 の 8) */
     let unmanaged = false;
+    /** 観察だけのモード(SWITCHYARD_OBSERVE=1)で走った。並べずに走らせ、始まりと終わりだけを残す */
+    let observed = false;
     let lastNote = '';
     let finished = false;
     /** @type {NodeJS.Timeout | null} */
@@ -241,7 +244,16 @@ export function runJob(opts) {
       phase = 'done';
       if (killTimer !== null) clearTimeout(killTimer);
       if (escape !== null) for (const line of escapeLines(escape)) out(line);
-      if (unmanaged) {
+      if (observed) {
+        try {
+          appendRecord(pathsOf(home).observed, {
+            kind: 'observed', start: childStartedAt, end: Date.now(), session: job.session, repo: job.repo, profile: job.profile,
+            class: job.class, locks: job.locks, cmd: job.cmd, code, cpuMs,
+          });
+        } catch {
+          // 観察の記録が書けなくても、走行の結果はそのまま返す
+        }
+      } else if (unmanaged) {
         // デーモンの次の起動で取り込まれ、失敗なら持ち主の Stop に出る(設計 §4.2)
         try {
           appendRecord(pathsOf(home).unmanaged, { at: Date.now(), session: job.session, repo: job.repo, profile: job.profile, cmd: job.cmd, code, durationMs: Date.now() - childStartedAt });
@@ -261,14 +273,21 @@ export function runJob(opts) {
       }
     };
 
-    /** @param {number} cpus @param {boolean} managed */
-    const startChild = (cpus, managed) => {
+    /**
+     * @param {number} cpus @param {boolean} managed
+     * @param {number} [threads] 並列度として道具に渡す数(デーモンが grant で渡す。省けば cpus)
+     */
+    const startChild = (cpus, managed, threads = cpus) => {
       if (finished) return;
       phase = 'running';
       const tpl = profile === null ? { env: {}, args: [] } : applyTemplate(profile, cpus);
       childStartedAt = Date.now();
+      // 割り当てを守らせる並列度の変数は、デーモンが割り当てた走行にだけ渡す(管理なしで走る子を宣言の最小に縛らない)。
+      // 利用者の値(親の環境・profile の env)が勝つ。SWITCHYARD_THREAD_ENV=0 で渡さない
+      const parallel = managed && cpus > 0 && env.SWITCHYARD_THREAD_ENV !== '0' ? threadEnv(threads, env) : {};
       /** @type {NodeJS.ProcessEnv} */
-      const childEnv = { ...env, ...tpl.env, SWITCHYARD_CPUS: String(cpus) };
+      const childEnv = { ...env, ...parallel, ...tpl.env, SWITCHYARD_CPUS: String(cpus) };
+      if (managed && cpus > 0) childEnv.SWITCHYARD_THREADS = String(threads);
       if (jobId !== null) childEnv.SWITCHYARD_JOB_ID = jobId;
       // デーモンに要求せずに走らせる子(入れ子で直接・管理なし)に、祖先のジョブの id を自分の id として渡さない
       else delete childEnv.SWITCHYARD_JOB_ID;
@@ -385,7 +404,7 @@ export function runJob(opts) {
           lastNote = line;
         } else if (m.t === 'grant' && phase === 'waiting') {
           out(t(`[switchyard] 開始 ${jobId}(CPU ${String(m.cpus)})`, `[switchyard] started ${jobId} (CPU ${String(m.cpus)})`));
-          startChild(Number(m.cpus), true);
+          startChild(Number(m.cpus), true, typeof m.threads === 'number' && m.threads >= 1 ? m.threads : Number(m.cpus));
         } else if (m.t === 'hold' && phase === 'running' && pgid !== null) {
           const mode = m.mode === 'pause' ? 'pause' : 'throttle';
           if (held === null) {
@@ -473,6 +492,13 @@ export function runJob(opts) {
         }
       }
     };
+
+    if (env.SWITCHYARD_OBSERVE === '1') {
+      // 観察だけのモード: デーモンに要求を出さず、すぐに走らせる。入れ子の印は普段どおり立てる(中の走行を二重に数えない)
+      observed = true;
+      startChild(job.cpus.max === 0 ? 0 : job.cpus.min, false);
+      return;
+    }
 
     if (job.cpus.max === 0 && job.locks.length === 0) {
       // 入れ子で CPU も鍵も要らなくなった: デーモンに要求を出さず、そのまま走らせる(設計 §4.3 の 7)

@@ -93,6 +93,6 @@ describe('switchyard init(profile の提案)', () => {
     assert.equal(await run(['--write']), 0);
     const written = JSON.parse(readFileSync(join(repo, 'switchyard.json'), 'utf8')).profiles;
     assert.deepEqual(written.unit, { match: ['npm run unit'], class: 'batch' });
-    assert.deepEqual(written['npm-run-e2e'], { match: ['npm run e2e', 'npm run e2e *'], class: 'batch', cpus: { min: 2, max: 4 } });
+    assert.deepEqual(written['npm-run-e2e'], { match: ['npm run e2e', 'npm run e2e *'], class: 'batch', cpus: { min: 2, max: 'all' } });
   });
 });

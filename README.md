@@ -32,6 +32,12 @@ git clone https://github.com/takuyaabe11/switchyard && cd switchyard
 node bin/switchyard.mjs replay --since 14d
 ```
 
+**Or try it without it doing anything.** Install it with `SWITCHYARD_OBSERVE=1` (for example in the `env` of your
+Claude Code settings). It then holds nothing back, queues nothing and refuses nothing; it only writes down when heavy
+runs started and ended. After a week, `switchyard report` shows how many of them actually overlapped, for how long,
+across how many sessions, whether a benchmark ran beside one, and whether two runs held the same lock. If nothing
+overlapped, it says so, and you can take it out with `switchyard uninstall`.
+
 ## What changes once it is installed
 
 - **Nothing in how you or Claude type commands.** A `PATH` shim in front of `npm`, `npx`, `node`, `yarn`, `pnpm`, `bun`,
@@ -44,6 +50,11 @@ node bin/switchyard.mjs replay --since 14d
 - **A few forms are refused, with a fix.** Commands a shim cannot see (`./gradlew test`, `.venv/bin/pytest`, a tool
   called by its full path) would skip the queue, so they are refused with the exact `switchyard run -- …` to use
   instead. Claude follows it on its own.
+- **Runs keep to their share.** The share a run is given reaches the tool as its thread or worker count
+  (`CARGO_BUILD_JOBS`, `RUST_TEST_THREADS`, `RAYON_NUM_THREADS`, `GOMAXPROCS`, `OMP_NUM_THREADS`,
+  `PYTEST_XDIST_AUTO_NUM_WORKERS` for `pytest -n auto`, and Vitest's `VITEST_MAX_THREADS`/`FORKS`/`WORKERS`). A value
+  you set yourself always wins. A run that has the machine to itself gets every core, so a lone run is never slowed.
+  `SWITCHYARD_THREAD_ENV=0` turns this off.
 - **It learns.** After two runs of the same command it knows how much CPU and memory that run really needs and sizes
   its share to that.
 
@@ -61,6 +72,9 @@ On a 4-core, 16 GB machine ([0.6–0.8](docs/verification/2026-09-24-effect.md),
   switchyard); before anything was learned, 24.4 s.
 - **Heavy runs are not stacked into swap.** A run whose usual peak memory would push free memory below 10% waits until
   something ends. With nothing running, a run always starts.
+- **Worker-per-core runners stay within their share.** `pytest -n auto` given 2 cores ran 2 workers instead of 4, with a
+  peak of 396 MB instead of 758 MB ([details](docs/verification/2026-09-24-adopt.md)). For runs that only use CPU, the
+  thread count makes no measurable difference to how long they take: the operating system already shares the cores.
 
 ## What it does not do
 
@@ -70,6 +84,8 @@ On a 4-core, 16 GB machine ([0.6–0.8](docs/verification/2026-09-24-effect.md),
   before switchyard had learned the suite.
 - It only queues commands it recognizes. For others (`bazel test`, `npm run e2e`, a custom script), add them to a
   `switchyard.json`; `switchyard init` suggests entries from your own history.
+- Jest, Playwright, Gradle, Maven, `make` and `dotnet` have no environment variable for their worker count, so their
+  share is not passed on. Put it in `switchyard.json` yourself (`"args": ["--maxWorkers={cpus}"]`).
 - The numbers above come from controlled runs on one machine, not from people's everyday use yet.
   `switchyard report` shows what it did on yours: how many runs it held back, how long they waited, what it packed in.
 - macOS and Linux only (Windows through WSL).
@@ -110,6 +126,7 @@ switchyard probe <seconds> -- <cmd> # measure a command to pick cpus/class
 switchyard replay [--since 7d]      # re-run past decisions against a config
 switchyard report [--since 7d]      # aggregate decisions and hook verdicts, and what the queue saved
 switchyard init [--write]           # suggest switchyard.json profiles from your past sessions in this repo
+switchyard uninstall [--dry-run]    # clean up before /plugin uninstall: daemon, PATH line, ~/.switchyard
 ```
 
 `switchyard run` flags: `--profile <name>`, `--class quick|batch|measure`,
@@ -163,7 +180,9 @@ the profiles already there.
 - A wrapped job runs with `SWITCHYARD_IN_JOB=1` in its environment. If your own test suite
   reads that variable, do not classify the command that starts it — or strip the variable
   before the suite runs, the way this repo's `npm test` does with `env -u SWITCHYARD_IN_JOB`.
-- `{cpus}` in `env` is replaced with the share the job was actually granted.
+- `{cpus}` in `env` and `args` is replaced with the share the job was actually granted.
+- `cpus.max` can be `"all"`: as many cores as the daemon has. The built-in table uses `{ "min": 2, "max": "all" }`,
+  so a run alone on the machine gets all of it.
 
 Without a `switchyard.json`, a built-in table covers the usual commands: `npm test` / `npm t` /
 `npm run test*` / `npm run build*`, the same for `yarn`, `pnpm` and `bun`, `npx vitest run`, `npx jest`,
@@ -223,10 +242,12 @@ of yours ended in a way nobody has looked at. The ways out:
 | Silence every hook for one session | `SWITCHYARD_THINKER=1` in the environment |
 | Stop the daemon | `switchyard stop` (it starts again on the next request) |
 | Run one command outside the queue | `switchyard run --class quick -- <command>`. The hook refuses the other ways around the shim for a command it would queue: calling a shimmed binary by path (`/usr/local/bin/npm test`), replacing `PATH` without keeping `$PATH`, `env -i`, and setting `SWITCHYARD_IN_JOB` or `SWITCHYARD_HELD_LOCKS` |
-| Remove it | `/plugin uninstall switchyard@switchyard`, then `switchyard stop`, then delete the `export PATH=.../shims:"$PATH"` line from the file Claude Code uses for session environment (`CLAUDE_ENV_FILE`), and `rm -rf ~/.switchyard` |
+| Watch without acting | `SWITCHYARD_OBSERVE=1`: nothing is held back, queued or refused; `switchyard report` shows what would have happened |
+| Remove it | `switchyard uninstall` first (it stops the daemon, removes the shims `PATH` line from the session env files, and deletes `~/.switchyard`; `--dry-run` shows what it would do, `--keep-logs` keeps the logs), then `/plugin uninstall switchyard@switchyard`, then reopen open sessions |
 
-Uninstalling the plugin does not stop a running daemon and does not remove the `PATH` line,
-so do those two by hand.
+`/plugin uninstall` alone does not stop a running daemon and does not remove the `PATH` line, so run
+`switchyard uninstall` before it. It only deletes files switchyard wrote: if `~/.switchyard` (or `SWITCHYARD_HOME`)
+holds anything else, it deletes nothing there and lists what it found.
 
 ## What it writes down
 
@@ -238,6 +259,7 @@ Everything lives under `~/.switchyard` (or `SWITCHYARD_HOME`), readable by you o
 | `events.jsonl` | Every decision, every job: **the full command string**, the repo path, the session id, exit codes, durations |
 | `hooks.jsonl` | Every `PreToolUse` verdict, with the command string and the working directory |
 | `unmanaged.jsonl` | Runs that happened while the daemon was unreachable |
+| `observed.jsonl` | In observe-only mode, when each heavy run started and ended |
 
 Commands are stored verbatim, so anything you type on a command line — including a secret
 passed as an argument — ends up in `events.jsonl`. The journals are capped: past 8MB the
@@ -300,6 +322,11 @@ git clone https://github.com/takuyaabe11/switchyard && cd switchyard
 node bin/switchyard.mjs replay --since 14d
 ```
 
+**何もさせずに試す。** `SWITCHYARD_OBSERVE=1` を付けて入れる(Claude Code の設定の `env` など)。switchyard は何も止めず、
+並べず、拒否せず、重い走行の始まりと終わりを記録するだけになる。1 週間ほどたったら `switchyard report` で、実際に何本が
+重なっていたか・どれだけの時間か・何セッションにまたがっていたか・ベンチが重い走行の横で走っていないか・同じ鍵を持つ走行が
+重なっていないかが分かる。重なりが無ければそう出るので、`switchyard uninstall` で外せばよい。
+
 ## 入れると何が変わるか
 
 - **自分も Claude も、コマンドの打ち方は変わらない。** `npm` / `npx` / `node` / `yarn` / `pnpm` / `bun` / `cargo` / `pytest` /
@@ -311,6 +338,10 @@ node bin/switchyard.mjs replay --since 14d
   求められる。後で同じコマンドが成功するか、`switchyard ack <job>` で消える。
 - **いくつかの形は拒否し、直し方を示す。** shim から見えない形(`./gradlew test`・`.venv/bin/pytest`・フルパスで呼ぶ道具)は
   順番待ちを素通りするので拒否し、代わりに使う `switchyard run -- …` をそのまま示す。Claude は自分でそれに従う。
+- **走行は自分の取り分を守る。** 割り当てたコア数を、道具が読むスレッド数・ワーカー数として渡す(`CARGO_BUILD_JOBS`・
+  `RUST_TEST_THREADS`・`RAYON_NUM_THREADS`・`GOMAXPROCS`・`OMP_NUM_THREADS`・`pytest -n auto` の `PYTEST_XDIST_AUTO_NUM_WORKERS`・
+  Vitest の `VITEST_MAX_THREADS`/`FORKS`/`WORKERS`)。自分で決めた値がいつも勝つ。機械を独り占めしている走行には全コアを
+  渡すので、単独の走行が遅くなることはない。`SWITCHYARD_THREAD_ENV=0` で止める。
 - **学ぶ。** 同じコマンドを 2 回走らせると、その走行が実際に使う CPU とメモリが分かり、取り分をそれに合わせる。
 
 ## 実測で何をするか
@@ -325,6 +356,9 @@ node bin/switchyard.mjs replay --since 14d
   詰めて入れる。そうした全件を 3 本同時に走らせると、学んだ後は平均 20.4 秒(switchyard なしで 19.4 秒)、学ぶ前は 24.4 秒だった。
 - **重い走行を重ねてスワップさせない。** いつものピークのメモリを足すと空きが全体の 10% を割る走行は、何かが終わるまで待つ。
   何も走っていなければ必ず走る。
+- **コアごとにワーカーを立てる道具を、取り分の中に収める。** 2 コアを割り当てた `pytest -n auto` は、ワーカーが 4 から 2 に、
+  ピークのメモリが 758MB から 396MB になった([詳細](docs/verification/2026-09-24-adopt.md))。CPU だけを使う走行では、
+  スレッド数を変えても所要は測れるほど変わらなかった(OS がもともとコアを分け合っているため)。
 
 ## しないこと
 
@@ -333,6 +367,8 @@ node bin/switchyard.mjs replay --since 14d
 - 新しいコマンドの最初の 1〜2 回は控えめに扱う。上の実験では、学ぶ前は 19.4 秒のところが 24.4 秒だった。
 - 順番待ちに乗せるのは見分けられるコマンドだけ。それ以外(`bazel test`・`npm run e2e`・自作のスクリプト)は `switchyard.json`
   に書く。`switchyard init` が自分の履歴から候補を出す。
+- Jest・Playwright・Gradle・Maven・`make`・`dotnet` にはワーカー数の環境変数が無いので、取り分は伝わらない。
+  `switchyard.json` に自分で書く(`"args": ["--maxWorkers={cpus}"]`)。
 - 上の数字は 1 台の機械で条件をそろえて測ったもので、まだ普段使いの利用者のデータではない。自分の機械で何をしたかは
   `switchyard report` で見られる(待たせた本数・待ち時間・詰めて入れた本数など)。
 - macOS と Linux だけ(Windows は WSL で)。
@@ -372,6 +408,7 @@ switchyard probe <秒> -- <cmd>      # cpus / class を決めるためにコマ�
 switchyard replay [--since 7d]      # 過去の決定を、今の設定でやり直して見る
 switchyard report [--since 7d]      # 決定と hook の判断、順番待ちの効果を集計する
 switchyard init [--write]           # この repo の過去のセッションから switchyard.json の profile を提案する
+switchyard uninstall [--dry-run]    # /plugin uninstall の前の後片付け。デーモン・PATH の行・~/.switchyard
 ```
 
 `switchyard run` の旗: `--profile <名前>`、`--class quick|batch|measure`、
@@ -398,7 +435,9 @@ repo の根に `switchyard.json` を置くと、その repo のコマンドの�
 - 包まれたジョブの環境には `SWITCHYARD_IN_JOB=1` が立つ。自分のテストがその変数を読むなら、
   それを起こすコマンドは分類しないこと。あるいは走らせる前に変数を落とす(この repo の `npm test` は
   `env -u SWITCHYARD_IN_JOB` で落としている)。
-- `env` の中の `{cpus}` は、そのジョブに実際に渡された取り分に置き換わる。
+- `env` と `args` の中の `{cpus}` は、そのジョブに実際に渡された取り分に置き換わる。
+- `cpus.max` には `"all"`(デーモンの容量いっぱい)と書ける。組み込みの既定表は `{ "min": 2, "max": "all" }` なので、
+  機械で単独の走行は全部を使える。
 
 `switchyard.json` が無ければ、組み込みの既定表がよくあるコマンドを見る: `npm test` / `npm t` /
 `npm run test*` / `npm run build*` と、`yarn` / `pnpm` / `bun` の同じ形、`npx vitest run`・`npx jest`・
@@ -451,9 +490,12 @@ switchyard は hook を 3 つ入れる。そのうち 2 つは作業を止めう
 | このセッションだけ hook を全部黙らせる | 環境変数 `SWITCHYARD_THINKER=1` |
 | デーモンを止める | `switchyard stop`(次の要求で起動し直す) |
 | 1 本だけ順番待ちの外で走らせる | `switchyard run --class quick -- <コマンド>` で包む |
-| 外す | `/plugin uninstall switchyard@switchyard` の後、`switchyard stop`、Claude Code がセッションの環境に使うファイル(`CLAUDE_ENV_FILE`)から `export PATH=.../shims:"$PATH"` の行を消し、`rm -rf ~/.switchyard` |
+| 何もさせずに見るだけにする | `SWITCHYARD_OBSERVE=1`。止めも並べも拒否もしない。入れていれば何が起きたかは `switchyard report` で分かる |
+| 外す | 先に `switchyard uninstall`(デーモンを止め、セッションの環境ファイルから shims の `PATH` の行を取り除き、`~/.switchyard` を消す。`--dry-run` ですることだけを見る、`--keep-logs` で記録を残す)。その後 `/plugin uninstall switchyard@switchyard`、開いているセッションを開き直す |
 
-plugin を外しても、走っているデーモンは止まらず、`PATH` の行も消えない。その 2 つは手で行う。
+`/plugin uninstall` だけでは、走っているデーモンは止まらず、`PATH` の行も消えない。先に `switchyard uninstall` を走らせる。
+消すのは switchyard が書いたファイルだけで、`~/.switchyard`(か `SWITCHYARD_HOME`)に他のものがあれば、そこでは何も消さずに
+見つけたものを挙げる。
 
 ## 何が記録されるか
 
@@ -465,6 +507,7 @@ plugin を外しても、走っているデーモンは止まらず、`PATH` の
 | `events.jsonl` | すべての決定とジョブ。**コマンドの全文**・repo のパス・セッション id・終了コード・所要時間 |
 | `hooks.jsonl` | `PreToolUse` の判断。コマンドの文字列と作業ディレクトリつき |
 | `unmanaged.jsonl` | デーモンに届かない間に走ったもの |
+| `observed.jsonl` | 観察だけのモードで、重い走行が始まった時刻と終わった時刻 |
 
 コマンドはそのままの文字列で残る。引数に渡した秘密も `events.jsonl` に入る。記録には上限があり、8MB を超えると `<名前>.1` へ回して新しく始めるので、残るのは 2 世代まで。どこにも送信しない。機械の外へは出ない。外へ問い合わせるのは更新の確認だけで、1 日に 1 回まで GitHub から `plugin.json` を取ってくる以外は何も送らない(`SWITCHYARD_UPDATE_CHECK=0` で止まる)。
 

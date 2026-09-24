@@ -155,8 +155,8 @@ export function suggest({ calls, profiles, minCount = 2, minMs = 20_000 }) {
   return out.sort((a, b) => b.count * b.medianMs - a.count * a.medianMs);
 }
 
-/** 提案を profile にする @param {Suggestion} s @returns {Profile} */
-export const profileOf = (s) => ({ match: [s.pattern, `${s.pattern} *`], class: 'batch', cpus: { min: 2, max: 4 } });
+/** 提案を profile にする(cpus の max は容量いっぱい) @param {Suggestion} s @returns {Record<string, unknown>} */
+export const profileOf = (s) => ({ match: [s.pattern, `${s.pattern} *`], class: 'batch', cpus: { min: 2, max: 'all' } });
 
 /**
  * 既にある switchyard.json に、提案の profile を足す(既にある profile は変えない)。
