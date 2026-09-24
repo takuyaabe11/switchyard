@@ -861,7 +861,7 @@ const SUITES = {
       {
         name: 'P7 要求に見込みのピークを載せない',
         file: 'src/daemon/server.mjs',
-        from: 'const memMb = memory ? memBook.expected(req.repo, req.profile) : null;',
+        from: 'const memMb = memory ? memBook.expected(learn, req.profile) : null;',
         to: 'const memMb = null;',
       },
       {
@@ -873,14 +873,26 @@ const SUITES = {
       {
         name: 'P2 学んだ使い方の見込みを空きの計算に使わない',
         file: 'src/daemon/server.mjs',
-        from: 'capacity - Math.max(busyCores, predicted)',
-        to: 'capacity - busyCores',
+        from: 'capacity - Math.max(busyCores + rampingCores, predicted)',
+        to: 'capacity - (busyCores + rampingCores)',
       },
       {
         name: 'P3 窓の長さを見ずに測る',
         file: 'src/daemon/server.mjs',
-        from: 'x.at >= settled && last.at - x.at >= SPARE_WINDOW_MS',
-        to: 'x.at >= settled',
+        from: 'if (last.at - samples[i].at >= SPARE_WINDOW_MS) {',
+        to: 'if (true) {',
+      },
+      {
+        name: 'P8 立ち上がり中の走行の見込みを足さない(空いて見える分だけ詰め込みすぎる)',
+        file: 'src/daemon/server.mjs',
+        from: 'Math.max(busyCores + rampingCores, predicted)',
+        to: 'Math.max(busyCores, predicted)',
+      },
+      {
+        name: 'P9 学んでいない立ち上がり中の走行を 0 コアと見込む',
+        file: 'src/daemon/server.mjs',
+        from: '(l.typical ?? l.cpus)',
+        to: '(l.typical ?? 0)',
       },
       {
         name: 'P4 標本を取っても割り振りを見直さない(tick まで待つ)',
@@ -891,8 +903,44 @@ const SUITES = {
     ],
   },
   adopt: {
-    tests: ['test/run/threads.test.mjs', 'test/report/observe.test.mjs', 'test/cli/uninstall.test.mjs', 'test/daemon/server.test.mjs'],
+    tests: ['test/run/threads.test.mjs', 'test/report/observe.test.mjs', 'test/cli/uninstall.test.mjs', 'test/daemon/server.test.mjs', 'test/config/context.test.mjs', 'test/run/run.test.mjs'],
     mutations: [
+      {
+        name: 'A8 終わった走行を worktree のパスで学ぶ(一族で分け合わない)',
+        file: 'src/daemon/server.mjs',
+        from: 'const learn = a.family ?? a.repo;',
+        to: 'const learn = a.repo;',
+      },
+      {
+        name: 'A9 要求の見込みを worktree のパスで引く',
+        file: 'src/daemon/server.mjs',
+        from: 'const learn = req.family ?? req.repo;',
+        to: 'const learn = req.repo;',
+      },
+      {
+        name: 'A10 再起動で記録の family を読まない',
+        file: 'src/daemon/store.mjs',
+        from: "book.record(typeof r.family === 'string' ? r.family : r.repo, r.profile, { durationMs",
+        to: 'book.record(r.repo, r.profile, { durationMs',
+      },
+      {
+        name: 'A11 worktree の本体をたどらない',
+        file: 'src/config/context.mjs',
+        from: "return basename(real) === '.git' ? dirname(real) : real;",
+        to: 'return root;',
+      },
+      {
+        name: 'A12 包みが family を送らない',
+        file: 'src/run/run.mjs',
+        from: '      ...(family !== repo ? { family } : {}),\n',
+        to: '',
+      },
+      {
+        name: 'A13 デーモンが要求の family を捨てる',
+        file: 'src/protocol/messages.mjs',
+        from: "    ...(typeof o.family === 'string' && o.family !== '' && o.family !== o.repo ? { family: o.family } : {}),\n",
+        to: '',
+      },
       {
         name: 'A1 利用者が親の環境で決めた並列度を上書きする',
         file: 'src/config/threads.mjs',

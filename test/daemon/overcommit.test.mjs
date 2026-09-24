@@ -23,24 +23,38 @@ const samples = (from, to, busyCores) => {
 };
 
 describe('spareOf(実測の空き)', () => {
-  it('容量から、立ち上がった後の窓で測った機械全体の使用コア数を引く', () => {
-    assert.equal(spareOf({ capacity: 4, samples: samples(0, 20_000, 1), leases: [{ grantedAt: 0, typical: null }] }), 3);
+  it('容量から、直近の窓で測った機械全体の使用コア数を引く', () => {
+    assert.equal(spareOf({ capacity: 4, samples: samples(0, 20_000, 1), leases: [{ grantedAt: 0, typical: null, cpus: 2 }] }), 3);
   });
 
-  it('入場から立ち上がりの時間(学んでいなければ長め)と窓の長さが経つまでは null', () => {
-    const lease = [{ grantedAt: 10_000, typical: null }];
-    assert.equal(spareOf({ capacity: 4, samples: samples(0, 10_000 + RAMP_UNKNOWN_MS + SPARE_WINDOW_MS - 500, 0), leases: lease }), null);
-    assert.equal(spareOf({ capacity: 4, samples: samples(0, 10_000 + RAMP_UNKNOWN_MS + SPARE_WINDOW_MS, 0), leases: lease }), 4);
-    const known = [{ grantedAt: 10_000, typical: 0.5 }];
-    assert.equal(spareOf({ capacity: 4, samples: samples(0, 10_000 + RAMP_KNOWN_MS + SPARE_WINDOW_MS, 0), leases: known }), 3.5);
+  it('窓の間に立ち上がりの途中だった走行は、学んだ使い方(学んでいなければ割り当てたコア数)を実測に足す', () => {
+    const at = 10_000;
+    // 学んでいない走行: 立ち上がり(長め)の途中は割り当ての 2 コアを足す。終われば実測だけ
+    const unknown = [{ grantedAt: at, typical: null, cpus: 2 }];
+    assert.equal(spareOf({ capacity: 4, samples: samples(0, at + RAMP_UNKNOWN_MS + SPARE_WINDOW_MS - 500, 0), leases: unknown }), 2);
+    assert.equal(spareOf({ capacity: 4, samples: samples(0, at + RAMP_UNKNOWN_MS + SPARE_WINDOW_MS, 0), leases: unknown }), 4);
+    // 学んだ走行: 立ち上がり(短め)の途中は学んだ 0.5 コアを足す。終わった後は見込みの合計で引く
+    const known = [{ grantedAt: at, typical: 0.5, cpus: 4 }];
+    assert.equal(spareOf({ capacity: 4, samples: samples(0, at + 500, 0), leases: known }), 3.5);
+    assert.equal(spareOf({ capacity: 4, samples: samples(0, at + RAMP_KNOWN_MS + SPARE_WINDOW_MS, 0), leases: known }), 3.5);
   });
 
-  it('学んだ使い方の見込みが実測より大きければ、見込みで引く(立ち上がりの途中で空いて見えても詰め込みすぎない)', () => {
-    assert.equal(spareOf({ capacity: 4, samples: samples(0, 20_000, 0.5), leases: [{ grantedAt: 0, typical: 3.8 }] }), 4 - 3.8);
+  it('短い走行が次々に入って誰かが立ち上がりの途中でも、立ち上がった走行の実測と合わせて空きを出す(以前は null で詰め込めなかった)', () => {
+    const leases = [
+      { grantedAt: 0, typical: null, cpus: 2 },
+      { grantedAt: 19_800, typical: 0.4, cpus: 2 },
+    ];
+    // 機械全体で 1 コア働いている。立ち上がり中の 2 本目の見込み 0.4 を足して 1.4 → 空き 2.6
+    assert.equal(spareOf({ capacity: 4, samples: samples(0, 20_000, 1), leases }), 4 - 1.4);
   });
 
-  it('標本が無ければ null', () => {
-    assert.equal(spareOf({ capacity: 4, samples: [], leases: [{ grantedAt: 0, typical: null }] }), null);
+  it('学んだ使い方の見込みが実測より大きければ、見込みで引く', () => {
+    assert.equal(spareOf({ capacity: 4, samples: samples(0, 20_000, 0.5), leases: [{ grantedAt: 0, typical: 3.8, cpus: 4 }] }), 4 - 3.8);
+  });
+
+  it('標本が無い・窓の長さに足りなければ null', () => {
+    assert.equal(spareOf({ capacity: 4, samples: [], leases: [{ grantedAt: 0, typical: null, cpus: 1 }] }), null);
+    assert.equal(spareOf({ capacity: 4, samples: samples(0, SPARE_WINDOW_MS - 500, 0), leases: [] }), null);
   });
 });
 
