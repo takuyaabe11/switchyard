@@ -35,18 +35,21 @@ describe('plugin の形(設計 §9・§9.6)', () => {
     assert.deepEqual([lock.name, lock.version, lock.packages[''].version], ['switchyard', version, version]);
   });
 
-  it('hooks.json は SessionStart・PreToolUse(Bash)・Stop だけを、plugin の hook の入口へつなぐ', () => {
+  it('hooks.json は SessionStart・PreToolUse(Bash)・PostToolUseFailure(Bash)・Stop だけを、plugin の hook の入口へつなぐ', () => {
     const hooks = json('hooks/hooks.json').hooks;
-    assert.deepEqual(Object.keys(hooks).sort(), ['PreToolUse', 'SessionStart', 'Stop']);
+    assert.deepEqual(Object.keys(hooks).sort(), ['PostToolUseFailure', 'PreToolUse', 'SessionStart', 'Stop']);
     assert.equal(hooks.PreToolUse[0].matcher, 'Bash');
+    assert.equal(hooks.PostToolUseFailure[0].matcher, 'Bash');
     /** @type {Record<string, string>} */
-    const arg = { SessionStart: 'session-start', PreToolUse: 'pre-tool-use', Stop: 'stop' };
+    const arg = { SessionStart: 'session-start', Stop: 'stop' };
+    /** @type {Record<string, string>} Bash の呼び出しごとに走る hook は sh のふるいを通す(node を起動しない)。ふるいは node の同じ入口へ渡す */
+    const sieve = { PreToolUse: 'switchyard-pretooluse.sh', PostToolUseFailure: 'switchyard-posttoolusefailure.sh' };
     for (const [event, entries] of Object.entries(hooks)) {
-      // PreToolUse だけは sh のふるいを通す(Bash の呼び出しごとに node を起動しない)。ふるいは node の同じ入口へ渡す
-      const expected = event === 'PreToolUse' ? 'sh "${CLAUDE_PLUGIN_ROOT}/bin/switchyard-pretooluse.sh"' : `node "\${CLAUDE_PLUGIN_ROOT}/bin/switchyard-hook.mjs" ${arg[event]}`;
+      const expected = sieve[event] !== undefined ? `sh "\${CLAUDE_PLUGIN_ROOT}/bin/${sieve[event]}"` : `node "\${CLAUDE_PLUGIN_ROOT}/bin/switchyard-hook.mjs" ${arg[event]}`;
       assert.equal(entries[0].hooks[0].command, expected);
     }
     assert.match(readFileSync(join(ROOT, 'bin/switchyard-pretooluse.sh'), 'utf8'), /switchyard-hook\.mjs" pre-tool-use/);
+    assert.match(readFileSync(join(ROOT, 'bin/switchyard-posttoolusefailure.sh'), 'utf8'), /switchyard-hook\.mjs" post-tool-use-failure/);
     assert.ok(existsSync(join(ROOT, 'bin/switchyard-hook.mjs')));
   });
 

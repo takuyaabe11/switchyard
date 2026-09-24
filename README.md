@@ -58,6 +58,17 @@ overlapped, it says so, and you can take it out with `switchyard uninstall`.
   free memory ran low, the run was killed with SIGKILL, or it was paused for a measurement, Claude is told right under
   the output (`this failure may not be caused by the code: …`) and asked to re-run it on a quiet machine before
   changing code. The same clue is added to the Stop notice and counted in `switchyard report`.
+- **A long run is not cut off by the Bash time limit.** Claude Code stops a Bash call after 2 minutes unless Claude
+  asks for longer. When a call is cut off, Claude is told it was the time limit, not the code, and switchyard remembers
+  the command: the next time it runs in the same repository, it gets twice the time (up to the 10-minute ceiling). A
+  heavy run switchyard has seen finish gets 1.5 times its longest time; one that needs more than the ceiling runs in the
+  background instead. A command that has never ended by itself (watch mode, a dev server) is never sent to the
+  background this way. `SWITCHYARD_TIMEOUT_GUARD=0` turns this off. This helps with a single session too.
+- **A port already in use is traced to its holder.** When a Bash call fails with `EADDRINUSE`, `address already in use`
+  or Docker's `port is already allocated`, Claude is told which process holds the port — its pid, command line, working
+  directory and how long it has run (or that a Docker container publishes it) — and that the failure is not the code's,
+  so it can stop a leftover server instead of debugging the test. It uses `lsof`, then `ss`, then `/proc` on Linux,
+  and `netstat` on Windows. Nothing runs unless a call has failed this way.
 - **Secrets stay out of the logs.** Values that look like secrets — `API_KEY=…`, `--password …`, `-Dx.password=…`,
   `mysql -p…`, `user:pass@` in URLs, `Authorization:` headers, and token shapes such as `sk-…`, `ghp_…`, `AKIA…` —
   are written as `***`. The command itself runs unchanged.
@@ -311,7 +322,8 @@ Everything lives under `~/.switchyard` (or `SWITCHYARD_HOME`), readable by you o
 |---|---|
 | `state.json` | What runs and waits right now |
 | `events.jsonl` | Every decision, every job: the command (secrets masked), the repo path, the session id, exit codes, durations |
-| `hooks.jsonl` | Every `PreToolUse` verdict, with the command string and the working directory |
+| `hooks.jsonl` | Every `PreToolUse` verdict, plus Bash calls cut off by the time limit or failed on a port in use, with the command string and the working directory |
+| `timeouts.json`, `timeouts.txt` | The last 50 commands cut off by the Bash time limit (30 days), with their repository and the limit, so the next run gets more time. A command holding what looks like a secret, or any command under `SWITCHYARD_LOG_COMMANDS=none`, is not kept |
 | `unmanaged.jsonl` | Runs that happened while the daemon was unreachable |
 | `observed.jsonl` | In observe-only mode, when each heavy run started and ended |
 
@@ -453,6 +465,16 @@ node bin/switchyard.mjs replay --since 14d
   SIGKILL で止められた・計測のために一時停止された、の中で失敗した走行は、出力のすぐ下で Claude に
   (`この失敗はコードのせいではないかもしれない: …`)伝え、コードを直す前に空いた機械で走らせ直すよう促す。同じ手がかりを
   Stop の知らせにも載せ、`switchyard report` でも数える。
+- **長い走行を Bash の時間切れで切らせない。** Claude Code は、Claude が長く頼まない限り、Bash の呼び出しを 2 分で止める。
+  切られたときは、コードのせいではなく時間切れだったと Claude に伝え、switchyard がそのコマンドを覚える。次に同じ repo で
+  走るときは、時間切れを倍にする(上限の 10 分まで)。自分で終わるのを見たことのある重い走行は、最長の所要の 1.5 倍にし、
+  上限でも足りなければ背景で走らせる。自分では終わったことの無いコマンド(watch モード・dev サーバー)は、こうして背景へ
+  回すことはしない。`SWITCHYARD_TIMEOUT_GUARD=0` で止める。セッションが 1 本でも効く。
+- **使用中のポートは、握っているプロセスを突き止める。** Bash の呼び出しが `EADDRINUSE`・`address already in use`・
+  Docker の `port is already allocated` で落ちたら、そのポートを握っているプロセス(pid・コマンドライン・作業場所・
+  走っている時間。Docker のコンテナが公開していればそう)と、コードのせいではないことを Claude に伝える。テストを直しに
+  行く前に、残っていたサーバーを止められる。調べるのは `lsof`、次に `ss`、Linux では `/proc`、Windows では `netstat`。
+  こうして落ちた呼び出しが無ければ何も走らせない。
 - **秘密を記録に残さない。** 秘密らしい値(`API_KEY=…`・`--password …`・`-Dx.password=…`・`mysql -p…`・URL の `user:pass@`・
   `Authorization:` ヘッダ・`sk-…`・`ghp_…`・`AKIA…` などのトークンの形)は `***` として記録する。走らせるコマンドは変えない。
 - **shim から見えないコマンドは代わりに包む。** 1 行だけの `./gradlew test`・`./mvnw verify`・`.venv/bin/pytest` は
@@ -662,7 +684,8 @@ switchyard は hook を 3 つ入れる。作業を止めうるのは `PreToolUse
 |---|---|
 | `state.json` | いま走っているもの・待っているもの |
 | `events.jsonl` | すべての決定とジョブ。コマンド(秘密は伏せる)・repo のパス・セッション id・終了コード・所要時間 |
-| `hooks.jsonl` | `PreToolUse` の判断。コマンドの文字列と作業ディレクトリつき |
+| `hooks.jsonl` | `PreToolUse` の判断と、Bash の時間切れで切られた・ポートが使用中で落ちた呼び出し。コマンドの文字列と作業ディレクトリつき |
+| `timeouts.json`・`timeouts.txt` | Bash の時間切れで切られた直近 50 個のコマンド(30 日)と、その repo・時間切れ。次に走るとき時間を延ばすため。秘密らしい値を含むコマンドと、`SWITCHYARD_LOG_COMMANDS=none` のときのコマンドは覚えない |
 | `unmanaged.jsonl` | デーモンに届かない間に走ったもの |
 | `observed.jsonl` | 観察だけのモードで、重い走行が始まった時刻と終わった時刻 |
 

@@ -11,6 +11,7 @@
 # だから、コマンドの文字列にこれらの語が語として現れず、cwd から上に設定ファイルが無ければ、node を起動するまでもない。
 # 語の一覧は test/hooks/sieve.test.mjs が SHIM_WORDS・defaultHeadWords との食い違いを止める。
 # 読めない形(command や cwd が見つからない・エスケープを含む cwd)は、迷わず 1 を返す。
+# 前に Bash の時間切れで切られたコマンドも 1(判定が時間切れを延ばす)。
 # Windows の cwd(C:\\Users\\a。JSON では \ が \\ になる)は / の形(C:/Users/a)に直して見る。
 
 function exists(f,    line, r) {
@@ -35,6 +36,17 @@ END {
   if (ENVIRON["SWITCHYARD_OFF"] == "1" || ENVIRON["SWITCHYARD_THINKER"] == "1") exit 0
   cmd = field(s, "command")
   if (cmd == "\001") exit 1
+  # 前に Bash の時間切れで切られたコマンド(src/hooks/timeouts.mjs が書く一覧。JSON の文字列の中身の形)は、
+  # 重い語が無くても node の判定へ回す(時間切れを延ばす)
+  if (ENVIRON["SWITCHYARD_TIMEOUT_GUARD"] != "0") {
+    home = ENVIRON["SWITCHYARD_HOME"]
+    if (home == "") home = ENVIRON["HOME"] "/.switchyard"
+    list = home "/timeouts.txt"
+    while ((getline line < list) > 0) {
+      if (line == cmd) { close(list); exit 1 }
+    }
+    close(list)
+  }
   # 改行・タブなどのエスケープ(\n)の字は語の一部ではない。語の境目にする
   gsub(/\\u[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]/, " ", cmd)
   gsub(/\\[nrtbf]/, " ", cmd)

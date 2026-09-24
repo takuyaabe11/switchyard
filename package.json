@@ -1,6 +1,6 @@
 {
   "name": "switchyard",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "private": true,
   "description": "Keeps Claude Code sessions on one machine from fighting over heavy runs, by handing out CPU shares and exclusive locks.",
   "license": "MIT",
@@ -31,7 +31,8 @@
     "mutate:pack": "node scripts/mutate.mjs pack",
     "mutate:adopt": "node scripts/mutate.mjs adopt",
     "mutate:trust": "node scripts/mutate.mjs trust",
-    "mutate:diagnose": "node scripts/mutate.mjs diagnose"
+    "mutate:diagnose": "node scripts/mutate.mjs diagnose",
+    "mutate:single": "node scripts/mutate.mjs single"
   },
   "devDependencies": {
     "@types/node": "^26.5.1",
