@@ -4,7 +4,8 @@
 // switchyard replay の空回しや、テストでの試算が、実際の記録を汚さないようにするため。
 import { switchyardHome, pathsOf } from '../daemon/paths.mjs';
 import { appendRecord } from '../daemon/store.mjs';
-import { preToolUse } from './pretooluse.mjs';
+import { ask, connectDaemon } from '../client/connect.mjs';
+import { preToolUse, waitExpected } from './pretooluse.mjs';
 import { sessionStart, stop } from './session.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
@@ -33,6 +34,32 @@ function recordPreToolUse(input, out, env) {
   }
 }
 
+/** @param {Record<string, unknown> | null} out */
+const isBackground = (out) => out !== null && typeof out.hookSpecificOutput === 'object' && out.hookSpecificOutput !== null && 'updatedInput' in out.hookSpecificOutput;
+
+/**
+ * 背景へ回す方針(SWITCHYARD_BACKGROUND)。auto(既定)は待ちが見込まれるときだけ、always は重ければ必ず、never は回さない。
+ * @param {NodeJS.ProcessEnv} env @returns {'auto' | 'always' | 'never'}
+ */
+export function backgroundMode(env) {
+  const v = env.SWITCHYARD_BACKGROUND;
+  return v === 'always' || v === 'never' ? v : 'auto';
+}
+
+/**
+ * デーモンの盤面。居なければ null(起動しない。居ないなら次の要求で空のデーモンが立ち、待たずに入場する)。
+ * @param {NodeJS.ProcessEnv} env @returns {Promise<import('../protocol/messages.mjs').Snapshot | null>}
+ */
+async function snapshot(env) {
+  try {
+    const conn = await connectDaemon({ home: switchyardHome(env), env, autoStart: false });
+    const m = await ask(conn, { t: 'status' }, (x) => x.t === 'status', 1_000);
+    return /** @type {import('../protocol/messages.mjs').Snapshot} */ (m.snapshot);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * @param {string} event pre-tool-use / session-start / stop
  * @param {string} raw 標準入力
@@ -43,7 +70,16 @@ export async function runHook(event, raw, { write = (s) => process.stdout.write(
   const input = raw.trim() === '' ? {} : JSON.parse(raw);
   switch (event) {
     case 'pre-tool-use': {
-      const out = preToolUse(input, { env, ...(profilesFor === undefined ? {} : { profilesFor }) });
+      const base = { env, ...(profilesFor === undefined ? {} : { profilesFor }) };
+      let out = preToolUse(input, base);
+      // 背景へ回す判定が出たときだけ、デーモンの盤面を見て、待ちが見込まれなければ前景のまま走らせる。
+      // 普段の Bash の呼び出しにはデーモンへの問い合わせを足さない
+      if (isBackground(out) && backgroundMode(env) === 'auto') {
+        const snap = await snapshot(env);
+        out = preToolUse(input, { ...base, shouldBackground: (heavy) => snap !== null && waitExpected(snap, heavy) });
+      } else if (isBackground(out) && backgroundMode(env) === 'never') {
+        out = null;
+      }
       recordPreToolUse(input, out, env);
       if (out !== null) write(JSON.stringify(out));
       return;

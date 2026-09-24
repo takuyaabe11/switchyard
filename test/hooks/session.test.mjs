@@ -232,7 +232,7 @@ describe('hook の入口', () => {
     /** @type {string[]} */
     const written = [];
     // 記録の置き場所は一時のものを渡す(渡さないと実際の ~/.switchyard/hooks.jsonl へ書く)
-    const opts = { write: (/** @type {string} */ s) => written.push(s), env: { SWITCHYARD_HOME: tempHome() } };
+    const opts = { write: (/** @type {string} */ s) => written.push(s), env: { SWITCHYARD_HOME: tempHome(), SWITCHYARD_BACKGROUND: 'always' } };
     await runHook('pre-tool-use', JSON.stringify({ tool_name: 'Bash', cwd, tool_input: { command: 'npm install' } }), opts);
     // deepEqual(written, []) だと型が空の配列に絞られ、次の push が型検査で通らない
     assert.equal(written.length, 0);

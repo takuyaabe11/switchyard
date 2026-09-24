@@ -138,7 +138,7 @@ function switchyardRunArgs(head, rest) {
 /**
  * switchyard run の包みが要求する性格と、`--` の後ろの語。buildRequest と同じ順(--class → --profile → `--` の後ろの分類 → batch)で決める。
  * 引数が読めなければ `--` の後ろだけを見る(背景への判定は広めでよい)。
- * @param {string[]} args @param {NamedProfile[]} profiles @returns {{ jobClass: JobClass, argv: string[] }}
+ * @param {string[]} args @param {NamedProfile[]} profiles @returns {Heavy & { argv: string[] }}
  */
 function wrapperOf(args, profiles) {
   /** @type {RunFlags} */
@@ -151,21 +151,57 @@ function wrapperOf(args, profiles) {
     // 使い方の誤りで包みは走らないが、`--` の後ろで判定しておく
   }
   const named = flags.profile !== undefined ? (profiles.find((p) => p.name === flags.profile) ?? null) : classify(classifiableCommand(argv), profiles);
-  return { jobClass: flags.class ?? named?.profile.class ?? 'batch', argv };
+  /** @type {Heavy} */
+  const need = {
+    jobClass: flags.class ?? named?.profile.class ?? 'batch',
+    cpusMin: flags.cpus?.min ?? named?.profile.cpus?.min ?? 1,
+    locks: [...new Set([...(named?.profile.locks ?? []), ...(flags.locks ?? [])])],
+  };
+  return { ...need, argv };
+}
+
+/** profile が要求する資源(buildRequest と同じ既定: CPU 1) @param {import('../config/profiles.mjs').Profile} p @returns {Heavy} */
+const needOf = (p) => ({ jobClass: p.class, cpusMin: p.cpus?.min ?? 1, locks: p.locks ?? [] });
+
+/**
+ * 背景へ回すかを決める関数。既定は「重いものは必ず回す」(switchyard replay の数え方と同じ)。
+ * hook の入口は、デーモンの盤面を見て待ちが見込まれるときだけ回す関数を渡す(waitExpected)。
+ * @typedef {(heavy: Heavy[]) => boolean} BackgroundPolicy
+ */
+/** @typedef {{ jobClass: JobClass, cpusMin: number, locks: string[] }} Heavy */
+
+/**
+ * いまの盤面で、この重い部分が待たされる見込みがあるか。
+ * 待ち列がある・計測が走っている・計測を要求するのに CPU を持つ走行がある・鍵が使われている・CPU の空きが足りない、のどれか。
+ * 見込みが無ければ前景のまま走らせる(待たないなら背景へ回す理由が無く、回すとエージェントは完了の通知を待つことになる)。
+ * @param {import('../protocol/messages.mjs').Snapshot} snap @param {Heavy[]} heavy @returns {boolean}
+ */
+export function waitExpected(snap, heavy) {
+  if (snap.waiting.length > 0) return true;
+  if (snap.leases.some((l) => l.class === 'measure')) return true;
+  const cpuHeld = snap.leases.some((l) => l.cpus > 0);
+  let need = 0;
+  for (const h of heavy) {
+    if (h.jobClass === 'measure' && cpuHeld) return true;
+    if (h.locks.some((k) => snap.leases.some((l) => l.locks.includes(k)))) return true;
+    need += Math.min(Math.max(h.cpusMin, 1), snap.capacity);
+  }
+  return need > snap.capacity - snap.used;
 }
 
 /**
  * @param {Record<string, unknown>} input hook の標準入力
- * @param {{ env?: NodeJS.ProcessEnv, profilesFor?: (cwd: string) => NamedProfile[] }} [opts]
+ * @param {{ env?: NodeJS.ProcessEnv, profilesFor?: (cwd: string) => NamedProfile[], shouldBackground?: BackgroundPolicy }} [opts]
  * @returns {Record<string, unknown> | null}
  */
-export function preToolUse(input, { env = process.env, profilesFor = (cwd) => loadProfiles(repoRoot(cwd)).profiles } = {}) {
+export function preToolUse(input, { env = process.env, profilesFor = (cwd) => loadProfiles(repoRoot(cwd)).profiles, shouldBackground = () => true } = {}) {
   if (env.SWITCHYARD_THINKER === '1') return null;
   if (input.tool_name !== 'Bash') return null;
   const ti = /** @type {Record<string, unknown>} */ (typeof input.tool_input === 'object' && input.tool_input !== null ? input.tool_input : {});
   const command = typeof ti.command === 'string' ? ti.command : '';
   const profiles = profilesFor(typeof input.cwd === 'string' ? input.cwd : process.cwd());
-  const found = { heavy: false };
+  /** @type {Heavy[]} */
+  const heavy = [];
   /** @type {string[]} */
   const unshimmed = [];
   /** @type {string[]} 環境変数で shim を素通りさせる部分 */
@@ -194,7 +230,7 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
     const run = switchyardRunArgs(head, rest);
     if (run !== null) {
       const w = wrapperOf(run, profiles);
-      if (w.jobClass !== 'quick') found.heavy = true;
+      if (w.jobClass !== 'quick') heavy.push({ jobClass: w.jobClass, cpusMin: w.cpusMin, locks: w.locks });
       visit(w.argv, true);
       return;
     }
@@ -212,7 +248,7 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
       const hit = classify(classifiableCommand([base, ...rest]), profiles);
       if (hit === null) return;
       if (!pathHead) {
-        if (hit.profile.class !== 'quick') found.heavy = true;
+        if (hit.profile.class !== 'quick') heavy.push(needOf(hit.profile));
         if (!wrapped && bypass.length > 0) overridden.push(bypassText);
       } else if (!wrapped) {
         unshimmed.push(text);
@@ -226,7 +262,7 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
     const hit = classify(ownText, profiles) ?? (pathHead ? classify(classifiableCommand([base, ...rest]), profiles) : null);
     const launches = pathHead || profiles.some((np) => np.profile.match.some((g) => leadWord(g) === head && globMatch(g, ownText)));
     // switchyard run で包んだ中では、子に入れ子の印が立ち node の shim も包まないので、重さは包みの性格だけで決まる(ここでは数えない)
-    if (!wrapped && hit !== null && launches && hit.profile.class !== 'quick') found.heavy = true;
+    if (!wrapped && hit !== null && launches && hit.profile.class !== 'quick') heavy.push(needOf(hit.profile));
     // パスで呼ぶスクリプトの引数の中の shim の語・シェルから後ろ(scripts/probe-run.sh gates npm run bench など)は、中で PATH の shim が包みうる。
     // 背景への判定だけに使う(拒否にはかけない)
     if (pathHead) {
@@ -259,7 +295,7 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
       },
     };
   }
-  if (found.heavy && ti.run_in_background !== true) {
+  if (heavy.length > 0 && ti.run_in_background !== true && shouldBackground(heavy)) {
     // 決定(permissionDecision)は付けない。allow は権限の確認を飛ばすので使わない(設計 §12)
     return { hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { ...ti, run_in_background: true } } };
   }

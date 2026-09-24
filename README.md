@@ -32,7 +32,7 @@ Once installed, every new Claude Code session gets three hooks:
 | Hook | What it does |
 |---|---|
 | `SessionStart` | Puts `shims/` at the front of `PATH` for the session |
-| `PreToolUse` (Bash) | Sends CPU-holding runs to the background; rejects bypasses that call the real binary by path |
+| `PreToolUse` (Bash) | Sends a CPU-holding run to the background when it would have to wait (a queue, a measurement, a held lock, not enough free CPU); rejects bypasses that call the real binary by path. `SWITCHYARD_BACKGROUND=always` sends every heavy run to the background, `never` sends none |
 | `Stop` | Holds the session back if one of its jobs ended in a way nobody has looked at |
 
 ## Commands
@@ -218,7 +218,7 @@ switchyard は操車場のこと。重い走行を 1 本ずつ、正しい線路
 | Hook | すること |
 |---|---|
 | `SessionStart` | そのセッションの `PATH` の先頭に `shims/` を足す |
-| `PreToolUse` (Bash) | CPU を持つ走行を背景実行に回す。本物の実行ファイルをパスで直に呼ぶ抜け道を拒否する |
+| `PreToolUse` (Bash) | CPU を持つ走行が待たされる見込み(待ち列・計測・使われている鍵・CPU の空き不足)のときだけ背景実行に回す。本物の実行ファイルをパスで直に呼ぶ抜け道を拒否する。`SWITCHYARD_BACKGROUND=always` で重い走行を必ず背景へ、`never` で回さない |
 | `Stop` | そのセッションのジョブに、まだ誰も確かめていない終わり方があれば止まるのを差し戻す |
 
 ## コマンド
