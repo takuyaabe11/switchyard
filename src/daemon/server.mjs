@@ -2,7 +2,7 @@
 // デーモンの殻。socket・時計・ファイルを持ち、判断は decide に任せる(設計 §4.2)。
 import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { connect as netConnect, createServer } from 'node:net';
-import { cpus as osCpus, freemem, totalmem } from 'node:os';
+import { availableParallelism, cpus as osCpus, freemem, totalmem } from 'node:os';
 import { decide, initialState } from '../core/decide.mjs';
 import { rebaseForRecovery } from '../core/recovery.mjs';
 import { usedCpus } from '../core/schedule.mjs';
@@ -36,6 +36,7 @@ import { t } from '../i18n.mjs';
  *   overcommit?: boolean,
  *   sampleMs?: number,
  *   readBusyMs?: () => number,
+ *   cores?: number,
  *   memory?: boolean,
  *   memFloorMb?: number,
  *   memSampleMs?: number,
@@ -69,6 +70,22 @@ export function busyMsOfMachine() {
   let busy = 0;
   for (const c of osCpus()) busy += c.times.user + c.times.nice + c.times.sys + c.times.irq;
   return busy;
+}
+
+/**
+ * 走行に並列度として渡すスレッド数。
+ * - ふつうは割り当てたコア数(他の走行と機械を分け合っているときに、取り分を超えて取り合わせない)
+ * - 実測で取り分を縮めた走行(待ちと入出力が中心)は、宣言の最大(容量まで)。CPU をあまり使わないのでスレッドを増やしても
+ *   取り合わず、縮めたコア数に縛ると待ちが直列になって遅くなる
+ * - 容量いっぱいを割り当てた走行は、機械の全コア数。予約のコアは人とエージェントのためだが、テストの結果を待つ間は
+ *   ほとんど使われない。縛ると単独の走行が 1/コア数 ほど遅くなるだけ(実測: go test 9.4 秒 → 10.4 秒)
+ * @param {{ cpus: number, job: { sizedFrom?: { min: number, max: number } } }} lease @param {number} capacity @param {number} cores
+ * @returns {number}
+ */
+export function threadsOf(lease, capacity, cores) {
+  const from = lease.job.sizedFrom;
+  const n = from === undefined ? lease.cpus : Math.max(lease.cpus, Math.min(from.max, capacity));
+  return n >= capacity ? Math.max(n, cores) : n;
 }
 
 /** 機械(コンテナなら cgroup の上限の中)で使えるメモリ(MB) */
@@ -144,6 +161,8 @@ export async function startDaemon(opts) {
     sampleMs = 1_000,
     readBusyMs = busyMsOfMachine,
     // メモリを見た受け入れ。既定は無効(startDaemon を直に使うテストで、機械の実際の空きで入場が変わらないように)
+    // 機械の論理コア数(容量いっぱいを割り当てた走行に並列度として渡す)
+    cores = availableParallelism(),
     memory = false,
     memFloorMb = totalMbOfMachine() * MEM_FLOOR_RATIO,
     memSampleMs = 2_000,
@@ -220,7 +239,8 @@ export async function startDaemon(opts) {
       // grant を送った時点を心拍とみなす(声を聞いたのと同じ扱い)。
       // 待っている包みは心拍を送らないので、更新しないと grant から started までの間に途絶の判定へ落ちる
       lastHeard.set(a.jobId, monoNow());
-      send(conn, { t: 'grant', jobId: a.jobId, cpus: a.cpus });
+      const lease = state.leases.find((l) => l.job.id === a.jobId);
+      send(conn, { t: 'grant', jobId: a.jobId, cpus: a.cpus, threads: lease === undefined ? a.cpus : threadsOf(lease, state.capacity, cores) });
     } else if (a.type === 'hold') {
       // 止める / 降格する側も声を聞いた扱いにする(止まっている間も包みは心拍を送り続けるが、往復を待たない)
       lastHeard.set(a.jobId, monoNow());
@@ -359,7 +379,9 @@ export async function startDaemon(opts) {
       const m = /** @type {Record<string, unknown>} */ (typeof raw === 'object' && raw !== null ? raw : {});
       switch (m.t) {
         case 'request': {
-          const req = parseJobRequest(m.job);
+          const parsed = parseJobRequest(m.job);
+          // 上限を容量に切り詰めてから縮める(既定の表の「容量いっぱい」を、top や記録に大きな数のまま出さない)
+          const req = parsed.cpus.max > state.capacity ? { ...parsed, cpus: { min: Math.min(parsed.cpus.min, state.capacity), max: state.capacity } } : parsed;
           const id = newJobId();
           bind(id);
           send(conn, { t: 'accepted', jobId: id });
@@ -380,7 +402,7 @@ export async function startDaemon(opts) {
           apply({ type: 'resume', now: monoNow(), jobId: id, pid: numOrNull(m.pid), pgid: numOrNull(m.pgid) });
           // 割り振りの後、受け取る前に切れていた包みには知らせ直す。
           // この resume で初めて入場したときは、apply の中の dispatch が既に grant を送っているので送らない
-          if (lease !== undefined && m.phase === 'waiting') send(conn, { t: 'grant', jobId: id, cpus: lease.cpus });
+          if (lease !== undefined && m.phase === 'waiting') send(conn, { t: 'grant', jobId: id, cpus: lease.cpus, threads: threadsOf(lease, state.capacity, cores) });
           return;
         }
         case 'started': {

@@ -7,6 +7,7 @@ import { channel, connectDaemon, DaemonUnavailableError } from '../client/connec
 import { sessionId } from '../client/session.mjs';
 import { heldLocks, repoRoot } from '../config/context.mjs';
 import { applyTemplate, classifiableCommand, classify, loadProfiles } from '../config/profiles.mjs';
+import { threadEnv } from '../config/threads.mjs';
 import { pathsOf } from '../daemon/paths.mjs';
 import { appendRecord } from '../daemon/store.mjs';
 import { readPgid, renicePriority, signalGroup, spawnMeasured, verifiedGroup, waitGroupGone } from './group.mjs';
@@ -261,14 +262,21 @@ export function runJob(opts) {
       }
     };
 
-    /** @param {number} cpus @param {boolean} managed */
-    const startChild = (cpus, managed) => {
+    /**
+     * @param {number} cpus @param {boolean} managed
+     * @param {number} [threads] 並列度として道具に渡す数(デーモンが grant で渡す。省けば cpus)
+     */
+    const startChild = (cpus, managed, threads = cpus) => {
       if (finished) return;
       phase = 'running';
       const tpl = profile === null ? { env: {}, args: [] } : applyTemplate(profile, cpus);
       childStartedAt = Date.now();
+      // 割り当てを守らせる並列度の変数は、デーモンが割り当てた走行にだけ渡す(管理なしで走る子を宣言の最小に縛らない)。
+      // 利用者の値(親の環境・profile の env)が勝つ。SWITCHYARD_THREAD_ENV=0 で渡さない
+      const parallel = managed && cpus > 0 && env.SWITCHYARD_THREAD_ENV !== '0' ? threadEnv(threads, env) : {};
       /** @type {NodeJS.ProcessEnv} */
-      const childEnv = { ...env, ...tpl.env, SWITCHYARD_CPUS: String(cpus) };
+      const childEnv = { ...env, ...parallel, ...tpl.env, SWITCHYARD_CPUS: String(cpus) };
+      if (managed && cpus > 0) childEnv.SWITCHYARD_THREADS = String(threads);
       if (jobId !== null) childEnv.SWITCHYARD_JOB_ID = jobId;
       // デーモンに要求せずに走らせる子(入れ子で直接・管理なし)に、祖先のジョブの id を自分の id として渡さない
       else delete childEnv.SWITCHYARD_JOB_ID;
@@ -385,7 +393,7 @@ export function runJob(opts) {
           lastNote = line;
         } else if (m.t === 'grant' && phase === 'waiting') {
           out(t(`[switchyard] 開始 ${jobId}(CPU ${String(m.cpus)})`, `[switchyard] started ${jobId} (CPU ${String(m.cpus)})`));
-          startChild(Number(m.cpus), true);
+          startChild(Number(m.cpus), true, typeof m.threads === 'number' && m.threads >= 1 ? m.threads : Number(m.cpus));
         } else if (m.t === 'hold' && phase === 'running' && pgid !== null) {
           const mode = m.mode === 'pause' ? 'pause' : 'throttle';
           if (held === null) {

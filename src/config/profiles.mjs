@@ -22,6 +22,13 @@ import { t } from '../i18n.mjs';
 /** @typedef {{ name: string, profile: Profile }} NamedProfile */
 
 /**
+ * cpus の max に書ける「容量いっぱい」(switchyard.json では "all")。デーモンが容量に切り詰める。
+ * 割り当てたコア数を並列度として道具に渡すので(src/config/threads.mjs)、上限を小さく決め打つと、
+ * 他に誰も走っていない大きな機械でも、その数のスレッドに縛られる。
+ */
+export const ALL_CPUS = 65_536;
+
+/**
  * 走らせずに調べるだけの旗。この旗を持つ部分は、どの profile にも当てない(改善 3)。
  * 値を取らない旗だけを置く — 値を取る旗をここに入れると、その後ろの語ごと見送られる。
  */
@@ -99,7 +106,7 @@ export const DEFAULT_PROFILES = [
         'make', 'make *',
       ],
       class: 'batch',
-      cpus: { min: 2, max: 4 },
+      cpus: { min: 2, max: ALL_CPUS },
     },
   },
 ];
@@ -257,9 +264,10 @@ export function validateProfile(name, raw) {
   const out = { match: /** @type {string[]} */ (p.match), class: /** @type {JobClass} */ (p.class) };
   if (p.cpus !== undefined) {
     const c = /** @type {Record<string, unknown>} */ (p.cpus);
-    const ok = typeof c === 'object' && c !== null && Number.isInteger(c.min) && Number.isInteger(c.max) && Number(c.min) >= 1 && Number(c.max) >= Number(c.min);
-    if (!ok) throw fail(t('cpus は { min: 1 以上の整数, max: min 以上の整数 }', 'cpus must be { min: integer >= 1, max: integer >= min }'));
-    out.cpus = { min: Number(c.min), max: Number(c.max) };
+    const max = typeof c === 'object' && c !== null && c.max === 'all' ? ALL_CPUS : c?.max;
+    const ok = typeof c === 'object' && c !== null && Number.isInteger(c.min) && Number.isInteger(max) && Number(c.min) >= 1 && Number(max) >= Number(c.min);
+    if (!ok) throw fail(t('cpus は { min: 1 以上の整数, max: min 以上の整数か "all" }', 'cpus must be { min: integer >= 1, max: integer >= min or "all" }'));
+    out.cpus = { min: Number(c.min), max: Number(max) };
   }
   if (p.locks !== undefined) {
     if (!isStrings(p.locks)) throw fail(t('locks は文字列の配列', 'locks must be an array of strings'));
