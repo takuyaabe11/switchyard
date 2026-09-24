@@ -11,6 +11,7 @@ import { t } from '../i18n.mjs';
  *   { cmd: 'run', flags: RunFlags, argv: string[] } |
  *   { cmd: 'top' } |
  *   { cmd: 'stop' } |
+ *   { cmd: 'uninstall', keepLogs: boolean, dryRun: boolean } |
  *   { cmd: 'restart' } |
  *   { cmd: 'why', jobId: string } |
  *   { cmd: 'ack', jobId: string, session: string | null } |
@@ -38,6 +39,7 @@ export const USAGE = t(
     '  switchyard replay [--cwd 前方一致] [--since 日数d] [--config switchyard.json] [--examples 件数] [--dir 記録の根]',
     '  switchyard report [--repo 前方一致] [--since 日数d]',
     '  switchyard init [--since 日数d] [--min-seconds 秒] [--min-count 回数] [--dir 記録の根] [--write]',
+    '  switchyard uninstall [--keep-logs] [--dry-run]',
   ].join('\n'),
   [
     'Usage:',
@@ -51,6 +53,7 @@ export const USAGE = t(
     '  switchyard replay [--cwd prefix] [--since <days>d] [--config switchyard.json] [--examples count] [--dir log-root]',
     '  switchyard report [--repo prefix] [--since <days>d]',
     '  switchyard init [--since <days>d] [--min-seconds seconds] [--min-count count] [--dir log-root] [--write]',
+    '  switchyard uninstall [--keep-logs] [--dry-run]',
   ].join('\n'),
 );
 
@@ -230,6 +233,11 @@ export function parseArgs(args) {
     case 'stop':
       if (rest.length > 0) throw new UsageError(t('stop は引数を取らない', 'stop takes no arguments'));
       return { cmd: 'stop' };
+    case 'uninstall': {
+      const bad = rest.find((a) => a !== '--keep-logs' && a !== '--dry-run');
+      if (bad !== undefined) throw new UsageError(t(`uninstall が知らない引数: ${bad}`, `uninstall does not take: ${bad}`));
+      return { cmd: 'uninstall', keepLogs: rest.includes('--keep-logs'), dryRun: rest.includes('--dry-run') };
+    }
     case 'restart':
       if (rest.length > 0) throw new UsageError(t('restart は引数を取らない', 'restart takes no arguments'));
       return { cmd: 'restart' };

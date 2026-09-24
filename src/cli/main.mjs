@@ -14,6 +14,8 @@ import { formatReport, replay } from '../replay/replay.mjs';
 import { foregroundCalls, formatInit, merged, suggest, writeConfig } from '../init/init.mjs';
 import { formatReport as formatSummary, summarize } from '../report/report.mjs';
 import { formatObserved, summarizeObserved } from '../report/observe.mjs';
+import { cleanUp, formatUninstall } from './uninstall.mjs';
+import { PLUGIN_ROOT } from '../hooks/session.mjs';
 import { probe } from '../run/probe.mjs';
 import { runJob } from '../run/run.mjs';
 import { parseArgs, UsageError, USAGE } from './args.mjs';
@@ -100,6 +102,16 @@ export async function cli(args, opts = {}) {
       const r = await stopDaemon({ home });
       stdout(`${r.reason}\n`);
       return r.stopped || r.pid === null ? 0 : 1;
+    }
+    case 'uninstall': {
+      // plugin を外す前の後片付け: デーモンを止め、環境ファイルの shims の行と記録を消す
+      /** @type {string} */
+      let daemon;
+      if (command.dryRun) daemon = t('走っていれば止める', 'stop it if it is running');
+      else daemon = (await stopDaemon({ home })).reason;
+      const r = cleanUp({ home, env, ownShims: join(PLUGIN_ROOT, 'shims'), keepLogs: command.keepLogs, dryRun: command.dryRun });
+      stdout(formatUninstall(r, { home, daemon, keepLogs: command.keepLogs, dryRun: command.dryRun }));
+      return 0;
     }
     case 'restart': {
       const r = await stopDaemon({ home });
