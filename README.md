@@ -47,7 +47,8 @@ switchyard ack <job> [--session <id>] # mark a failed job as looked at
 switchyard run --why "..." -- <cmd> # run something through switchyard explicitly
 switchyard probe <seconds> -- <cmd> # measure a command to pick cpus/class
 switchyard replay [--since 7d]      # re-run past decisions against a config
-switchyard report [--since 7d]      # aggregate decisions and hook verdicts
+switchyard report [--since 7d]      # aggregate decisions and hook verdicts, and what the queue saved
+switchyard init [--write]           # suggest switchyard.json profiles from your past sessions in this repo
 ```
 
 `switchyard run` flags: `--profile <name>`, `--class quick|batch|measure`,
@@ -56,7 +57,10 @@ switchyard report [--since 7d]      # aggregate decisions and hook verdicts
 
 ## Per-project configuration
 
-Drop a `switchyard.json` at the repo root to classify that project's commands:
+Drop a `switchyard.json` at the repo root to classify that project's commands. `switchyard init` reads your past
+Claude Code sessions in the repo (`~/.claude/projects`), finds commands that ran repeatedly and took long but match
+no profile, and prints them as profiles; `switchyard init --write` adds them to `switchyard.json` without touching
+the profiles already there.
 
 ```json
 {
@@ -241,7 +245,8 @@ switchyard ack <job> [--session <id>] # 失敗したジョブを確認済みに�
 switchyard run --why "..." -- <cmd> # 明示的に switchyard を通して走らせる
 switchyard probe <秒> -- <cmd>      # cpus / class を決めるためにコマンドを計測する
 switchyard replay [--since 7d]      # 過去の決定を、今の設定でやり直して見る
-switchyard report [--since 7d]      # 決定と hook の判断を集計する
+switchyard report [--since 7d]      # 決定と hook の判断、順番待ちの効果を集計する
+switchyard init [--write]           # この repo の過去のセッションから switchyard.json の profile を提案する
 ```
 
 `switchyard run` の旗: `--profile <名前>`、`--class quick|batch|measure`、
@@ -250,7 +255,9 @@ switchyard report [--since 7d]      # 決定と hook の判断を集計する
 
 ## repo ごとの設定
 
-repo の根に `switchyard.json` を置くと、その repo のコマンドの分類を決められる。
+repo の根に `switchyard.json` を置くと、その repo のコマンドの分類を決められる。`switchyard init` は、その repo での
+過去の Claude Code のセッション(`~/.claude/projects`)を読み、繰り返し走っていて長いのにどの profile にも当たらない
+コマンドを profile として出す。`switchyard init --write` で、既にある profile を変えずに `switchyard.json` へ書き足す。
 形式は上の英語側の例と同じ。
 
 - `class`: `quick` は素通し、`batch` は CPU を取り、絞られることがある。

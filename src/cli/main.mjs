@@ -11,6 +11,7 @@ import { stopDaemon } from '../daemon/control.mjs';
 import { switchyardHome, pathsOf } from '../daemon/paths.mjs';
 import { readJournal } from '../daemon/store.mjs';
 import { formatReport, replay } from '../replay/replay.mjs';
+import { foregroundCalls, formatInit, merged, suggest, writeConfig } from '../init/init.mjs';
 import { formatReport as formatSummary, summarize } from '../report/report.mjs';
 import { probe } from '../run/probe.mjs';
 import { runJob } from '../run/run.mjs';
@@ -195,6 +196,25 @@ export async function cli(args, opts = {}) {
       // 回した 1 世代前も数に入れる(switchyard report が回転の前後で飛ばない)
       const s = summarize({ events: readJournal(p.events).records, hooks: readJournal(p.hooks).records, repoPrefix: command.repoPrefix, since });
       stdout(formatSummary(s, { repoPrefix: command.repoPrefix, sinceDays: command.sinceDays }));
+      return 0;
+    }
+    case 'init': {
+      // 過去のセッション記録から、この repo の profile を提案する。記録は読むだけで、--write のときだけ switchyard.json に書き足す
+      const repo = repoRoot(cwd);
+      const dir = command.dir ?? join(env.HOME ?? homedir(), '.claude', 'projects');
+      const since = command.sinceDays === null ? null : now() - command.sinceDays * 86_400_000;
+      const calls = await foregroundCalls({ dir, repo, since });
+      const suggestions = suggest({ calls, profiles: loadProfiles(repo).profiles, minCount: command.minCount, minMs: command.minSeconds * 1000 });
+      const file = join(repo, 'switchyard.json');
+      if (command.write && suggestions.length > 0) {
+        try {
+          writeConfig(file, merged(file, suggestions));
+        } catch (e) {
+          stderr(t(`${file} を書けない: ${e instanceof Error ? e.message : String(e)}\n`, `cannot write ${file}: ${e instanceof Error ? e.message : String(e)}\n`));
+          return 1;
+        }
+      }
+      stdout(formatInit({ repo, suggestions, calls: calls.length, write: command.write && suggestions.length > 0, file }));
       return 0;
     }
     case 'probe': {

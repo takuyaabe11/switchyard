@@ -17,11 +17,13 @@ import { t } from '../i18n.mjs';
  *   { cmd: 'probe', seconds: number, argv: string[] } |
  *   ReplayCommand |
  *   ReportCommand |
+ *   InitCommand |
  *   { cmd: 'help' }
  * )} Command
  */
 /** @typedef {{ cmd: 'replay', cwdPrefix: string | null, sinceDays: number | null, config: string | null, examples: number, dir: string | null }} ReplayCommand */
 /** @typedef {{ cmd: 'report', repoPrefix: string | null, sinceDays: number | null }} ReportCommand */
+/** @typedef {{ cmd: 'init', dir: string | null, sinceDays: number | null, minSeconds: number, minCount: number, write: boolean }} InitCommand */
 
 export const USAGE = t(
   [
@@ -35,6 +37,7 @@ export const USAGE = t(
     '  switchyard probe <秒> -- <コマンド...>',
     '  switchyard replay [--cwd 前方一致] [--since 日数d] [--config switchyard.json] [--examples 件数] [--dir 記録の根]',
     '  switchyard report [--repo 前方一致] [--since 日数d]',
+    '  switchyard init [--since 日数d] [--min-seconds 秒] [--min-count 回数] [--dir 記録の根] [--write]',
   ].join('\n'),
   [
     'Usage:',
@@ -47,6 +50,7 @@ export const USAGE = t(
     '  switchyard probe <seconds> -- <command...>',
     '  switchyard replay [--cwd prefix] [--since <days>d] [--config switchyard.json] [--examples count] [--dir log-root]',
     '  switchyard report [--repo prefix] [--since <days>d]',
+    '  switchyard init [--since <days>d] [--min-seconds seconds] [--min-count count] [--dir log-root] [--write]',
   ].join('\n'),
 );
 
@@ -176,6 +180,33 @@ function parseReport(rest) {
   return out;
 }
 
+/** @param {string[]} rest @returns {InitCommand} */
+function parseInit(rest) {
+  /** @type {InitCommand} */
+  const out = { cmd: 'init', dir: null, sinceDays: null, minSeconds: 20, minCount: 2, write: false };
+  for (let i = 0; i < rest.length; i += 1) {
+    const name = rest[i];
+    if (name === '--write') {
+      out.write = true;
+      continue;
+    }
+    const value = rest[i + 1];
+    if (value === undefined) throw new UsageError(t(`${name} に値が無い`, `${name} needs a value`));
+    i += 1;
+    if (name === '--dir') out.dir = value;
+    else if (name === '--since') {
+      const m = /^([1-9][0-9]*)d$/.exec(value);
+      if (m === null) throw new UsageError(t(`--since は 14d の形(1 以上の日数): ${value}`, `--since takes the form 14d (1 or more days): ${value}`));
+      out.sinceDays = Number(m[1]);
+    } else if (name === '--min-seconds' || name === '--min-count') {
+      if (!/^[0-9]+$/.test(value)) throw new UsageError(t(`${name} は 0 以上の整数: ${value}`, `${name} takes an integer of 0 or more: ${value}`));
+      if (name === '--min-seconds') out.minSeconds = Number(value);
+      else out.minCount = Number(value);
+    } else throw new UsageError(t(`知らないオプション: ${name}`, `unknown option: ${name}`));
+  }
+  return out;
+}
+
 /** @param {string[]} args @returns {Command} */
 export function parseArgs(args) {
   const [cmd, ...rest] = args;
@@ -191,6 +222,8 @@ export function parseArgs(args) {
       return parseReplay(rest);
     case 'report':
       return parseReport(rest);
+    case 'init':
+      return parseInit(rest);
     case 'top':
       if (rest.length > 0) throw new UsageError(t('top は引数を取らない', 'top takes no arguments'));
       return { cmd: 'top' };
