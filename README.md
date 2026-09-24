@@ -118,6 +118,22 @@ A part that carries `--version`, `--help`, `--list` or `--dry-run` (or ends in `
 is never classified: it asks a question instead of running work, so `make --version` and
 `npx playwright test --list` stay out of the queue.
 
+## Updating
+
+switchyard is installed from its own marketplace, and Claude Code does not auto-update third-party
+marketplaces by default. Claude Code only sees a new release when the `version` in
+`plugin.json` goes up. To update by hand:
+
+```
+/plugin marketplace update switchyard
+/reload-plugins
+```
+
+The same works in the VS Code extension, where `/plugins` opens the Manage plugins dialog.
+After an update the daemon that is already running keeps the old version; the next session says so,
+and `switchyard restart` brings the new one up. `PATH` lines that point at the old install are
+removed by the next `SessionStart`.
+
 ## Turning it off, and taking it out
 
 switchyard installs three hooks, and two of them can stop you: `PreToolUse` refuses a
@@ -258,6 +274,20 @@ repo の根に `switchyard.json` を置くと、その repo のコマンドの�
 `--version` / `--help` / `--list` / `--dry-run` を含む部分(と、末尾が `-V` / `-h` / `-n` の部分)は
 どの表にも当てない。走らせずに訊いているだけなので、`make --version` や
 `npx playwright test --list` は順番待ちに乗らない。
+
+## 更新する
+
+switchyard は自前のマーケットプレイスから入るので、Claude Code は既定ではそれを自動で更新しない。
+Claude Code が新しい版に気づくのは、`plugin.json` の `version` が上がったときだけ。手で更新するには:
+
+```
+/plugin marketplace update switchyard
+/reload-plugins
+```
+
+VS Code の拡張でも同じで、`/plugins` で Manage plugins の画面が開く。
+更新しても、走っているデーモンは古い版のまま残る。次のセッションがそれを知らせるので、`switchyard restart` で入れ替える。
+古い置き場を指す `PATH` の行は、次の `SessionStart` が取り除く。
 
 ## 切る・外す
 
