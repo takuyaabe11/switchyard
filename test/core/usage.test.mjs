@@ -6,7 +6,7 @@ import { rightSize, UsageBook } from '../../src/core/usage.mjs';
 const run = (/** @type {number} */ cpuMs, /** @type {number} */ cpus, over = {}) => ({ durationMs: 10_000, cpuMs, cpus, code: 0, ...over });
 
 describe('UsageBook(CPU の使い方の実測)', () => {
-  it('割り振りの半分も使わない成功が 3 回あれば、平均の使用コア数の中央値を返す', () => {
+  it('割り振りの半分も使わない成功が 2 回以上あれば、平均の使用コア数の中央値を返す', () => {
     const b = new UsageBook();
     for (const cpuMs of [8_000, 7_000, 9_000]) b.record('/r', 'p', run(cpuMs, 2));
     assert.equal(b.cores('/r', 'p'), 0.8);
@@ -15,7 +15,6 @@ describe('UsageBook(CPU の使い方の実測)', () => {
 
   it('回数が足りない・短い走行・すぐ落ちた失敗・CPU 時間の無い走行は数えない', () => {
     const b = new UsageBook();
-    b.record('/r', 'p', run(1_000, 2));
     b.record('/r', 'p', run(1_000, 2));
     b.record('/r', 'p', run(400, 2, { code: 1, durationMs: 4_000 }));
     b.record('/r', 'p', run(100, 2, { durationMs: 1_000 }));
@@ -43,6 +42,18 @@ describe('UsageBook(CPU の使い方の実測)', () => {
     assert.equal(b.cores('/r', 'p'), null, '使い切る走行');
     for (let i = 0; i < 10; i += 1) b.record('/r', 'p', run(5_000, 4));
     assert.equal(b.cores('/r', 'p'), 0.5);
+  });
+});
+
+describe('UsageBook.typical(走行中のジョブが使いそうなコア数)', () => {
+  it('縮めるかどうかに関わらず直近の使用コア数の中央値を返し、回数が足りなければ null', () => {
+    const b = new UsageBook();
+    b.record('/r', 'p', { durationMs: 10_000, cpuMs: 40_000, cpus: 4, code: 0 });
+    assert.equal(b.typical('/r', 'p'), null);
+    b.record('/r', 'p', { durationMs: 10_000, cpuMs: 38_000, cpus: 4, code: 0 });
+    b.record('/r', 'p', { durationMs: 10_000, cpuMs: 36_000, cpus: 4, code: 0 });
+    assert.equal(b.typical('/r', 'p'), 3.8);
+    assert.equal(b.cores('/r', 'p'), null, '使い切る走行は縮めないが、いつもの使い方は返す');
   });
 });
 

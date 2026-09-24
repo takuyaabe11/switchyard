@@ -213,6 +213,8 @@ const needOf = (p, /** @type {string} */ name) => ({ jobClass: p.class, cpusMin:
  * 待ち列がある・計測が走っている・計測を要求するのに CPU を持つ走行がある・鍵が使われている・CPU の空きが足りない、のどれか。
  * 見込みが無ければ前景のまま走らせる(待たないなら背景へ回す理由が無く、回すとエージェントは完了の通知を待つことになる)。
  * repo を渡すと、デーモンが実測で縮める profile(盤面の sized)は縮めた要求で見積もる(right-sizing と同じ計算)。
+ * 宣言の空きが足りなくても、重い部分が 1 つで、デーモンが測った実測の空き(盤面の spare)に収まれば、
+ * 次の標本(1 秒ごと)で詰め込まれるので待たないとみなす(詰め込みは 1 回に 1 本なので、2 つ以上なら待つ)。
  * @param {import('../protocol/messages.mjs').Snapshot} snap @param {Heavy[]} heavy @param {string} [repo] @returns {boolean}
  */
 export function waitExpected(snap, heavy, repo) {
@@ -227,7 +229,8 @@ export function waitExpected(snap, heavy, repo) {
     const min = cores === undefined ? h.cpusMin : rightSize({ class: h.jobClass, cpus: { min: h.cpusMin, max: h.cpusMin } }, cores).cpus.min;
     need += Math.min(Math.max(min, 1), snap.capacity);
   }
-  return need > snap.capacity - snap.used;
+  if (need <= snap.capacity - snap.used) return false;
+  return !(heavy.length === 1 && typeof snap.spare === 'number' && need <= snap.spare);
 }
 
 /**

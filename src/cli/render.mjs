@@ -61,6 +61,7 @@ export function renderTop(snap, nowWall) {
         l.locks.length === 0 ? '' : t(`鍵: ${l.locks.join(', ')}`, `locks: ${l.locks.join(', ')}`),
         l.escapes.length === 0 ? '' : t(`抜ける子: ${l.escapes.join(', ')}`, `escaping children: ${l.escapes.join(', ')}`),
         sizedText(l),
+        l.overcommit === true ? t('実測の空きに詰め込んだ', 'packed into measured spare CPU') : '',
       ].filter((x) => x !== '');
       lines.push(`  ${l.id} [${label[l.class]}] ${phase} CPU ${l.cpus} ${duration(nowWall - l.sinceWall)}  ${l.cmd}${extras.length === 0 ? '' : `  (${extras.join(' / ')})`}`);
     }

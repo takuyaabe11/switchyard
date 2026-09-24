@@ -5,8 +5,9 @@
 /** @param {State} s */
 export function checkInvariants(s) {
   // 親の子として入場したリース(設計 §6.3 の 4)は容量を超えて借りてよいので、I1 の合計から除く。
-  // 止めた / 降格したリース(held)も、計測に CPU を譲っているので数えない(設計 §6.7)
-  const used = s.leases.reduce((n, l) => n + (l.lockChild === true || l.held !== undefined ? 0 : l.cpus), 0);
+  // 止めた / 降格したリース(held)も、計測に CPU を譲っているので数えない(設計 §6.7)。
+  // 実測の空きに詰め込んだリース(overcommit)も、予約ではなく実測の空きで入れたので数えない
+  const used = s.leases.reduce((n, l) => n + (l.lockChild === true || l.overcommit === true || l.held !== undefined ? 0 : l.cpus), 0);
   if (used > s.capacity) throw new Error(`I1: CPU の割り振り ${used} が容量 ${s.capacity} を超えた`);
 
   /** @type {Map<string, number>} */

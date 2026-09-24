@@ -136,9 +136,15 @@ function blockReason(s, job) {
 /**
  * 待ち列を見て、入場させるジョブと、待たせるジョブの理由を決める。
  * 入力の状態は書き換えない。この回に作ったリースだけを書き換える。
- * @param {State} input @param {number} now @returns {{ state: State, actions: Action[] }}
+ *
+ * spare は、実測で空いているコア数(容量 − 機械全体で実際に使われているコア数)。デーモンが、直前の入場から
+ * 走行が立ち上がるのを待ってから測った値だけを渡す(測れない・待っている途中なら null)。
+ * 先頭のジョブ(計測を除く)が宣言の空きに入らなくても、実測の空きに cpus.min が収まれば、1 回に 1 本だけ容量を超えて入れる(詰め込み)。
+ * 予約はしたが使わない走行(待ちと入出力が中心のテスト)の横で、使われないコアを遊ばせないため。
+ * CPU を使い切る走行の横では空きが出ないので入れない。計測の走行中・入場待ちの間(gate)と、鍵が空いていないときも入れない。
+ * @param {State} input @param {number} now @param {{ spare?: number | null }} [opts] @returns {{ state: State, actions: Action[] }}
  */
-export function schedule(input, now) {
+export function schedule(input, now, { spare = null } = {}) {
   /** @type {State} */
   const s = { ...input, waiting: [...input.waiting], leases: [...input.leases], notes: {} };
   /** @type {Lease[]} */
@@ -172,11 +178,18 @@ export function schedule(input, now) {
     });
   ordered = [...children, ...ordered.filter((w) => !children.includes(w))];
 
-  /** @param {Waiting} w @param {number} cpus @param {boolean} [lockChild] 親の子として入場する(設計 §6.3 の 4) */
-  const admit = (w, cpus, lockChild = false) => {
+  /**
+   * @param {Waiting} w @param {number} cpus @param {boolean} [lockChild] 親の子として入場する(設計 §6.3 の 4)
+   * @param {boolean} [overcommit] 実測の空きに詰め込む(容量を超える)
+   */
+  const admit = (w, cpus, lockChild = false, overcommit = false) => {
     s.waiting = s.waiting.filter((x) => x !== w);
     /** @type {Lease} */
-    const lease = { job: w.job, cpus, grantedAt: now, phase: 'granted', pid: null, pgid: null, recovering: false, ...(lockChild ? { lockChild: true } : {}) };
+    const lease = {
+      job: w.job, cpus, grantedAt: now, phase: 'granted', pid: null, pgid: null, recovering: false,
+      ...(lockChild ? { lockChild: true } : {}),
+      ...(overcommit ? { overcommit: true } : {}),
+    };
     s.leases = [...s.leases, lease];
     granted.push(lease);
   };
@@ -217,6 +230,8 @@ export function schedule(input, now) {
   let gate = runningMeasure ? t(`計測 ${runningMeasure.job.id} の走行中は入場しない`, `no admission while measurement ${runningMeasure.job.id} runs`) : null;
   /** @type {{ id: string, etaAt: number | null } | null} 入場できなかった最初のジョブ */
   let head = null;
+  /** この回にまだ詰め込めるか(1 回に 1 本まで。入れた走行が立ち上がる前に、次を測った空きで入れない) */
+  let spareLeft = spare;
   /** @type {Set<string>} 前に居て入場できなかったジョブが要る鍵(鍵だけのジョブはこれを追い越さない) */
   const blocked = new Set();
   /** @param {JobSpec} job */
@@ -279,6 +294,11 @@ export function schedule(input, now) {
         admit(w, job.cpus.min);
         continue;
       }
+      if (spareLeft !== null && spareLeft >= job.cpus.min && locksFree(s, job.locks)) {
+        admit(w, job.cpus.min, false, true);
+        spareLeft = null;
+        continue;
+      }
       head = { id: job.id, etaAt: estimateStart(s, job, now) };
       note(blockReason(s, job), head.etaAt);
       block(job);
@@ -305,7 +325,8 @@ export function schedule(input, now) {
   // 余った CPU を、この回に入場したジョブへ順に max まで配る(走行中のジョブは増やさない)
   let free = s.capacity - usedCpus(s);
   for (const lease of granted) {
-    // 親の子のリースは容量を超えて借りうるので、余りを配らない(設計 §6.3 の 4)
+    // 親の子のリースは容量を超えて借りうるので、余りを配らない(設計 §6.3 の 4)。
+    // 詰め込んだリースは、入った時点で宣言の空きが負なので、ここで増えることはない
     if (lease.lockChild === true) continue;
     const add = Math.min(lease.job.cpus.max - lease.cpus, free);
     if (add > 0) {
@@ -318,7 +339,9 @@ export function schedule(input, now) {
   // 止める処置は入場より先に出す(計測が走り出す前に、相手が止まっているようにする)
   const actions = [...holdActions];
   // 容量を超えて借りた親の子だけ印を載せる(記録から借りの回数を数えるため。項目は該当するときだけ足す)
-  for (const l of granted) actions.push({ type: 'grant', jobId: l.job.id, cpus: l.cpus, ...(l.lockChild === true ? { lockChild: true } : {}) });
+  for (const l of granted) {
+    actions.push({ type: 'grant', jobId: l.job.id, cpus: l.cpus, ...(l.lockChild === true ? { lockChild: true } : {}), ...(l.overcommit === true ? { overcommit: true } : {}) });
+  }
   for (const n of Object.values(s.notes)) {
     const prev = input.notes[n.jobId];
     const changed = prev === undefined || prev.position !== n.position || prev.reason !== n.reason || prev.etaAt !== n.etaAt;

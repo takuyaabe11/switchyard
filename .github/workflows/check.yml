@@ -40,3 +40,4 @@ jobs:
       - run: node scripts/mutate.mjs core
       - run: node scripts/mutate.mjs escape
       - run: node scripts/mutate.mjs hooks
+      - run: node scripts/mutate.mjs pack

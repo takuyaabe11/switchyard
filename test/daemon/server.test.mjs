@@ -425,12 +425,12 @@ describe('実測の CPU の使い方で要求を縮める(right-sizing)', () => 
     return grant.cpus;
   };
 
-  it('割り振りの半分も使わない成功が 3 回続いた profile は、次から実測に合わせた要求で並べ、記録に CPU 時間を残す', async () => {
+  it('割り振りの半分も使わない成功が 2 回続いた profile は、次から実測に合わせた要求で並べ、記録に CPU 時間を残す', async () => {
     const { d, home } = await daemon({ capacity: 4 });
-    for (let i = 0; i < 3; i += 1) assert.equal(await runOnce(d, 8_000), 4, '縮める前は宣言どおり(空きを max まで配る)');
+    for (let i = 0; i < 2; i += 1) assert.equal(await runOnce(d, 8_000), 4, '縮める前は宣言どおり(空きを max まで配る)');
     assert.equal(await runOnce(d, 8_000), 1, '平均 0.8 コア → 1 コア');
     const history = readFileSync(pathsOf(home).events, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.kind === 'history');
-    assert.deepEqual(history.map((h) => h.cpuMs), [8_000, 8_000, 8_000, 8_000]);
+    assert.deepEqual(history.map((h) => h.cpuMs), [8_000, 8_000, 8_000]);
     const req = readFileSync(pathsOf(home).events, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.kind === 'event' && r.event.type === 'request').pop();
     assert.deepEqual([req.event.job.cpus, req.event.job.sizedFrom, req.event.job.measuredCores], [{ min: 1, max: 1 }, { min: 2, max: 4 }, 0.8]);
     // 盤面にも載せる(PreToolUse が待ちの見込みに使う)

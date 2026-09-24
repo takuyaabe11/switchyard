@@ -27,8 +27,27 @@ const SUITES = {
       'test/core/schedule.preempt.test.mjs',
       'test/core/score.test.mjs',
       'test/core/usage.test.mjs',
+      'test/core/schedule.overcommit.test.mjs',
     ],
     mutations: [
+      {
+        name: 'M24 実測の空きの大きさを見ずに詰め込む',
+        file: 'src/core/schedule.mjs',
+        from: 'spareLeft !== null && spareLeft >= job.cpus.min && locksFree(s, job.locks)',
+        to: 'spareLeft !== null && locksFree(s, job.locks)',
+      },
+      {
+        name: 'M25 1 回に何本も詰め込む(立ち上がる前の同じ空きで次を入れる)',
+        file: 'src/core/schedule.mjs',
+        from: 'spareLeft = null;',
+        to: '',
+      },
+      {
+        name: 'M26 鍵を見ずに詰め込む',
+        file: 'src/core/schedule.mjs',
+        from: 'spareLeft !== null && spareLeft >= job.cpus.min && locksFree(s, job.locks)',
+        to: 'spareLeft !== null && spareLeft >= job.cpus.min',
+      },
       {
         name: 'M40 割り振りを使い切る走行も縮める(割り振りの少なさを学んで縮み続ける)',
         file: 'src/core/usage.mjs',
@@ -454,7 +473,7 @@ const SUITES = {
     ],
   },
   hooks: {
-    tests: ['test/hooks/pretooluse.test.mjs', 'test/hooks/main.test.mjs', 'test/hooks/session.test.mjs', 'test/hooks/agreement.test.mjs', 'test/hooks/shell.test.mjs'],
+    tests: ['test/hooks/pretooluse.test.mjs', 'test/hooks/main.test.mjs', 'test/hooks/session.test.mjs', 'test/hooks/agreement.test.mjs', 'test/hooks/shell.test.mjs', 'test/hooks/sieve.test.mjs'],
     mutations: [
       {
         name: 'H1 既に背景でも書き換える',
@@ -466,8 +485,44 @@ const SUITES = {
         // 待ちが見込まれないのに背景へ回す(エージェントが完了の通知を待たされる)
         name: 'H20 CPU の空きを見ずに、重ければ背景へ回す',
         file: 'src/hooks/pretooluse.mjs',
-        from: 'return need > snap.capacity - snap.used;',
+        from: 'if (need <= snap.capacity - snap.used) return false;',
+        to: '',
+      },
+      {
+        name: 'H25 待ちの見込みに、実測の空き(詰め込み)を使わない',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "return !(heavy.length === 1 && typeof snap.spare === 'number' && need <= snap.spare);",
         to: 'return true;',
+      },
+      {
+        name: 'H26 重い部分が 2 つ以上でも詰め込まれると見込む',
+        file: 'src/hooks/pretooluse.mjs',
+        from: "return !(heavy.length === 1 && typeof snap.spare === 'number' && need <= snap.spare);",
+        to: "return !(typeof snap.spare === 'number' && need <= snap.spare);",
+      },
+      {
+        name: 'H27 ふるいが npm を見落とす',
+        file: 'bin/switchyard-pretooluse.awk',
+        from: '(npm|npx|',
+        to: '(npx|',
+      },
+      {
+        name: 'H28 ふるいが switchyard.json を見ない',
+        file: 'bin/switchyard-pretooluse.awk',
+        from: 'if (exists(d "/switchyard.json") || exists(d "/conductor.json")) exit 1',
+        to: 'if (exists(d "/conductor.json")) exit 1',
+      },
+      {
+        name: 'H29 ふるいが改行のエスケープを語の境目にしない',
+        file: 'bin/switchyard-pretooluse.awk',
+        from: '  gsub(/\\\\[nrtbf]/, " ", cmd)\n',
+        to: '',
+      },
+      {
+        name: 'H30 ふるいが git の index を書き換えるサブコマンドを見落とす',
+        file: 'bin/switchyard-pretooluse.awk',
+        from: '(commit|merge|',
+        to: '(merge|',
       },
       {
         name: 'H23 shim から見えない重い形を拒否しない',
@@ -639,6 +694,35 @@ const SUITES = {
         file: 'src/hooks/main.mjs',
         from: '  if (out === null) return;\n',
         to: '',
+      },
+    ],
+  },
+  pack: {
+    tests: ['test/daemon/overcommit.test.mjs', 'test/daemon/server.test.mjs'],
+    mutations: [
+      {
+        name: 'P1 学んでいない走行の立ち上がりを待たない',
+        file: 'src/daemon/server.mjs',
+        from: '(l.typical === null ? RAMP_UNKNOWN_MS : RAMP_KNOWN_MS)',
+        to: 'RAMP_KNOWN_MS',
+      },
+      {
+        name: 'P2 学んだ使い方の見込みを空きの計算に使わない',
+        file: 'src/daemon/server.mjs',
+        from: 'capacity - Math.max(busyCores, predicted)',
+        to: 'capacity - busyCores',
+      },
+      {
+        name: 'P3 窓の長さを見ずに測る',
+        file: 'src/daemon/server.mjs',
+        from: 'x.at >= settled && last.at - x.at >= SPARE_WINDOW_MS',
+        to: 'x.at >= settled',
+      },
+      {
+        name: 'P4 標本を取っても割り振りを見直さない(tick まで待つ)',
+        file: 'src/daemon/server.mjs',
+        from: 'if (sp !== null && sp >= 1) apply',
+        to: 'if (false) apply',
       },
     ],
   },

@@ -12,6 +12,7 @@ import { simulate } from '../../testkit/simulate.mjs';
 const scenario = fc
   .record({
     capacity: fc.integer({ min: 1, max: 8 }),
+    spare: fc.option(fc.integer({ min: 0, max: 4 }), { nil: null }),
     qCap: fc.integer({ min: 1, max: 2 }),
     jobs: fc.array(
       fc.record({
@@ -33,6 +34,7 @@ const scenario = fc
   })
   .map((raw) => ({
     capacity: raw.capacity,
+    spare: raw.spare,
     lockCaps: { p: 1, q: raw.qCap },
     jobs: raw.jobs.map((j, i) => {
       const pick = j.parentPick;

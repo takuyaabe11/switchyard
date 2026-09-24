@@ -70,9 +70,10 @@ export function resolveBySuccess(s, session, repo, profile, cmd) {
 const afterMeasure = (s, l) => (l.job.class === 'measure' ? { ...s, favorNonMeasure: true } : s);
 
 /**
- * @param {State} input @param {Event} e @returns {{ state: State, actions: Action[] }}
+ * @param {State} input @param {Event} e @param {{ spare?: number | null }} [opts] 実測の空き(schedule の詰め込み)
+ * @returns {{ state: State, actions: Action[] }}
  */
-export function decide(input, e) {
+export function decide(input, e, opts = {}) {
   let s = input;
   /** @type {Action[]} */
   const extra = [];
@@ -167,6 +168,6 @@ export function decide(input, e) {
     case 'tick':
       break;
   }
-  const r = schedule(s, e.now);
+  const r = schedule(s, e.now, opts);
   return { state: r.state, actions: [...extra, ...r.actions] };
 }
