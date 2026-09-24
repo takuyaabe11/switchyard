@@ -29,6 +29,7 @@ are meaningless, memory runs out, and sessions trip over the same git index.
 switchyard puts those runs in a queue. A `PATH` shim recognizes test and build commands for npm, yarn, pnpm, bun,
 cargo, pytest, uv, poetry, go, Maven, Gradle, dotnet, rspec, deno and make, and routes them through a small local
 daemon that hands out CPU shares, watches memory, and gives out exclusive locks (a port, the git index, any name).
+The share reaches the tool as its thread or worker count (cargo, Go, pytest-xdist, Vitest and others).
 Nobody changes how commands are typed. When a run has to wait, Claude runs it in the background and is told when it
 finishes. A failed run that nobody looked at is brought back to the session before it stops. After two runs of the
 same command, switchyard knows how much CPU and memory it really uses and sizes its share to match.
@@ -55,7 +56,9 @@ it stays out of the way (about 4 ms on most Bash calls).
 
 **Try before installing:**
 `git clone https://github.com/takuyaabe11/switchyard && cd switchyard && node bin/switchyard.mjs replay --since 14d`
-shows how many of your past commands it would have queued, without installing anything.
+shows how many of your past commands it would have queued, without installing anything. Installed with
+`SWITCHYARD_OBSERVE=1`, it acts on nothing and only records when heavy runs overlapped; `switchyard report` shows the
+result after a week. `switchyard uninstall` removes everything it wrote.
 
 ---
 
@@ -78,7 +81,8 @@ shows how many of your past commands it would have queued, without installing an
 
 switchyard はそれらの走行を順番待ちに乗せる。`PATH` の shim が npm・yarn・pnpm・bun・cargo・pytest・uv・poetry・go・Maven・
 Gradle・dotnet・rspec・deno・make のテストとビルドのコマンドを見分け、手元の小さなデーモンに通す。デーモンは CPU の取り分を
-割り振り、メモリを見て、排他の鍵(ポート・git の index・任意の名前)を渡す。コマンドの打ち方は誰も変えなくてよい。
+割り振り、メモリを見て、排他の鍵(ポート・git の index・任意の名前)を渡す。取り分は、道具のスレッド数・ワーカー数として
+伝わる(cargo・Go・pytest-xdist・Vitest など)。コマンドの打ち方は誰も変えなくてよい。
 待つことになる走行は Claude が背景で走らせ、終わったら知らせを受ける。誰も見ていない失敗は、セッションが止まる前に
 差し戻して見させる。同じコマンドを 2 回走らせると、実際に使う CPU とメモリを学び、取り分をそれに合わせる。
 
@@ -100,4 +104,6 @@ Gradle・dotnet・rspec・deno・make のテストとビルドのコマンドを
 
 **入れる前に試す:**
 `git clone https://github.com/takuyaabe11/switchyard && cd switchyard && node bin/switchyard.mjs replay --since 14d`
-で、過去のコマンドのうち何本を順番待ちに乗せていたかが、何も入れずに分かる。
+で、過去のコマンドのうち何本を順番待ちに乗せていたかが、何も入れずに分かる。`SWITCHYARD_OBSERVE=1` を付けて入れると、
+何もせずに重い走行の重なりだけを記録し、1 週間後に `switchyard report` で結果が見られる。`switchyard uninstall` で、
+書いたものをすべて片付けられる。

@@ -1,4 +1,4 @@
-# 本物の Claude Code での通し(0.9.0)
+# 本物の Claude Code での通し(0.10.0)
 
 ## 実行日時・環境
 
@@ -24,14 +24,14 @@
     "Stop の差し戻しの後、Claude が switchyard ack した": true,
     "./gradlew test を拒否し、Claude が switchyard run で包んで走らせた": true
   },
-  "costUsd": [0.0164497, 0.0347207, 0.0199571],
-  "result1": "Here's the output line that starts with `LIVE_JOB=`:\n\n```\nLIVE_JOB=jmuf8955m0\n```",
-  "result2": "Done. I've run `npm test` which failed with exit code 1 as expected, and acknowledged the job with switchyard since the failure was intentional.",
-  "result3": "GRADLE_JOB=jmuf89no22 test"
+  "costUsd": [0.0165385, 0.0315579, 0.0203963],
+  "result1": "```\nLIVE_JOB=jmuf9jb5v0\n```",
+  "result2": "Done. I ran `npm test` as requested, which failed with exit code 1 as expected. I then acknowledged the failed switchyard job `jmuf9jggo1` as instructed by the system prompt.",
+  "result3": "```\nGRADLE_JOB=jmuf9jtxe2 test\n```"
 }
 ```
 
-終了コード: 0。費用の合計 $0.071。
+終了コード: 0。費用の合計 $0.068。
 
 ## 読み方
 
