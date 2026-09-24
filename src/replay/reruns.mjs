@@ -55,11 +55,24 @@ export function isReadOnly(command) {
   return true;
 }
 
+/** Bash ツールの時間切れの結果(Claude Code の実物: `Exit code 143\nCommand timed out after 2s`・is_error) */
+export const TIMED_OUT = /(^|\n)Command timed out after /;
+
+/** ポートが既に使われていて起動できなかった(Node の EADDRINUSE・各言語の bind の失敗・docker のポートの割り当て) */
+export const PORT_IN_USE = /EADDRINUSE|address already in use|port \d+ is (?:already )?in use|port is already (?:in use|allocated)/i;
+
+/** tool_result の中身の文字列(文字列か、text の塊の並び) @param {unknown} content @returns {string} */
+function resultText(content) {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content.map((c) => (c !== null && typeof c === 'object' && typeof c.text === 'string' ? c.text : '')).join('\n');
+}
+
 /**
  * 記録の 1 行から、並べて見るための出来事を取り出す。
- * @typedef {{ kind: 'bash', id: string, command: string, cwd: string, at: number, background: boolean }
+ * @typedef {{ kind: 'bash', id: string, command: string, cwd: string, at: number, background: boolean, timeoutMs: number | null }
  *   | { kind: 'edit', at: number }
- *   | { kind: 'result', id: string, at: number, isError: boolean }} Step
+ *   | { kind: 'result', id: string, at: number, isError: boolean, timedOut: boolean, portInUse: boolean }} Step
  * @param {string} line @returns {Step[]}
  */
 export function stepsOf(line) {
@@ -79,12 +92,16 @@ export function stepsOf(line) {
   for (const b of content) {
     if (o.type === 'assistant' && b?.type === 'tool_use') {
       if (b.name === 'Bash' && typeof b.input?.command === 'string') {
-        out.push({ kind: 'bash', id: String(b.id ?? ''), command: b.input.command, cwd: typeof o.cwd === 'string' ? o.cwd : '', at, background: b.input.run_in_background === true });
+        const timeoutMs = typeof b.input.timeout === 'number' && b.input.timeout > 0 ? b.input.timeout : null;
+        out.push({ kind: 'bash', id: String(b.id ?? ''), command: b.input.command, cwd: typeof o.cwd === 'string' ? o.cwd : '', at, background: b.input.run_in_background === true, timeoutMs });
       } else if (EDIT_TOOLS.has(b.name)) {
         out.push({ kind: 'edit', at });
       }
     } else if (o.type === 'user' && b?.type === 'tool_result' && typeof b.tool_use_id === 'string') {
-      out.push({ kind: 'result', id: b.tool_use_id, at, isError: b.is_error === true });
+      const isError = b.is_error === true;
+      const text = isError ? resultText(b.content) : '';
+      // 時間切れは is_error の結果にだけ出る。ポートの失敗は、失敗した結果(終了コードが 0 でない)の中だけを見る
+      out.push({ kind: 'result', id: b.tool_use_id, at, isError, timedOut: isError && TIMED_OUT.test(text), portInUse: isError && PORT_IN_USE.test(text) });
     }
   }
   return out;
@@ -243,4 +260,72 @@ export function timingOf(intervals, background) {
     overlapMs,
     maxConcurrent,
   };
+}
+
+/**
+ * 1 本のセッションでも起きる事故: Bash の時間切れと、ポートが使用中で落ちた走行。
+ * @typedef {{ command: string, count: number, ms: number }} MishapCommand
+ * @typedef {{
+ *   timeouts: { count: number, heavy: number, atDefault: number, ms: number, rerun: number, rerunBackground: number, top: MishapCommand[] },
+ *   portInUse: { count: number, heavy: number, top: MishapCommand[] },
+ * }} Mishaps
+ */
+
+/** 空の集計 @returns {Mishaps} */
+export const emptyMishaps = () => ({
+  timeouts: { count: 0, heavy: 0, atDefault: 0, ms: 0, rerun: 0, rerunBackground: 0, top: [] },
+  portInUse: { count: 0, heavy: 0, top: [] },
+});
+
+/**
+ * 1 つのセッションの出来事を順に見て、時間切れとポートの失敗を数える(集計は acc に足す)。
+ * 時間切れの後に、同じ場所で同じコマンドがもう一度走ったら、走り直しと数える(背景へ回したかも数える)。
+ * @param {Step[]} steps 記録の順
+ * @param {(call: { command: string, cwd: string }) => boolean} isHeavy
+ * @param {Mishaps} acc
+ * @param {{ timeouts: Map<string, { count: number, ms: number }>, portInUse: Map<string, { count: number, ms: number }> }} byCommand
+ */
+export function countMishaps(steps, isHeavy, acc, byCommand) {
+  /** @type {Map<string, { key: string, command: string, cwd: string, at: number, background: boolean, timeoutMs: number | null }>} */
+  const calls = new Map();
+  /** @type {Set<string>} 時間切れで終わり、まだ走り直していないコマンド */
+  const timedOut = new Set();
+  /** @param {Map<string, { count: number, ms: number }>} m @param {string} key @param {number} ms */
+  const bump = (m, key, ms) => {
+    const c = m.get(key) ?? { count: 0, ms: 0 };
+    c.count += 1;
+    c.ms += ms;
+    m.set(key, c);
+  };
+  for (const s of steps) {
+    if (s.kind === 'bash') {
+      const key = `${s.cwd}\u0000${s.command.replace(/\s+/g, ' ').trim()}`;
+      if (timedOut.has(key)) {
+        timedOut.delete(key);
+        acc.timeouts.rerun += 1;
+        if (s.background) acc.timeouts.rerunBackground += 1;
+      }
+      calls.set(s.id, { key, command: s.command, cwd: s.cwd, at: s.at, background: s.background, timeoutMs: s.timeoutMs });
+      continue;
+    }
+    if (s.kind !== 'result') continue;
+    const c = calls.get(s.id);
+    if (c === undefined) continue;
+    calls.delete(s.id);
+    const ms = c.background || !Number.isFinite(s.at - c.at) ? 0 : Math.max(0, s.at - c.at);
+    const heavy = (s.timedOut || s.portInUse) && isHeavy({ command: c.command, cwd: c.cwd });
+    if (s.timedOut) {
+      acc.timeouts.count += 1;
+      acc.timeouts.ms += ms;
+      if (heavy) acc.timeouts.heavy += 1;
+      if (c.timeoutMs === null) acc.timeouts.atDefault += 1;
+      timedOut.add(c.key);
+      bump(byCommand.timeouts, c.key, ms);
+    }
+    if (s.portInUse) {
+      acc.portInUse.count += 1;
+      if (heavy) acc.portInUse.heavy += 1;
+      bump(byCommand.portInUse, c.key, ms);
+    }
+  }
 }

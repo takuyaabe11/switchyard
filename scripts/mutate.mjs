@@ -347,6 +347,36 @@ const SUITES = {
         to: 'if (active.size >= 1) overlapMs += e.t - last;',
       },
       {
+        name: 'R26 成功した結果の文面でも時間切れと数える',
+        file: 'src/replay/reruns.mjs',
+        from: 'timedOut: isError && TIMED_OUT.test(text)',
+        to: 'timedOut: TIMED_OUT.test(resultText(b.content))',
+      },
+      {
+        name: 'R27 時間切れの後の走り直しを数えない',
+        file: 'src/replay/reruns.mjs',
+        from: 'acc.timeouts.rerun += 1;',
+        to: '',
+      },
+      {
+        name: 'R28 時間切れの後の走り直しを何度も数える',
+        file: 'src/replay/reruns.mjs',
+        from: '        timedOut.delete(key);\n',
+        to: '',
+      },
+      {
+        name: 'R29 指定した時間切れも既定の時間切れと数える',
+        file: 'src/replay/reruns.mjs',
+        from: 'if (c.timeoutMs === null) acc.timeouts.atDefault += 1;',
+        to: 'acc.timeouts.atDefault += 1;',
+      },
+      {
+        name: 'R30 docker のポートの割り当ての失敗を見ない',
+        file: 'src/replay/reruns.mjs',
+        from: 'port is already (?:in use|allocated)',
+        to: 'port is already in use',
+      },
+      {
         name: 'R20 再開したセッションが持ち越した行を 2 度数える',
         file: 'src/replay/replay.mjs',
         from: "          if (st.id !== '' && stepSeen.has(st.id)) {",

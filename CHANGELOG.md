@@ -3,6 +3,15 @@
 All notable changes to switchyard. Versions follow `plugin.json`; Claude Code only offers an update when that
 version goes up.
 
+## Unreleased
+
+### Added
+- `switchyard replay` counts two things that happen with a single session too: Bash calls cut off by the tool's time
+  limit (how many were heavy runs, how many hit the default limit, the time spent before the cut, and whether the same
+  command was run again afterwards, in the foreground or the background), and calls that failed because a port was
+  already in use (`EADDRINUSE`, `address already in use`, Docker's `port is already allocated`). Both are measured on
+  your own logs before anything is built for them.
+
 ## 0.17.0
 
 ### Added

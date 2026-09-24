@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_PROFILES } from '../../src/config/profiles.mjs';
 import { formatReport, replay } from '../../src/replay/replay.mjs';
-import { countSession, emptyReruns, intervalsOf, isReadOnly, stepsOf, timingOf } from '../../src/replay/reruns.mjs';
+import { countMishaps, countSession, emptyMishaps, emptyReruns, intervalsOf, isReadOnly, stepsOf, timingOf } from '../../src/replay/reruns.mjs';
 
 const T0 = Date.parse('2026-09-10T00:00:00.000Z');
 const iso = (/** @type {number} */ ms) => new Date(T0 + ms).toISOString();
@@ -127,5 +127,82 @@ describe('intervalsOf・timingOf(重い走行の時間とセッションをま�
     assert.match(text, /重い走行の時間\(前景で結果を待った 2 本。背景の 1 本は/);
     assert.match(text, /Claude が結果を待った時間の合計: 50秒/);
     assert.match(text, /他と重なった走行 2 本\(100\.0%\)・2 本以上が同時に走っていた時間 10秒\(待った時間の合計の 20\.0%\)・最大同時 2 本/);
+  });
+});
+
+/** 中身を持つ tool_result の行 @param {string} id @param {number} ms @param {unknown} content @param {boolean} [isError] */
+const resultWith = (id, ms, content, isError = true) => JSON.stringify({ type: 'user', timestamp: iso(ms), message: { content: [{ type: 'tool_result', tool_use_id: id, is_error: isError, content }] } });
+
+/** @param {string[]} lines */
+function mishaps(lines) {
+  const acc = emptyMishaps();
+  const byCommand = { timeouts: new Map(), portInUse: new Map() };
+  const heavy = (/** @type {{ command: string }} */ c) => /^(npm test|cargo test)/.test(c.command.replace(/\s+/g, ' ').trim());
+  countMishaps(lines.flatMap(stepsOf), heavy, acc, byCommand);
+  return { acc, byCommand };
+}
+
+describe('countMishaps(1 本のセッションでも起きる事故: 時間切れ・ポートが使用中)', () => {
+  it('Claude Code の時間切れの結果(Exit code 143・Command timed out after)を数え、切れるまでの時間と既定の時間切れかを数える', () => {
+    const { acc } = mishaps([
+      bash('a', 'npm test', 0),
+      resultWith('a', 120_000, 'Exit code 143\nCommand timed out after 2m 0s'),
+      use('b', 'Bash', { command: 'sleep 99', timeout: 5000 }, 200_000),
+      resultWith('b', 205_000, [{ type: 'text', text: 'Exit code 143\nCommand timed out after 5s' }]),
+    ]);
+    assert.deepEqual(
+      { count: acc.timeouts.count, heavy: acc.timeouts.heavy, atDefault: acc.timeouts.atDefault, ms: acc.timeouts.ms },
+      { count: 2, heavy: 1, atDefault: 1, ms: 125_000 },
+    );
+  });
+
+  it('時間切れの後に同じ場所で同じコマンドが走れば走り直しと数え、背景で走ったかも数える。失敗していない結果の文面は見ない', () => {
+    const { acc, byCommand } = mishaps([
+      bash('a', 'npm test', 0),
+      resultWith('a', 120_000, 'Exit code 143\nCommand timed out after 2m 0s'),
+      bash('b', 'npm  test', 130_000, true),
+      resultWith('b', 131_000, 'Command running in background', false),
+      // 走り直しの後にもう一度走っても、1 回の時間切れにつき走り直しは 1 回
+      bash('f', 'npm test', 140_000),
+      resultWith('f', 150_000, 'ok', false),
+      bash('c', 'cargo test', 200_000),
+      resultWith('c', 320_000, 'Exit code 143\nCommand timed out after 2m 0s'),
+      use('d', 'Bash', { command: 'cargo test' }, 400_000, '/w/other'),
+      resultWith('d', 401_000, 'ok', false),
+      bash('e', 'echo "Command timed out after 1s"', 500_000),
+      resultWith('e', 500_100, 'Command timed out after 1s', false),
+    ]);
+    assert.deepEqual([acc.timeouts.count, acc.timeouts.rerun, acc.timeouts.rerunBackground], [2, 1, 1]);
+    assert.deepEqual([...byCommand.timeouts.values()].map((v) => v.count), [1, 1]);
+  });
+
+  it('ポートが使用中で落ちた結果(EADDRINUSE・address already in use・docker の port is already allocated)を数える', () => {
+    const { acc } = mishaps([
+      bash('a', 'npm test', 0),
+      resultWith('a', 1000, 'Error: listen EADDRINUSE: address already in use :::3000'),
+      bash('b', 'docker compose up -d', 2000),
+      resultWith('b', 3000, 'Bind for 0.0.0.0:5432 failed: port is already allocated'),
+      bash('c', 'python -m http.server 8000', 4000),
+      resultWith('c', 5000, 'OSError: [Errno 98] Address already in use'),
+      bash('d', 'grep -r EADDRINUSE src', 6000),
+      resultWith('d', 6100, 'src/a.js: // EADDRINUSE', false),
+    ]);
+    assert.deepEqual([acc.portInUse.count, acc.portInUse.heavy, acc.timeouts.count], [3, 1, 0]);
+  });
+
+  it('replay が数えて文面に出す', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cmis-'));
+    mkdirSync(join(dir, 'p'));
+    writeFileSync(
+      join(dir, 'p', 's.jsonl'),
+      `${[bash('a', 'npm test', 0), resultWith('a', 120_000, 'Exit code 143\nCommand timed out after 2m 0s'), bash('b', 'npm test', 130_000, true), resultWith('b', 131_000, 'ok', false), bash('c', 'npm run dev', 200_000), resultWith('c', 201_000, 'Error: listen EADDRINUSE: address already in use :::3000')].join('\n')}\n`,
+    );
+    const r = await replay({ dir, cwdPrefix: null, since: null, profilesFor: () => DEFAULT_PROFILES, examples: 3 });
+    assert.deepEqual([r.mishaps.timeouts.count, r.mishaps.timeouts.rerun, r.mishaps.timeouts.rerunBackground, r.mishaps.portInUse.count], [1, 1, 1, 1]);
+    const text = formatReport(r, { cwdPrefix: null, sinceDays: null, examples: 3 });
+    assert.match(text, /Bash の時間切れ: 1 件\(うち重い走行 1 件・既定の時間切れ 1 件\)・切れるまで待った時間の合計 2分/);
+    assert.match(text, /その後に同じコマンドを走り直した: 1 件\(うち背景で 1 件\)/);
+    assert.match(text, /ポートが使用中で落ちた Bash: 1 件/);
+    assert.match(text, /1 回 {2}npm run dev/);
   });
 });
