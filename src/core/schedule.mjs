@@ -185,15 +185,18 @@ export function schedule(input, now) {
   /** @type {Action[]} */
   const holdActions = [];
   const headMeasure = runningMeasure === undefined && ordered.length > 0 && ordered[0].job.class === 'measure' ? ordered[0].job : null;
-  if (headMeasure !== null) {
-    const targets = holdable(s, headMeasure);
+  const targets = headMeasure === null ? [] : holdable(s, headMeasure);
+  // 止めればこの回に計測が入場できるときだけ止める。譲らない(never の)走行や、計測の鍵を持つ走行が残っていれば、
+  // 止めても計測は入れず、止めた走行が何も測られないまま待たされるだけになる(実測: 2 秒止まって何も測らなかった)
+  const ready = headMeasure !== null && cpuLeases(s).every((l) => targets.includes(l)) && locksFree(s, headMeasure.locks);
+  if (ready) {
     if (targets.length > 0) {
       const ids = new Set(targets.map((l) => l.job.id));
       s.leases = s.leases.map((l) => (ids.has(l.job.id) ? { ...l, held: l.job.preempt === 'pause' ? 'pause' : 'throttle' } : l));
       for (const l of targets) holdActions.push({ type: 'hold', jobId: l.job.id, mode: l.job.preempt === 'pause' ? 'pause' : 'throttle' });
     }
   } else if (runningMeasure === undefined) {
-    // 計測が居なくなった(入場した後に終わった・取り消された)。止めたものを戻す
+    // 計測が居なくなった(入場した後に終わった・取り消された)か、計測がまだ入れない。止めたものを戻す
     const releases = s.leases.filter(isHeld);
     if (releases.length > 0) {
       s.leases = s.leases.map((l) => {

@@ -1,6 +1,7 @@
 // @ts-check
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -20,11 +21,11 @@ const unavailable = async () => {
 /** 子のプロセスグループを確かめられなかったことにする差し替え(設計 §15) */
 const noGroup = () => null;
 
-/** @param {string} file */
+/** ゾンビ(終わって回収を待つだけ。init が回収しないコンテナで残る)は生きていると数えない @param {string} file */
 const pidAlive = (file) => {
   try {
-    process.kill(Number(readFileSync(file, 'utf8').trim()), 0);
-    return true;
+    const stat = execFileSync('ps', ['-o', 'stat=', '-p', readFileSync(file, 'utf8').trim()], { encoding: 'utf8' }).trim();
+    return stat !== '' && !stat.startsWith('Z');
   } catch {
     return false;
   }

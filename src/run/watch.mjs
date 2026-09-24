@@ -3,7 +3,8 @@
 // どのコマンドにも同じように働く。ツールごとの表は持たない。
 import { execFileSync } from 'node:child_process';
 
-/** @typedef {{ pid: number, ppid: number, pgid: number, comm: string, started: string }} ProcRow */
+/** zombie は、終わったが親に回収されていないプロセス(init が回収しないコンテナで残る)。生きている数に入れない */
+/** @typedef {{ pid: number, ppid: number, pgid: number, comm: string, started: string, zombie?: boolean }} ProcRow */
 /** @typedef {{ comm: string, count: number }} EscapedCount */
 /** @typedef {{ pid: number, comm: string, inGroup: boolean }} Survivor */
 /** @typedef {{ seen: number, escaped: EscapedCount[], survivors: Survivor[] }} EscapeReport */
@@ -12,18 +13,20 @@ import { execFileSync } from 'node:child_process';
  * ps の 1 行(`pid=,ppid=,pgid=,lstart=,comm=`。LC_ALL=C で「曜日 月 日 時刻 年」の固定 5 語)を解析する。
  * comm はパスに空白を含みうる(実測: この機械の `ps -A` 521 行のうち 65 行が該当。「稀」ではない)ので、
  * lstart の 5 語より後ろを全部つないで 1 つの comm として扱う。数が読めない・語が足りない行は null。
- * @param {string} line @returns {ProcRow | null}
+ * stat を付けると `pid=,ppid=,pgid=,stat=,lstart=,comm=` の形として読み、zombie を埋める。
+ * @param {string} line @param {{ stat?: boolean }} [opts] @returns {ProcRow | null}
  */
-export function parsePsLine(line) {
+export function parsePsLine(line, { stat = false } = {}) {
   const parts = line.trim().split(/\s+/);
-  if (parts.length < 9) return null;
+  const at = stat ? 4 : 3;
+  if (parts.length < at + 6) return null;
   const pid = Number(parts[0]);
   const ppid = Number(parts[1]);
   const pgid = Number(parts[2]);
   if (!Number.isInteger(pid) || !Number.isInteger(ppid) || !Number.isInteger(pgid)) return null;
-  const started = parts.slice(3, 8).join(' ');
-  const comm = parts.slice(8).join(' ');
-  return { pid, ppid, pgid, comm, started };
+  const started = parts.slice(at, at + 5).join(' ');
+  const comm = parts.slice(at + 5).join(' ');
+  return stat ? { pid, ppid, pgid, comm, started, zombie: parts[3].startsWith('Z') } : { pid, ppid, pgid, comm, started };
 }
 
 /** @param {ProcRow | null} r @returns {r is ProcRow} */
@@ -33,10 +36,10 @@ const isRow = (r) => r !== null;
  * @returns {ProcRow[]}
  */
 export function processTable() {
-  return execFileSync('ps', ['-A', '-o', 'pid=,ppid=,pgid=,lstart=,comm='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
+  return execFileSync('ps', ['-A', '-o', 'pid=,ppid=,pgid=,stat=,lstart=,comm='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
     .trim()
     .split('\n')
-    .map(parsePsLine)
+    .map((l) => parsePsLine(l, { stat: true }))
     .filter(isRow);
 }
 
@@ -126,7 +129,8 @@ export function createEscapeTracker({ rootPid, pgid, list = processTable }) {
     for (const [pid, v] of seen) {
       if (pid === rootPid) continue;
       const now = freshById.get(pid);
-      if (now !== undefined && now.started === v.started) survivors.push({ pid, comm: v.comm, inGroup: v.pgid === pgid });
+      // ゾンビは終わっている(回収を待っているだけ)ので、生き残りに数えない
+      if (now !== undefined && now.started === v.started && now.zombie !== true) survivors.push({ pid, comm: v.comm, inGroup: v.pgid === pgid });
     }
     survivors.sort((a, b) => a.pid - b.pid);
     return { seen: seen.size, escaped, survivors };

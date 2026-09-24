@@ -20,6 +20,25 @@ describe('parsePsLine(R1)', () => {
     assert.deepEqual(r, { pid: 10, ppid: 1, pgid: 10, comm: 'sh', started: 'Tue Sep 1 09:05:07 2026' });
   });
 
+  it('stat を付けた形では、ゾンビ(Z で始まる stat)に印を付ける', () => {
+    assert.deepEqual(parsePsLine('  1821     1  1820 Z    Tue Sep  1 09:05:07 2026 sleep', { stat: true }), {
+      pid: 1821, ppid: 1, pgid: 1820, comm: 'sleep', started: 'Tue Sep 1 09:05:07 2026', zombie: true,
+    });
+    assert.equal(parsePsLine('  10 1 10 Ss Tue Sep  1 09:05:07 2026 sh', { stat: true })?.zombie, false);
+  });
+
+  it('ゾンビは終了後の生き残りに数えない', () => {
+    /** @type {ProcRow[]} */
+    let rows = [
+      { pid: 100, ppid: 1, pgid: 100, comm: 'sh', started: 's0' },
+      { pid: 101, ppid: 100, pgid: 100, comm: 'sleep', started: 's1' },
+    ];
+    const t = createEscapeTracker({ rootPid: 100, pgid: 100, list: () => rows });
+    t.sample();
+    rows = [{ pid: 101, ppid: 1, pgid: 100, comm: 'sleep', started: 's1', zombie: true }];
+    assert.deepEqual(t.report().survivors, []);
+  });
+
   it('語が足りない行は null', () => {
     assert.equal(parsePsLine('10 1 10 Tue Sep 15'), null);
   });

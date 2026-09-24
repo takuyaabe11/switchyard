@@ -8,6 +8,7 @@ import { usedCpus } from '../core/schedule.mjs';
 import { sortWaiting } from '../core/score.mjs';
 import { numOrNull, parseEscape, parseJobRequest } from '../protocol/messages.mjs';
 import { createDecoder, encode } from '../protocol/ndjson.mjs';
+import { groupHasLiveMembers } from '../run/group.mjs';
 import { VERSION } from '../version.mjs';
 import { pathsOf, SOCKET_PATH_LIMIT } from './paths.mjs';
 import { appendRecord, createStateWriter, loadEscapes, loadEstimates, parseState, readJournal, readJson, rotateRecords, takeUnmanaged } from './store.mjs';
@@ -34,14 +35,18 @@ import { appendRecord, createStateWriter, loadEscapes, loadEstimates, parseState
  * }} DaemonOptions
  */
 
-/** プロセスグループがまだ存在するか(信号 0 は存在確認だけで、何も起こさない) @param {number} pgid */
+/**
+ * プロセスグループがまだ存在するか(信号 0 は存在確認だけで、何も起こさない)。
+ * ゾンビだけが残ったグループは終わったとみなす(init が回収しないコンテナで、孤児のリースが返らなくなる)。
+ * @param {number} pgid
+ */
 export function isGroupAlive(pgid) {
   try {
     process.kill(-pgid, 0);
-    return true;
   } catch (e) {
     return /** @type {NodeJS.ErrnoException} */ (e).code === 'EPERM';
   }
+  return groupHasLiveMembers(pgid);
 }
 
 const defaultMono = () => Number(process.hrtime.bigint() / 1_000_000n);

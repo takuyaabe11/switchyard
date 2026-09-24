@@ -68,7 +68,27 @@ export function renicePriority(pgid, priority) {
 }
 
 /**
- * グループのプロセスが全部消えるまで待つ。消えたら true、時間内に消えなければ false。
+ * グループに、ゾンビでないプロセスが残っているか。
+ * 信号 0 はゾンビにも届くので、init が子を回収しないコンテナでは、終わったグループがいつまでも生きて見える。
+ * ps が使えなければ、確かめられないので生きているとみなす(資源を早く返しすぎない側に倒す)。
+ * @param {number} pgid @returns {boolean}
+ */
+export function groupHasLiveMembers(pgid) {
+  /** @type {string} */
+  let out;
+  try {
+    out = execFileSync('ps', ['-A', '-o', 'pgid=,stat='], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return true;
+  }
+  return out.split('\n').some((line) => {
+    const [g, st] = line.trim().split(/\s+/);
+    return Number(g) === pgid && st !== undefined && !st.startsWith('Z');
+  });
+}
+
+/**
+ * グループのプロセスが全部消えるまで待つ(ゾンビだけが残ったら消えたとみなす)。消えたら true、時間内に消えなければ false。
  * @param {number} pgid @param {number} timeoutMs @param {number} [stepMs] @returns {Promise<boolean>}
  */
 export async function waitGroupGone(pgid, timeoutMs, stepMs = 20) {
@@ -76,6 +96,7 @@ export async function waitGroupGone(pgid, timeoutMs, stepMs = 20) {
   for (;;) {
     try {
       process.kill(-pgid, 0);
+      if (!groupHasLiveMembers(pgid)) return true;
     } catch (e) {
       if (/** @type {NodeJS.ErrnoException} */ (e).code === 'ESRCH') return true;
     }
