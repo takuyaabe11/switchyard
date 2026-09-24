@@ -9,7 +9,7 @@ import { heldLocks, repoFamily, repoRoot } from '../../src/config/context.mjs';
 import { fileURLToPath } from 'node:url';
 
 /** @returns {string} */
-const tmp = () => realpathSync(mkdtempSync(join(tmpdir(), 'switchyard-context-')));
+const tmp = () => realpathSync.native(mkdtempSync(join(tmpdir(), 'switchyard-context-')));
 
 describe('repoRoot(設計 §4.5)', () => {
   it('.git を持つ最も近い祖先を返す', () => {

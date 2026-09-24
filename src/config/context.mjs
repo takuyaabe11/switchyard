@@ -5,6 +5,14 @@ import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 
 /**
+ * 実パス。Windows では短い名前(RUNNER~1)や大文字小文字を、ファイルシステムが持つ形にそろえる(native)。
+ * そろえないと、git が worktree に書く長い名前の本体と、短い名前で開いた本体が別の鍵になる(CI の windows で実測)。
+ * POSIX はこれまでどおり(記録の鍵を変えない)。
+ * @param {string} p @returns {string}
+ */
+const real = (p) => (process.platform === 'win32' ? realpathSync.native(p) : realpathSync(p));
+
+/**
  * git の作業ツリーの根。git の外なら cwd。
  * `git rev-parse --show-toplevel` を起動せず、`.git`(ディレクトリでも、worktree / submodule のファイルでも)を上へ探す。
  * 分類器と PreToolUse が 1 コマンドごとに呼ぶ経路なので、ここで外部プロセスを 1 本起動すると
@@ -17,7 +25,7 @@ export function repoRoot(cwd) {
   /** @type {string} */
   let start;
   try {
-    start = realpathSync(cwd);
+    start = real(cwd);
   } catch {
     return cwd;
   }
@@ -52,9 +60,9 @@ export function repoFamily(root) {
     if (m === null) return root;
     const gitdir = isAbsolute(m[1]) ? m[1] : resolve(root, m[1]);
     const common = resolve(gitdir, readFileSync(join(gitdir, 'commondir'), 'utf8').trim());
-    const real = realpathSync(common);
+    const canon = real(common);
     // 本体の .git なら、その親(本体の作業ツリーの根)。裸の repo なら、その .git 自体
-    return basename(real) === '.git' ? dirname(real) : real;
+    return basename(canon) === '.git' ? dirname(canon) : canon;
   } catch {
     return root;
   }
