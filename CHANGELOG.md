@@ -3,6 +3,35 @@
 All notable changes to switchyard. Versions follow `plugin.json`; Claude Code only offers an update when that
 version goes up.
 
+## 0.12.0
+
+### Added
+- A failed run that may not be the code's fault says so. While a run is going, the daemon keeps track of how busy the
+  machine is, how much of that is other work (other heavy runs, or anything outside switchyard), free memory, and time
+  spent paused for a measurement. If the run fails with the machine nearly saturated by other work, free memory below
+  the floor, a SIGKILL (137), or more than a second paused, `switchyard run` prints
+  `[switchyard] this failure may not be caused by the code: …` right under the output and asks Claude to re-run it on a
+  quiet machine before changing code. The same clue is added to the `Stop` notice and to the history record, and
+  `switchyard report` counts these failures. It is a hint, not a diagnosis.
+- `xcodebuild`, `bazel`, `bazelisk`, `nx` and `turbo` get shims (26 words in all), and the built-in table recognizes
+  `xcodebuild test|build|build-for-testing|test-without-building` (the action may come after the options),
+  `bazel`/`bazelisk test|build|coverage`, `nx test|build|run-many|affected|run <project>:test|build` and
+  `turbo run test|build`, including the `npx`/`pnpm`/`yarn` forms.
+
+### Changed
+- A heavy command the shims cannot see (`./gradlew test`, `./mvnw verify`, `.venv/bin/pytest`) on a line of its own is
+  now rewritten to `switchyard run -- …` instead of being refused, saving Claude a round trip. Claude Code checks
+  permission on the rewritten command (confirmed with the real CLI), so this approves nothing new: an allow rule for
+  `./gradlew test` alone no longer covers it, and you are asked, or allow `Bash(switchyard run:*)`. Chained forms are
+  still refused with the command to use. `SWITCHYARD_WRAP=0` refuses every form as before.
+  `SWITCHYARD_BACKGROUND=never` keeps the rewrite and only drops the move to the background.
+- `switchyard replay` and the observe-mode summary count these rewrites separately ("wrapped in switchyard run").
+  `switchyard report` shows how many were wrapped.
+
+### Fixed
+- `switchyard replay` examples for long commands (a heredoc followed by `npm test`) now show the part that triggered
+  the verdict. The text inside a heredoc was never counted; the example only looked as if it were.
+
 ## 0.11.0
 
 Defaults changed after a round of persona interviews ([docs/research/2026-09-24-personas.md](docs/research/2026-09-24-personas.md)):

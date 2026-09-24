@@ -27,11 +27,15 @@ When two or three Claude Code sessions share one machine — one per git worktre
 are meaningless, and memory runs out.
 
 switchyard puts those runs in a queue. A `PATH` shim recognizes test and build commands for npm, yarn, pnpm, bun,
-cargo, pytest, uv, poetry, go, Maven, Gradle, dotnet, rspec, deno and make, and routes them through a small local
+cargo, pytest, uv, poetry, go, Maven, Gradle, dotnet, rspec, deno, make, Xcode, Bazel, Nx and Turborepo, and routes
+them through a small local
 daemon that hands out CPU shares, watches memory, and gives out exclusive locks (a port, a database, any name).
 The share reaches the tool as its thread or worker count (cargo, Go, pytest-xdist, Vitest and others).
 Nobody changes how commands are typed. When a run has to wait, Claude runs it in the background and is told when it
-finishes. A failed run that nobody looked at is reported when the session stops. After two runs of the
+finishes. `./gradlew test` and other commands a shim cannot see are wrapped in `switchyard run` for you (Claude Code
+still asks permission for the wrapped command). If a run fails while the machine was saturated by other work or short
+of memory, Claude is told the failure may not be the code's fault and to re-run it before changing code. A failed run
+that nobody looked at is reported when the session stops. After two runs of the
 same command, switchyard knows how much CPU and memory it really uses and sizes its share to match.
 
 **Who it is for:**
@@ -82,10 +86,12 @@ result after a week. `switchyard uninstall` removes everything it wrote.
 メモリが尽きる。
 
 switchyard はそれらの走行を順番待ちに乗せる。`PATH` の shim が npm・yarn・pnpm・bun・cargo・pytest・uv・poetry・go・Maven・
-Gradle・dotnet・rspec・deno・make のテストとビルドのコマンドを見分け、手元の小さなデーモンに通す。デーモンは CPU の取り分を
+Gradle・dotnet・rspec・deno・make・Xcode・Bazel・Nx・Turborepo のテストとビルドのコマンドを見分け、手元の小さなデーモンに通す。デーモンは CPU の取り分を
 割り振り、メモリを見て、排他の鍵(ポート・データベース・任意の名前)を渡す。取り分は、道具のスレッド数・ワーカー数として
 伝わる(cargo・Go・pytest-xdist・Vitest など)。コマンドの打ち方は誰も変えなくてよい。
-待つことになる走行は Claude が背景で走らせ、終わったら知らせを受ける。誰も見ていない失敗は、セッションが止まるときに
+待つことになる走行は Claude が背景で走らせ、終わったら知らせを受ける。`./gradlew test` など shim から見えないコマンドは
+`switchyard run` で代わりに包む(包んだコマンドにも Claude Code の承認は出る)。他の処理で機械が埋まっていたりメモリが
+足りなかったりする中で失敗した走行は、コードのせいではないかもしれないので、直す前に走らせ直すよう Claude に伝える。誰も見ていない失敗は、セッションが止まるときに
 知らせる。同じコマンドを 2 回走らせると、実際に使う CPU とメモリを学び、取り分をそれに合わせる。
 
 **向いている人:**

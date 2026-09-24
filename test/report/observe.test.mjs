@@ -31,6 +31,7 @@ describe('summarizeObserved', () => {
       hooks: [
         { kind: 'hook', observe: true, decision: 'deny', at: 0, cwd: '/r' },
         { kind: 'hook', observe: true, decision: 'background', at: 0, cwd: '/r' },
+        { kind: 'hook', observe: true, decision: 'wrap', at: 0, cwd: '/r' },
         { kind: 'hook', decision: 'background', at: 0, cwd: '/r' },
       ],
     });
@@ -43,7 +44,7 @@ describe('summarizeObserved', () => {
       sessions: 3,
       measureDisturbed: 1,
       lockClashes: 1,
-      hook: { background: 1, deny: 1 },
+      hook: { background: 1, deny: 1, wrap: 1 },
     });
   });
 

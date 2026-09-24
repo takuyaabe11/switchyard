@@ -16,7 +16,7 @@ import { t } from '../i18n.mjs';
  *   sessions: number,
  *   measureDisturbed: number,
  *   lockClashes: number,
- *   hook: { background: number, deny: number }
+ *   hook: { background: number, deny: number, wrap: number }
  * }} ObservedSummary
  */
 
@@ -74,11 +74,12 @@ export function summarizeObserved({ observed, hooks = [], repoPrefix = null, sin
       if (overlaps(runs[i], runs[j]) && runs[i].locks.some((k) => runs[j].locks.includes(k))) lockClashes += 1;
     }
   }
-  const hook = { background: 0, deny: 0 };
+  const hook = { background: 0, deny: 0, wrap: 0 };
   for (const r of hooks) {
     if (r.observe !== true || str(r, 'kind') !== 'hook' || !inScope(str(r, 'cwd'), num(r, 'at'))) continue;
     if (r.decision === 'background') hook.background += 1;
     else if (r.decision === 'deny') hook.deny += 1;
+    else if (r.decision === 'wrap') hook.wrap += 1;
   }
   return { runs: runs.length, heavy: heavy.length, overlapped, overlapMs, sessions: new Set(heavy.map((r) => r.session)).size, measureDisturbed, lockClashes, hook };
 }
@@ -94,8 +95,8 @@ export function formatObserved(s) {
     t(`  他の重い走行の横で走った計測: ${s.measureDisturbed} 本`, `  Measurements that ran beside another heavy run: ${s.measureDisturbed}`),
     t(`  同じ鍵(git の index・ポートなど)を持つ走行の重なり: ${s.lockClashes} 回`, `  Overlaps of runs holding the same lock (git index, a port, ...): ${s.lockClashes}`),
     t(
-      `  PreToolUse が入れていれば: 拒否 ${s.hook.deny} 件・重い走行として背景の候補 ${s.hook.background} 件`,
-      `  PreToolUse would have: refused ${s.hook.deny}, flagged ${s.hook.background} as heavy runs to send to the background when they had to wait`,
+      `  PreToolUse が入れていれば: 拒否 ${s.hook.deny} 件・switchyard run で包む ${s.hook.wrap} 件・重い走行として背景の候補 ${s.hook.background} 件`,
+      `  PreToolUse would have: refused ${s.hook.deny}, wrapped ${s.hook.wrap} in switchyard run, flagged ${s.hook.background} as heavy runs to send to the background when they had to wait`,
     ),
   ];
   if (s.heavy > 0 && s.overlapped === 0 && s.lockClashes === 0) {

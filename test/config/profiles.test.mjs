@@ -98,6 +98,7 @@ describe('既定表: Xcode・Bazel・Nx・Turbo', () => {
       'nx test web',
       'nx run web:test',
       'npx nx affected -t test',
+      'nx affected -t build',
       'pnpm nx run-many -t build',
       'turbo run test',
       'npx turbo build --filter=web',

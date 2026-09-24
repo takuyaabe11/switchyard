@@ -34,13 +34,13 @@ async function setup(busyCores) {
   return { d, home };
 }
 
-/** 300ms 走って code で終わる走行を switchyard に通す @param {string} home @param {number} code */
-async function failing(home, code) {
+/** 300ms 走って code で終わる走行を switchyard に通す @param {string} home @param {number} code @param {{ min: number, max: number }} [cpus] */
+async function failing(home, code, cpus = { min: 1, max: 1 }) {
   /** @type {string[]} */
   const lines = [];
   const exit = await runJob({
     argv: [process.execPath, '-e', `setTimeout(() => process.exit(${code}), 300)`],
-    flags: { cpus: { min: 1, max: 1 } },
+    flags: { cpus },
     home,
     cwd: tmpdir(),
     env: { PATH: process.env.PATH },
@@ -69,5 +69,15 @@ describe('daemon: 環境のせいかもしれない失敗', () => {
     assert.equal(exit, 1);
     assert.equal(lines.some((l) => /コードのせいではないかもしれない/.test(l)), false, lines.join('\n'));
     assert.equal(Object.values(d.getState().unacked).flat()[0].hint, undefined);
+  });
+
+  it('機械を忙しくしているのがこの走行だけなら、何も言わない(道具に渡したスレッドの分は他の処理に数えない)', async () => {
+    const home = tempHome();
+    const t0 = Date.now();
+    const d = await startDaemon({ home, capacity: 4, cores: 4, tickMs: 50, overcommit: true, sampleMs: 20, readBusyMs: () => (Date.now() - t0) * 4, idleExitMs: null });
+    cleanups.push(() => d.close());
+    const { exit, lines } = await failing(home, 1, { min: 4, max: 4 });
+    assert.equal(exit, 1);
+    assert.equal(lines.some((l) => /コードのせいではないかもしれない/.test(l)), false, lines.join('\n'));
   });
 });

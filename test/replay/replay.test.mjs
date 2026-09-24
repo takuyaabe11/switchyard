@@ -139,7 +139,7 @@ describe('replay(記録の根を読んで集計する)', () => {
     const r = await replay({ dir: fixture(), cwdPrefix: null, since: null, profilesFor: defaults, examples: 5, git: true });
     assert.equal(r.files, 3);
     assert.equal(r.calls, 6);
-    assert.deepEqual(r.hook, { deny: 1, background: 2, alreadyBackground: 1, none: 2 });
+    assert.deepEqual(r.hook, { deny: 1, wrap: 0, background: 2, alreadyBackground: 1, none: 2 });
     assert.deepEqual(r.shim, { run: { 'default:batch': 3 }, lock: 1, pass: 0 });
     assert.equal(r.first, '2026-09-10T01:00:00.000Z');
     assert.equal(r.last, '2026-09-15T01:00:00.000Z');
@@ -149,7 +149,7 @@ describe('replay(記録の根を読んで集計する)', () => {
     const dir = fixture();
     const irc = await replay({ dir, cwdPrefix: '/w/irc', since: null, profilesFor: defaults, examples: 5, git: true });
     assert.equal(irc.calls, 5);
-    assert.deepEqual(irc.hook, { deny: 1, background: 1, alreadyBackground: 1, none: 2 });
+    assert.deepEqual(irc.hook, { deny: 1, wrap: 0, background: 1, alreadyBackground: 1, none: 2 });
     const recent = await replay({ dir, cwdPrefix: null, since: Date.parse('2026-09-12T00:00:00.000Z'), profilesFor: defaults, examples: 5, git: true });
     assert.equal(recent.calls, 4);
     assert.equal(recent.first, '2026-09-12T01:00:00.000Z');
@@ -205,6 +205,18 @@ describe('formatReport(端末に出す文面)', () => {
     assert.equal(r.hook.background, 1, '本文の中の npm test は数えない');
     assert.equal(r.examples.background[0].trigger, 'npm test');
     assert.match(formatReport(r, { cwdPrefix: null, sinceDays: null, examples: 5 }), /→ 判定した部分: npm test/);
+  });
+
+  it('shim から見えない 1 行は「包む」に数え、つないだ形は拒否に数える', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'crep-'));
+    mkdirSync(join(root, 'p'));
+    writeFileSync(join(root, 'p', 's.jsonl'), [bashLine({ id: 'w1', command: './gradlew test' }), bashLine({ id: 'w2', command: 'cd app && ./gradlew test' })].join('\n') + '\n');
+    const r = await replay({ dir: root, cwdPrefix: null, since: null, profilesFor: defaults, examples: 5, git: true });
+    assert.equal(r.hook.wrap, 1);
+    assert.equal(r.hook.deny, 1);
+    assert.equal(r.hook.background, 0);
+    assert.deepEqual(r.examples.wrap.map((e) => e.command), ['./gradlew test']);
+    assert.match(formatReport(r, { cwdPrefix: null, sinceDays: null, examples: 5 }), /switchyard run で包む: 1 件\(50\.0%\)/);
   });
 
   it('例のコマンドは 1 行にまとめ、長ければ 120 字で切る', async () => {
