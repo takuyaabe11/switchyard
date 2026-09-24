@@ -13,6 +13,18 @@ You do not change how you type commands. A `PATH` shim in front of `npm`, `npx`,
 `yarn`, `pnpm`, `bun`, `cargo`, `pytest`, `python`, `python3`, `uv`, `poetry`, `go`, `mvn`, `gradle`, `dotnet`,
 `bundle`, `rspec`, `deno`, `make` and `git` classifies each command and routes it through switchyard automatically.
 
+## When it helps
+
+Measured on a 4-core machine ([details](docs/verification/2026-09-24-effect.md)):
+
+- **Benchmarks stay meaningful.** Beside four CPU-bound runs, a fixed benchmark ran 20–50% slower and varied widely.
+  As a `measure` job it waited for those runs to finish (about 4 s) and then matched its alone-time.
+- **The first result comes back sooner.** Three CPU-bound test suites started together all finished at about 11.9 s.
+  Through switchyard they finished at 4.3 s, 8.4 s and 12.4 s: about 30% sooner on average, about 4% longer overall.
+- **It does not help runs that mostly wait.** Three copies of a suite that is mostly process start-up and waiting took
+  15 s side by side and 25 s through switchyard, with no failures either way. Mark such commands `quick` in
+  `switchyard.json`, or leave them out of your profiles.
+
 ## Install
 
 ```
@@ -217,6 +229,17 @@ switchyard は操車場のこと。重い走行を 1 本ずつ、正しい線路
 コマンドの打ち方は変えない。`npm` / `npx` / `node` / `yarn` / `pnpm` / `bun` / `cargo` / `pytest` / `python` / `python3` /
 `uv` / `poetry` / `go` / `mvn` / `gradle` / `dotnet` / `bundle` / `rspec` / `deno` / `make` / `git` の前に入る `PATH` の shim が、
 打たれたコマンドを分類して自動で switchyard に通す。
+
+## 効く場面
+
+4 コアの機械での実測([詳細](docs/verification/2026-09-24-effect.md)):
+
+- **計測の数字が意味を保つ。** CPU を使う走行 4 本の横では、固定量のベンチが 20〜50% 遅くなり、ばらつきも大きかった。
+  `measure` として走らせると、4 本が終わるまで約 4 秒待ってから、単独と同じ数字で走った。
+- **最初の結果が早く返る。** CPU を使うテストの全件を 3 本同時に始めると、3 本とも約 11.9 秒で終わった。
+  switchyard を通すと 4.3 秒・8.4 秒・12.4 秒で終わり、平均は約 30% 早く、全体は約 4% 延びただけだった。
+- **待ちが中心の走行には効かない。** 子プロセスの起動と待ちが中心の全件を 3 本同時に走らせると、素のままで 15 秒、
+  switchyard を通すと 25 秒かかった(どちらも失敗なし)。そういうコマンドは `switchyard.json` で `quick` にするか、profile から外す。
 
 ## 導入
 
