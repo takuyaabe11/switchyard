@@ -54,6 +54,21 @@ describe('runHook(pre-tool-use)の記録(設計 §4.2・§9.2)', () => {
   });
 });
 
+describe('switchyard run で包む書き換え', () => {
+  it('./gradlew test は包んで記録に wrap と残し、背景へ回さない方針(never)でも包む書き換えは残す', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'chook-'));
+    /** @type {string[]} */
+    const written = [];
+    const opts = { env: { SWITCHYARD_HOME: home, SWITCHYARD_BACKGROUND: 'never' }, profilesFor: () => PROFILES, write: (/** @type {string} */ x) => written.push(x) };
+    await runHook('pre-tool-use', bash('./gradlew test'), opts);
+    const out = JSON.parse(written[0]).hookSpecificOutput;
+    assert.equal(out.updatedInput.command, 'switchyard run -- ./gradlew test');
+    assert.equal(out.updatedInput.run_in_background, undefined);
+    const rows = readFileSync(pathsOf(home).hooks, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    assert.deepEqual(rows.map((r) => r.decision), ['wrap']);
+  });
+});
+
 describe('背景へ回す方針(SWITCHYARD_BACKGROUND)', () => {
   /** @type {import('../../src/protocol/messages.mjs').Snapshot} */
   const empty = { capacity: 4, used: 0, leases: [], waiting: [], unacked: {}, badRecords: 0, version: 'x' };

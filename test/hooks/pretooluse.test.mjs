@@ -94,23 +94,29 @@ describe('preToolUse(設計 §9.2)', () => {
     assert.equal(decision('SWITCHYARD_IN_JOB=1 git status'), null);
   });
 
-  it('shim から見えない重い形(仮想環境の実行ファイル・activate の後・./gradlew・./mvnw)は拒否し、switchyard run で包むよう案内する', () => {
-    /** @param {string} c */
-    const out = (c) => /** @type {any} */ (preToolUse(bash(c), { profilesFor: () => DEFAULT_PROFILES }))?.hookSpecificOutput ?? null;
+  it('shim から見えない重い形が 1 行だけなら switchyard run -- で包むよう書き換え、つないだ形は拒否して案内する', () => {
+    /** @param {string} c @param {NodeJS.ProcessEnv} [env] */
+    const out = (c, env = {}) => /** @type {any} */ (preToolUse(bash(c), { env, profilesFor: () => DEFAULT_PROFILES }))?.hookSpecificOutput ?? null;
     const decision = (/** @type {string} */ c) => out(c)?.permissionDecision ?? null;
+    for (const c of ['.venv/bin/pytest -x', '/home/u/p/.venv/bin/python -m pytest', '.tox/py312/bin/pytest', './gradlew test', './gradlew :app:test --info', '../mvnw -q verify', './gradlew test > build.log 2>&1']) {
+      assert.equal(decision(c), null, c);
+      assert.equal(out(c).updatedInput.command, `switchyard run -- ${c}`, c);
+    }
+    // 権限の確認は書き換えた後のコマンドで行われる。書き換えは包む接頭辞だけ
+    assert.equal(out('  ./gradlew test  ').updatedInput.command, 'switchyard run -- ./gradlew test');
     for (const c of [
-      '.venv/bin/pytest -x',
-      '/home/u/p/.venv/bin/python -m pytest',
-      '.tox/py312/bin/pytest',
       'source .venv/bin/activate && pytest -x',
       '. venv/bin/activate; python -m pytest',
-      './gradlew test',
-      './gradlew :app:test --info',
-      '../mvnw -q verify',
+      'cd app && ./gradlew test',
+      './gradlew test | tail -20',
+      'JAVA_HOME=/opt/jdk ./gradlew test',
+      './gradlew test\n./gradlew check',
     ]) {
       assert.equal(decision(c), 'deny', c);
       assert.match(out(c).permissionDecisionReason, /switchyard run --/, c);
     }
+    // SWITCHYARD_WRAP=0 なら以前どおり拒否して案内する
+    assert.equal(out('./gradlew test', { SWITCHYARD_WRAP: '0' }).permissionDecision, 'deny');
     // 包めば通る。軽い形・node_modules/.bin(node の shim を通る)・activate の前の走行は拒否しない
     for (const c of [
       'switchyard run -- ./gradlew test',

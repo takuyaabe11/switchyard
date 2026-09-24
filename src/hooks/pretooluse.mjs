@@ -350,6 +350,17 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
       },
     };
   }
+  // shim から見えない形が、それだけの 1 行(./gradlew test・./mvnw verify・.venv/bin/pytest -x)なら、拒否せずに
+  // switchyard run -- で包んで走らせる(SWITCHYARD_WRAP=0 で以前どおり拒否して案内する)。
+  // Claude Code は書き換えた後のコマンドで権限を確かめる(実物で確認: ./gradlew test だけを許していると、包んだ形は承認を求められる)
+  // ので、確認をすり抜けることはない。拒否して Claude に包み直させても同じ確認が出るので、1 往復を減らすだけ。
+  // && や | でつないだ形・前に代入がある形・複数行は、書き換えを誤りうるので拒否して案内する
+  const wrapTarget = invisible.length === 1 && overridden.length === 0 && env.SWITCHYARD_WRAP !== '0' && !command.includes('\n') ? invisible[0] : null;
+  if (wrapTarget !== null && simpleCommands(command).length === 1 && command.trim().startsWith(wrapTarget.split(' ')[0])) {
+    const wrappedCommand = `switchyard run -- ${command.trim()}`;
+    const background = ti.run_in_background !== true && shouldBackground(heavy);
+    return { hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: { ...ti, command: wrappedCommand, ...(background ? { run_in_background: true } : {}) } } };
+  }
   if (invisible.length > 0) {
     return {
       hookSpecificOutput: {
