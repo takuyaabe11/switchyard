@@ -358,8 +358,8 @@ export function formatReport(r, { cwdPrefix, sinceDays, examples }) {
       const k = mt.kinds;
       lines.push(
         t(
-          `  種類: 前景で待つループ(sleep を含む until / while・tail -f など)${k.wait.count} 件・${duration(k.wait.ms)} / 重い走行 ${k.heavy.count} 件・${duration(k.heavy.ms)} / その他 ${k.other.count} 件・${duration(k.other.ms)}`,
-          `  kinds: waiting loops in the foreground (until / while with sleep, tail -f, ...) ${k.wait.count}, ${duration(k.wait.ms)}; heavy runs ${k.heavy.count}, ${duration(k.heavy.ms)}; other ${k.other.count}, ${duration(k.other.ms)}`,
+          `  種類: 前景で待つループ(sleep を含む until / while / for・tail -f など)${k.wait.count} 件・${duration(k.wait.ms)} / 重い走行 ${k.heavy.count} 件・${duration(k.heavy.ms)} / その他 ${k.other.count} 件・${duration(k.other.ms)}`,
+          `  kinds: waiting loops in the foreground (until / while / for with sleep, tail -f, ...) ${k.wait.count}, ${duration(k.wait.ms)}; heavy runs ${k.heavy.count}, ${duration(k.heavy.ms)}; other ${k.other.count}, ${duration(k.other.ms)}`,
         ),
       );
       lines.push(t(`  その後に同じコマンドを走り直した: ${mt.rerun} 件(うち背景で ${mt.rerunBackground} 件)`, `  the same command was run again afterwards: ${mt.rerun} (${mt.rerunBackground} in the background)`));

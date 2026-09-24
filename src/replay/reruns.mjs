@@ -275,7 +275,7 @@ export function timingOf(intervals, background) {
 
 /**
  * 時間切れで切られた呼び出しの種類。
- * - wait: 何かが終わるのを前景で待っていた(sleep を含む until / while のループ・sleep だけ・tail -f・watch・gh run watch)
+ * - wait: 何かが終わるのを前景で待っていた(sleep を含む until / while / for のループ・sleep だけ・tail -f・watch・gh run watch)
  * - heavy: 重い走行(テスト・ビルド)
  * - other: それ以外
  * 待つループの中に重いコマンドがあっても、待つ形を先に見る(切られたのは待っていたから)。
@@ -283,7 +283,7 @@ export function timingOf(intervals, background) {
  */
 
 /** 前景で待つ形 */
-const WAIT_LOOP = /\b(?:until|while)\b[\s\S]*\bsleep\b/;
+const WAIT_LOOP = /\b(?:until|while|for)\b[\s\S]*\bdo\b[\s\S]*\bsleep\b/;
 const WAIT_ALONE = /^\s*sleep\s+\d+(?:\.\d+)?\s*$|\btail\b[^;&|\n]*\s(?:-[a-zA-Z]*[fF][a-zA-Z]*|--follow)\b|(?:^|[;&|]\s*)watch\s|\bgh\s+run\s+watch\b/;
 
 /**

@@ -194,6 +194,9 @@ describe('countMishaps(1 本のセッションでも起きる事故: 時間切�
     for (const c of [
       'until grep -q "EXIT=" .probe/run.log; do sleep 25; done; grep passed .probe/run.log',
       'n=0; while [ $n -lt 36 ]; do sleep 25; n=$((n+1)); done',
+      // 実際に切られた形(利用者の記録): 回数を決めた for のループ
+      'for i in $(seq 1 100); do sleep 5; done; git log --oneline -1',
+      'for i in $(seq 1 110); do n=$(git log --oneline -1 | cut -c1-8); if [ "$n" != "3c9c" ]; then break; fi; sleep 10; done',
       'sleep 600',
       'tail -f logs/app.log',
       'tail -n 50 -F logs/app.log',
@@ -210,6 +213,8 @@ describe('countMishaps(1 本のセッションでも起きる事故: 時間切�
     assert.equal(timeoutKind('curl -s https://example.com/big.tar | tar x', false), 'other');
     assert.equal(timeoutKind('sleep 8; echo done', false), 'other');
     assert.equal(timeoutKind('grep -rn "sleep" src | tail -5', false), 'other');
+    // ループでも待たない(sleep の無い)for は待つ形ではない
+    assert.equal(timeoutKind('for f in src/*.ts; do npx tsc --noEmit $f; done', false), 'other');
   });
 
   it('種類ごとの件数と時間を数え、上位のコマンドも種類ごとに出す', async () => {
@@ -231,7 +236,7 @@ describe('countMishaps(1 本のセッションでも起きる事故: 時間切�
     assert.deepEqual(r.mishaps.timeouts.kinds, { wait: { count: 1, ms: 600_000 }, heavy: { count: 1, ms: 120_000 }, other: { count: 1, ms: 120_000 } });
     assert.deepEqual(r.mishaps.timeouts.top.map((x) => [x.kind, x.command]), [['wait', loop], ['heavy', 'npm test'], ['other', 'curl -s https://example.com/big']]);
     const text = formatReport(r, { cwdPrefix: null, sinceDays: null, examples: 3 });
-    assert.match(text, /種類: 前景で待つループ\(sleep を含む until \/ while・tail -f など\)1 件・10分 \/ 重い走行 1 件・2分 \/ その他 1 件・2分/);
+    assert.match(text, /種類: 前景で待つループ\(sleep を含む until \/ while \/ for・tail -f など\)1 件・10分 \/ 重い走行 1 件・2分 \/ その他 1 件・2分/);
     assert.match(text, /\[待つ\] 1 回・10分 {2}until grep/);
     assert.match(text, /\[他\] 1 回・2分 {2}curl/);
   });

@@ -7,7 +7,7 @@ version goes up.
 
 ### Added
 - `switchyard replay` sorts Bash calls cut off by the time limit into three kinds, each with its count and time:
-  loops waiting in the foreground for something else to finish (`until`/`while` with `sleep`, `sleep` alone,
+  loops waiting in the foreground for something else to finish (`until`/`while`/`for` with `sleep`, `sleep` alone,
   `tail -f`, `watch`, `gh run watch`), heavy runs, and the rest. It shows the most frequent commands of each kind, so
   the rest is visible even when waiting loops dominate. A loop that runs a heavy command inside counts as waiting.
 
