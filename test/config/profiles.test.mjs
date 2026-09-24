@@ -81,7 +81,7 @@ describe('既定表(設計 §9.3)', () => {
 
   it('どの glob も語で始まる(shim の sh のふるいが先頭の語だけで判断できる)', () => {
     for (const np of DEFAULT_PROFILES) for (const g of np.profile.match) assert.equal(g.startsWith('*'), false, g);
-    assert.deepEqual(defaultHeadWords(), ['cargo', 'go', 'make', 'npm', 'npx', 'pytest']);
+    assert.deepEqual(defaultHeadWords(), ['bun', 'cargo', 'go', 'make', 'npm', 'npx', 'pnpm', 'pytest', 'yarn']);
   });
 });
 
@@ -114,6 +114,19 @@ describe('isInspect(走らせずに調べるだけの部分。改善 3)', () => 
 });
 
 describe('classifiableCommand(分類に渡す文字列)', () => {
+  it('node_modules/.bin の実行ファイルは、直に呼んでも shebang の node から呼んでも npx の形にする', () => {
+    assert.equal(classifiableCommand(['./node_modules/.bin/vitest', 'run']), 'npx vitest run');
+    assert.equal(classifiableCommand(['node', '/r/node_modules/.bin/jest', '--ci']), 'npx jest --ci');
+    assert.equal(classifiableCommand(['node', 'scripts/node_modules.bin/x']), 'node scripts/node_modules.bin/x');
+  });
+
+  it('既定表は npm run test・npm t・yarn / pnpm / bun・cargo の重いサブコマンドも見る', () => {
+    for (const c of ['npm run test', 'npm run test:unit', 'npm t', 'yarn test', 'pnpm run build', 'bun test', 'cargo nextest run', 'cargo clippy', 'npx jest', 'go build ./...']) {
+      assert.equal(classify(c, DEFAULT_PROFILES)?.name, 'default:batch', c);
+    }
+    for (const c of ['npm run lint', 'yarn install', 'pnpm add x', 'bun run dev', 'npm --version']) assert.equal(classify(c, DEFAULT_PROFILES), null, c);
+  });
+
   it('node の -e / --eval / -p / --print の値(インラインのコード)を除く', () => {
     assert.equal(classifiableCommand(['node', '-e', 'require("./benchmarks/standards.json")']), 'node -e');
     assert.equal(classifiableCommand(['node', '--input-type=module', '-e', 'import "vitest run"', 'arg']), 'node --input-type=module -e arg');

@@ -6,7 +6,7 @@ import { mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { decideShim, formatAnswer } from '../../src/shim/decide.mjs';
+import { decideShim, formatAnswer, gitSubcommand } from '../../src/shim/decide.mjs';
 
 const DECIDE = fileURLToPath(new URL('../../src/shim/decide.mjs', import.meta.url));
 const CLI = fileURLToPath(new URL('../../bin/switchyard.mjs', import.meta.url));
@@ -101,6 +101,23 @@ describe('decideShim(設計 §9.1)', () => {
     const dir = gitDir();
     const lock = `git-index:${realpathSync(join(dir, '.git'))}`;
     assert.deepEqual(decideShim({ word: 'git', args: ['stash'], cwd: dir, env: { SWITCHYARD_HELD_LOCKS: `other,${lock}` } }), { kind: 'pass' });
+  });
+
+  it('大域オプション(-C dir・-c k=v・--no-pager)の後ろのサブコマンドでも鍵を取り、鍵は -C の先の repo の git-dir', () => {
+    const dir = gitDir();
+    const lock = { kind: 'lock', lock: `git-index:${realpathSync(join(dir, '.git'))}` };
+    // cwd は git の外。-C で指した repo の鍵になる
+    assert.deepEqual(decideShim({ word: 'git', args: ['-C', dir, 'commit', '-m', 'x'], cwd: plainDir(), env: {} }), lock);
+    assert.deepEqual(decideShim({ word: 'git', args: ['-c', 'user.name=x', '--no-pager', 'commit'], cwd: dir, env: {} }), lock);
+    assert.deepEqual(decideShim({ word: 'git', args: ['add', '-A'], cwd: dir, env: {} }), lock);
+    assert.deepEqual(decideShim({ word: 'git', args: ['-C', dir, 'status'], cwd: plainDir(), env: {}, gitDir: mustNotRead }), { kind: 'pass' });
+  });
+
+  it('gitSubcommand は値を取る大域オプションの値をサブコマンドと取り違えない', () => {
+    assert.deepEqual(gitSubcommand(['-C', 'commit', 'log']), { globals: ['-C', 'commit'], sub: 'log' });
+    assert.deepEqual(gitSubcommand(['--git-dir=x', '-p', 'stash', 'pop']), { globals: ['--git-dir=x', '-p'], sub: 'stash' });
+    assert.deepEqual(gitSubcommand(['-C']), { globals: ['-C'], sub: '' });
+    assert.deepEqual(gitSubcommand([]), { globals: [], sub: '' });
   });
 
   it('git の外の git commit は pass', () => {

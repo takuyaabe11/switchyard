@@ -83,6 +83,8 @@ describe('preToolUse(設計 §9.2)', () => {
 
   it('パスで呼ぶ git commit は拒否し、git commit は通す', () => {
     assert.equal(/** @type {any} */ (preToolUse(bash('/usr/bin/git commit -m x'), opts)).hookSpecificOutput.permissionDecision, 'deny');
+    assert.equal(/** @type {any} */ (preToolUse(bash('/usr/bin/git -C . commit -m x'), opts)).hookSpecificOutput.permissionDecision, 'deny');
+    assert.equal(preToolUse(bash('/usr/bin/git -C . status'), opts), null);
     assert.equal(preToolUse(bash('git commit -m x'), opts), null);
   });
 

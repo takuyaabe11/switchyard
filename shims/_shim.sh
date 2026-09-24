@@ -26,10 +26,29 @@ fi
 # CPU を持つジョブの中なら、そのジョブの一部として走らせる(設計 §4.3 の 7。分類器を呼ぶまでもない)
 if [ "${SWITCHYARD_IN_JOB:-}" = 1 ]; then exec "$real" "$@"; fi
 
-# git は index を書き換えるサブコマンドのときだけ分類器を呼ぶ(git status などを速いまま通す)
+# git は index を書き換えるサブコマンドのときだけ分類器を呼ぶ(git status などを速いまま通す)。
+# 大域オプション(-C dir・-c k=v・--no-pager など)を読み飛ばしてサブコマンドを探す。
+# 最初の引数だけを見ると git -C repo commit が鍵を取らずに素通りする
+# (src/shim/decide.mjs の gitSubcommand と GIT_LOCK_SUBCOMMANDS と同じ。test/shim/shims.test.mjs が食い違いを止める)
 if [ "$name" = git ]; then
-  case "${1:-}" in
-    commit | merge | rebase | cherry-pick | stash | am) ;;
+  git_sub=
+  git_skip=0
+  for a in "$@"; do
+    if [ "$git_skip" = 1 ]; then
+      git_skip=0
+      continue
+    fi
+    case "$a" in
+      -C | -c | --git-dir | --work-tree | --namespace | --config-env | --super-prefix) git_skip=1 ;;
+      -*) ;;
+      *)
+        git_sub=$a
+        break
+        ;;
+    esac
+  done
+  case "$git_sub" in
+    commit | merge | rebase | cherry-pick | stash | am | add | rm | mv | reset | restore | checkout | switch | pull | revert) ;;
     *) exec "$real" "$@" ;;
   esac
 fi
@@ -54,8 +73,14 @@ if [ "$name" != git ]; then
   # 既定表に無い語(node など)がふるいで素通しになり、その repo の profile が効かなくなる
   if [ ! -f "$sieve_root/switchyard.json" ] && [ ! -f "$sieve_root/conductor.json" ]; then
     case "$name" in
-      cargo | go | make | npm | npx | pytest) ;;
-      *) exec "$real" "$@" ;;
+      bun | cargo | go | make | npm | npx | pnpm | pytest | yarn) ;;
+      *)
+        # node_modules/.bin のスクリプトを shebang(#!/usr/bin/env node)で起動した形は、npx と同じに分類する
+        case "$name:${1:-}" in
+          node:*node_modules/.bin/*) ;;
+          *) exec "$real" "$@" ;;
+        esac
+        ;;
     esac
   fi
 fi

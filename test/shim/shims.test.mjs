@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defaultHeadWords, LEGACY_CONFIG } from '../../src/config/profiles.mjs';
+import { GIT_LOCK_SUBCOMMANDS } from '../../src/shim/decide.mjs';
 import { stopDaemon } from '../../src/daemon/control.mjs';
 import { pathsOf } from '../../src/daemon/paths.mjs';
 import { startDaemon } from '../../src/daemon/server.mjs';
@@ -14,7 +15,7 @@ import { tempHome } from '../../testkit/tmp.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const SHIMS = realpathSync(join(ROOT, 'shims'));
-const SHIM_WORDS = ['npm', 'npx', 'node', 'cargo', 'pytest', 'go', 'make', 'git'];
+const SHIM_WORDS = ['npm', 'npx', 'node', 'cargo', 'pytest', 'go', 'make', 'git', 'yarn', 'pnpm', 'bun'];
 
 /** 呼び出し元の PATH から shims を除いたもの(このテスト自体が shim の下で走っても本物を指す) */
 const BASE_PATH = (process.env.PATH ?? '')
@@ -35,7 +36,7 @@ function fakeBin() {
   const dir = mkdtempSync(join(tmpdir(), 'cfake-'));
   const vars = 'job=${SWITCHYARD_JOB_ID:-none} in=${SWITCHYARD_IN_JOB:-none} held=${SWITCHYARD_HELD_LOCKS:-none}';
   writeFileSync(join(dir, 'npm'), `#!/bin/sh\necho "fake-npm $* ${vars}"\n`);
-  writeFileSync(join(dir, 'git'), `#!/bin/sh\ncase "$1" in rev-parse) exec ${REAL_GIT} "$@" ;; esac\necho "fake-git $* ${vars}"\n`);
+  writeFileSync(join(dir, 'git'), `#!/bin/sh\nfor a in "$@"; do [ "$a" = rev-parse ] && exec ${REAL_GIT} "$@"; done\necho "fake-git $* ${vars}"\n`);
   chmodSync(join(dir, 'npm'), 0o755);
   chmodSync(join(dir, 'git'), 0o755);
   return dir;
@@ -90,7 +91,7 @@ function shimsWithClassifier(decideSource) {
 }
 
 describe('shims(設計 §9.1)', () => {
-  it('shims に 8 語がそろい、どれも実行できる', () => {
+  it('shims に 11 語がそろい、どれも実行できる', () => {
     for (const word of SHIM_WORDS) assert.ok((statSync(join(SHIMS, word)).mode & 0o111) !== 0, word);
   });
 
@@ -100,6 +101,35 @@ describe('shims(設計 §9.1)', () => {
     assert.notEqual(m, null, 'ふるいの case が見つからない');
     const inSieve = String(m?.[1]).split('|').map((w) => w.trim()).filter((w) => w !== '').sort();
     assert.deepEqual(inSieve, defaultHeadWords());
+  });
+
+  it('sh の git のサブコマンドの集合と大域オプションが、分類器と一致する(片方だけ直す事故を止める)', () => {
+    const src = readFileSync(join(SHIMS, '_shim.sh'), 'utf8');
+    const subs = /case "\$git_sub" in\n\s*([^)]*)\)/.exec(src);
+    assert.notEqual(subs, null, 'git のサブコマンドの case が見つからない');
+    assert.deepEqual(String(subs?.[1]).split('|').map((w) => w.trim()).sort(), [...GIT_LOCK_SUBCOMMANDS].sort());
+  });
+
+  it('git -C <repo> commit も鍵だけのジョブとして包み、鍵は -C の先の repo の git-dir', async () => {
+    const { home } = await daemon();
+    const repo = plainDir();
+    execFileSync(REAL_GIT, ['init', '-q'], { cwd: repo });
+    const r = await sh(`git -C '${repo}' commit -m x`, { cwd: plainDir(), home });
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, new RegExp(`^fake-git -C \\S+ commit -m x job=j\\S+ in=none held=git-index:${realpathSync(join(repo, '.git'))}$`, 'm'));
+  });
+
+  it('shebang で起動した node_modules/.bin のスクリプトは、switchyard.json が無くても npx と同じに包む', async () => {
+    const { home } = await daemon();
+    const cwd = plainDir();
+    mkdirSync(join(cwd, 'node_modules', '.bin'), { recursive: true });
+    const bin = join(cwd, 'node_modules', '.bin', 'vitest');
+    writeFileSync(bin, '#!/usr/bin/env node\nconsole.log(`fake-vitest ${process.argv.slice(2).join(" ")} job=${process.env.SWITCHYARD_JOB_ID ?? "none"}`)\n');
+    chmodSync(bin, 0o755);
+    const r = await sh('./node_modules/.bin/vitest run', { cwd, home });
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /^fake-vitest run job=j\S+$/m);
+    assert.deepEqual(history(home).map((h) => h.profile), ['default:batch']);
   });
 
   it('switchyard.json が無い repo では、既定表に無い語は node を起動せずに本物へ直行する', async () => {

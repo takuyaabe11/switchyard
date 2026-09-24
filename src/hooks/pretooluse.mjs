@@ -9,15 +9,15 @@ import { basename } from 'node:path';
 import { parseArgs } from '../cli/args.mjs';
 import { repoRoot } from '../config/context.mjs';
 import { classifiableCommand, classify, globMatch, loadProfiles } from '../config/profiles.mjs';
-import { GIT_LOCK_SUBCOMMANDS } from '../shim/decide.mjs';
+import { GIT_LOCK_SUBCOMMANDS, gitSubcommand } from '../shim/decide.mjs';
 import { simpleCommands } from './shell.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
 /** @typedef {import('../core/types.mjs').JobClass} JobClass */
 /** @typedef {import('../run/run.mjs').RunFlags} RunFlags */
 
-/** shim を置く語(設計 §9.1)。shims/ の実物と同じ 8 語 */
-export const SHIM_WORDS = ['npm', 'npx', 'node', 'cargo', 'pytest', 'go', 'make', 'git'];
+/** shim を置く語(設計 §9.1)。shims/ の実物と同じ 11 語 */
+export const SHIM_WORDS = ['npm', 'npx', 'node', 'cargo', 'pytest', 'go', 'make', 'git', 'yarn', 'pnpm', 'bun'];
 
 /** `-c 文字列` の文字列をコマンドとして走らせるシェル */
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
@@ -162,7 +162,7 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
     }
     // git は profile で分類しない。shim と同じく、index を書き換えるサブコマンドだけが鍵だけのジョブになる(CPU を持たないので前景のまま)
     if (base === 'git') {
-      if (head !== 'git' && !wrapped && GIT_LOCK_SUBCOMMANDS.has(rest[0] ?? '')) unshimmed.push(text);
+      if (head !== 'git' && !wrapped && GIT_LOCK_SUBCOMMANDS.has(gitSubcommand(rest).sub)) unshimmed.push(text);
       return;
     }
     const pathHead = head.includes('/');
