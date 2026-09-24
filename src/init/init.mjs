@@ -91,6 +91,8 @@ export async function foregroundCalls({ dir, repo, since }) {
   const out = [];
   /** @type {Set<string>} */
   const done = new Set();
+  // 呼び出し側が渡した根も同じ形にそろえる(Windows の短い名前)
+  const root = comparablePath(repo);
   /** @type {Map<string, string>} 記録の cwd ごとに 1 度だけ直す(Windows では実パスを引く) */
   const seen = new Map();
   const inRepo = (/** @type {string} */ raw) => {
@@ -99,7 +101,7 @@ export async function foregroundCalls({ dir, repo, since }) {
       cwd = comparablePath(raw);
       seen.set(raw, cwd);
     }
-    return cwd === repo || cwd.startsWith(`${repo}${sep}`);
+    return cwd === root || cwd.startsWith(`${root}${sep}`);
   };
   for (const file of files) {
     const lines = createInterface({ input: createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });

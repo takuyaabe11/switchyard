@@ -14,7 +14,8 @@ const real = (p) => (process.platform === 'win32' ? realpathSync.native(p) : rea
 
 /**
  * 記録に残ったパス(セッション記録の cwd など)を、repoRoot の答えと比べられる形にする。
- * Windows だけ実パスへ直す(短い名前・大文字小文字の違い)。無いパス・POSIX はそのまま(これまでと同じ)。
+ * Windows だけ実パスへ直す(短い名前・大文字小文字・/ と \ の違い)。もう無いパスは、有る先祖まで直して残りを継ぐ。
+ * POSIX はそのまま(これまでと同じ)。
  * @param {string} p @returns {string}
  */
 export function comparablePath(p) {
@@ -22,7 +23,8 @@ export function comparablePath(p) {
   try {
     return realpathSync.native(p);
   } catch {
-    return p;
+    const parent = dirname(p);
+    return parent === p ? p : join(comparablePath(parent), basename(p));
   }
 }
 

@@ -4,10 +4,11 @@ import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { comparablePath } from '../src/config/context.mjs';
 import { stopDaemon } from '../src/daemon/control.mjs';
 import { pathsOf } from '../src/daemon/paths.mjs';
 import { startDaemon } from '../src/daemon/server.mjs';
@@ -41,6 +42,12 @@ const alive = (pid) => {
 };
 
 describe('Windows(Git for Windows)', { skip: WIN ? false : 'Windows だけの通し' }, () => {
+  it('記録のパスを実パスの形にそろえる。もう無いパスは、有る先祖までそろえて残りを継ぐ(/ も \\ にする)', () => {
+    const base = mkdtempSync(join(tmpdir(), 'cwin-'));
+    assert.equal(comparablePath(base), realpathSync.native(base));
+    assert.equal(comparablePath(`${base}/gone/sub`), join(realpathSync.native(base), 'gone', 'sub'));
+  });
+
   it('Git Bash が見つかる', () => {
     assert.ok(findGitBash() !== null);
   });
