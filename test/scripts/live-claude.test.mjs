@@ -33,7 +33,9 @@ describe('live-claude(設計 §15)', () => {
   });
 
   it('何も無ければすべて偽', () => {
-    assert.deepEqual(analyzeStream(''), { background: false, foregroundOutput: false, blockedStop: false, denied: false, toolText: '', result: '', costUsd: null });
+    assert.deepEqual(analyzeStream(''), { background: false, foregroundOutput: false, blockedStop: false, denied: false, commands: [], toolText: '', result: '', costUsd: null });
+    const use = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', name: 'Bash', input: { command: 'switchyard run -- echo hi' } }] } });
+    assert.deepEqual(analyzeStream(use).commands, ['switchyard run -- echo hi']);
   });
 
   it('後始末: daemon.lock の pid が既に居なければ、何もせずに終わる(投げない)', () => {

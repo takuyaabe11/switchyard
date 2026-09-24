@@ -5,6 +5,8 @@
 //   1. 成功する npm test: shim が switchyard に通し(記録に default:batch)、空いているので前景のまま走り、子にジョブの id が渡り、文言は英語
 //   2. 失敗する npm test: Stop が差し戻し(SWITCHYARD_STOP=block)、Claude が switchyard ack で確認済みにする
 //   3. ./gradlew test: shim から見えないので PreToolUse が switchyard run -- で包む形に書き換え、拒否せずにそのまま走る
+//      (許すのは包んだ形 1 つだけ: Bash(switchyard run -- ./gradlew test))
+//   4. Bash(switchyard run:*) と広く許していても、中身が重い走行の形でない switchyard run は承認を求められ、-p では走らない
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,13 +23,16 @@ const ROOT = fileURLToPath(new URL('../', import.meta.url));
  * background: Bash の走行が背景に回った(task_started の is_backgrounded、または背景に回ったと告げる tool_result)。
  * foregroundOutput: 前景で走った Bash の tool_result に子の出力(LIVE_JOB=)が直に入っている。
  * @param {string} text
- * @returns {{ background: boolean, foregroundOutput: boolean, blockedStop: boolean, denied: boolean, toolText: string, result: string, costUsd: number | null }}
+ * commands: Claude が Bash に渡したコマンド(hook が書き換える前)。
+ * @returns {{ background: boolean, foregroundOutput: boolean, blockedStop: boolean, denied: boolean, commands: string[], toolText: string, result: string, costUsd: number | null }}
  */
 export function analyzeStream(text) {
   let background = false;
   let foregroundOutput = false;
   let blockedStop = false;
   let denied = false;
+  /** @type {string[]} */
+  const commands = [];
   let toolText = '';
   let result = '';
   /** @type {number | null} */
@@ -43,6 +48,9 @@ export function analyzeStream(text) {
     }
     const s = JSON.stringify(m);
     if (m.type === 'system' && m.subtype === 'task_started' && m.is_backgrounded === true) background = true;
+    if (m.type === 'assistant' && Array.isArray(m.message?.content)) {
+      for (const c of m.message.content) if (c?.type === 'tool_use' && c.name === 'Bash' && typeof c.input?.command === 'string') commands.push(c.input.command);
+    }
     if (m.type === 'user' && Array.isArray(m.message?.content)) {
       for (const c of m.message.content) {
         if (c?.type !== 'tool_result') continue;
@@ -59,7 +67,7 @@ export function analyzeStream(text) {
       costUsd = typeof m.total_cost_usd === 'number' ? m.total_cost_usd : null;
     }
   }
-  return { background, foregroundOutput, blockedStop, denied, toolText, result, costUsd };
+  return { background, foregroundOutput, blockedStop, denied, commands, toolText, result, costUsd };
 }
 
 /** @param {string} home */
@@ -135,10 +143,15 @@ if (isMain) {
     const a2 = analyzeStream(r2.stdout ?? '');
     const acked = records().some((r) => r.kind === 'event' && typeof r.event === 'object' && r.event !== null && /** @type {Record<string, unknown>} */ (r.event).type === 'ack');
 
-    // 書き換えた後のコマンドで権限を確かめるので、包んだ形を許しておく
-    const r3 = claude('Run the Bash command `./gradlew test` exactly once, then reply with the line of its output that starts with GRADLE_JOB=.', ['Bash(switchyard run:*)']);
+    // 書き換えた後のコマンドで権限を確かめるので、包んだ形を許しておく(広い switchyard run:* ではなく、その形だけ)
+    const r3 = claude('Run the Bash command `./gradlew test` exactly once, then reply with the line of its output that starts with GRADLE_JOB=.', ['Bash(switchyard run -- ./gradlew test)']);
     const a3 = analyzeStream(r3.stdout ?? '');
     const gradleManaged = records().some((r) => r.kind === 'event' && typeof r.event === 'object' && r.event !== null && JSON.stringify(r.event).includes('gradlew test') && /** @type {Record<string, unknown>} */ (r.event).type === 'request');
+
+    const marker = join(work, 'unvetted.txt');
+    const r4 = claude("Run the Bash command `switchyard run -- touch unvetted.txt` exactly once. Do not run anything else. Then reply DONE.", ['Bash(switchyard run:*)']);
+    const a4 = analyzeStream(r4.stdout ?? '');
+    const unvettedRan = existsSync(marker);
 
     const checks = {
       'shim が npm test を switchyard に通した(記録に default:batch の history)': managed,
@@ -147,8 +160,9 @@ if (isMain) {
       '文言は英語(started)': a1.toolText.includes('[switchyard] started'),
       'Stop の差し戻しの後、Claude が switchyard ack した': a2.blockedStop && acked,
       './gradlew test を拒否せずに switchyard run で包んで走らせた(子にジョブの id)': !a3.denied && gradleManaged && /GRADLE_JOB=j/.test(a3.toolText),
+      'switchyard run:* を許していても、中身が重い走行でない包みは走らなかった(Claude は実際に試した)': a4.commands.some((c) => c.includes('switchyard run -- touch unvetted.txt')) && !unvettedRan,
     };
-    console.log(JSON.stringify({ checks, costUsd: [a1.costUsd, a2.costUsd, a3.costUsd], result1: a1.result, result2: a2.result, result3: a3.result, work, home }, null, 2));
+    console.log(JSON.stringify({ checks, costUsd: [a1.costUsd, a2.costUsd, a3.costUsd, a4.costUsd], result1: a1.result, result2: a2.result, result3: a3.result, result4: a4.result, work, home }, null, 2));
     process.exitCode = Object.values(checks).every(Boolean) ? 0 : 1;
   } finally {
     stopDaemon(home);

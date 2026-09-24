@@ -25,7 +25,8 @@ function recordPreToolUse(input, out, env, observe = false) {
   const ti = /** @type {Record<string, unknown>} */ (typeof input.tool_input === 'object' && input.tool_input !== null ? input.tool_input : {});
   const updated = /** @type {Record<string, unknown> | undefined} */ (h.updatedInput);
   // wrap: switchyard run で包むよう書き換えた(背景へ回したかは問わない)
-  const decision = h.permissionDecision === 'deny' ? 'deny' : updated !== undefined && updated.command !== ti.command ? 'wrap' : 'background';
+  // ask: switchyard run の中身が重い走行の形ではないので承認を求めた
+  const decision = h.permissionDecision === 'deny' || h.permissionDecision === 'ask' ? h.permissionDecision : updated !== undefined && updated.command !== ti.command ? 'wrap' : 'background';
   try {
     appendRecord(pathsOf(switchyardHome(env)).hooks, {
       at: Date.now(),
@@ -40,6 +41,9 @@ function recordPreToolUse(input, out, env, observe = false) {
     /* 記録できないときは黙って進む */
   }
 }
+
+/** @param {Record<string, unknown> | null} out */
+const isAsk = (out) => out !== null && typeof out.hookSpecificOutput === 'object' && out.hookSpecificOutput !== null && /** @type {Record<string, unknown>} */ (out.hookSpecificOutput).permissionDecision === 'ask';
 
 /** @param {Record<string, unknown> | null} out */
 const isBackground = (out) => out !== null && typeof out.hookSpecificOutput === 'object' && out.hookSpecificOutput !== null && 'updatedInput' in out.hookSpecificOutput;
@@ -79,8 +83,14 @@ export async function runHook(event, raw, { write = (s) => process.stdout.write(
     case 'pre-tool-use': {
       const base = { env, ...(profilesFor === undefined ? {} : { profilesFor }) };
       if (env.SWITCHYARD_OBSERVE === '1') {
-        // 観察だけのモード: 判断を記録するだけで、拒否も背景化もしない(重い走行はすべて「背景の候補」として数える)
-        recordPreToolUse(input, preToolUse(input, base), env, true);
+        // 観察だけのモード: 判断を記録するだけで、拒否も背景化もしない(重い走行はすべて「背景の候補」として数える)。
+        // switchyard run の中身への承認の求め(ask)だけは返す。順番待ちではなく、許可の設定が広がるのを防ぐためのもの
+        const observed = preToolUse(input, base);
+        recordPreToolUse(input, observed, env, true);
+        if (isAsk(observed)) {
+          const { updatedInput: _, ...h } = /** @type {Record<string, unknown>} */ (observed?.hookSpecificOutput);
+          write(JSON.stringify({ hookSpecificOutput: h }));
+        }
         return;
       }
       let out = preToolUse(input, base);
