@@ -17,13 +17,15 @@ import { t } from '../i18n.mjs';
  * @typedef {{
  *   id: string, session: string, class: JobClass, cmd: string, why: string | null,
  *   cpus: number, locks: string[], phase: LeasePhase, recovering: boolean,
- *   sinceWall: number, expectedMs: number | null, escapes: string[]
+ *   sinceWall: number, expectedMs: number | null, escapes: string[],
+ *   sizedFrom?: CpuRange | null, measuredCores?: number | null
  * }} LeaseView
  */
 /**
  * @typedef {{
  *   id: string, session: string, class: JobClass, cmd: string, why: string | null,
- *   cpus: CpuRange, locks: string[], recovering: boolean, sinceWall: number, note: WallNote | null, escapes: string[]
+ *   cpus: CpuRange, locks: string[], recovering: boolean, sinceWall: number, note: WallNote | null, escapes: string[],
+ *   sizedFrom?: CpuRange | null, measuredCores?: number | null
  * }} WaitingView
  */
 /**

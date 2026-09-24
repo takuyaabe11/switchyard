@@ -47,7 +47,7 @@ describe('decide: 走行と終了', () => {
     const s = state({ capacity: 1, leases: [lease({ id: 'a', repo: '/r', profile: 'unit' })], waiting: [waiting({ id: 'b' })] });
     const r = decide(s, { type: 'exit', now: 5, jobId: 'a', code: 0, killedByCaller: false, durationMs: 1234 });
     assert.deepEqual(r.actions, [
-      { type: 'history', repo: '/r', profile: 'unit', class: 'batch', cpus: 1, durationMs: 1234, code: 0 },
+      { type: 'history', repo: '/r', profile: 'unit', class: 'batch', cpus: 1, durationMs: 1234, code: 0, cpuMs: null },
       { type: 'grant', jobId: 'b', cpus: 1 },
     ]);
     assert.deepEqual(r.state.unacked, {});

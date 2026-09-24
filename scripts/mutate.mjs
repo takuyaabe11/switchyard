@@ -26,8 +26,33 @@ const SUITES = {
       'test/core/schedule.measure.test.mjs',
       'test/core/schedule.preempt.test.mjs',
       'test/core/score.test.mjs',
+      'test/core/usage.test.mjs',
     ],
     mutations: [
+      {
+        name: 'M40 割り振りを使い切る走行も縮める(割り振りの少なさを学んで縮み続ける)',
+        file: 'src/core/usage.mjs',
+        from: 'if (median(list.map((x) => x.ratio)) >= UNDERUSE_RATIO) return null;',
+        to: '',
+      },
+      {
+        name: 'M41 実測に合わせて宣言より上げる',
+        file: 'src/core/usage.mjs',
+        from: 'const min = Math.min(job.cpus.min, n);',
+        to: 'const min = n;',
+      },
+      {
+        name: 'M42 計測も縮める',
+        file: 'src/core/usage.mjs',
+        from: "if (cores === null || job.class !== 'batch' || job.cpus.max === 0) return job;",
+        to: 'if (cores === null || job.cpus.max === 0) return job;',
+      },
+      {
+        name: 'M43 失敗した走行も使い方に数える',
+        file: 'src/core/usage.mjs',
+        from: 'if (code !== 0 || cpuMs === null || cpus <= 0 || durationMs < USAGE_MIN_DURATION_MS) return;',
+        to: 'if (cpuMs === null || cpus <= 0 || durationMs < USAGE_MIN_DURATION_MS) return;',
+      },
       {
         name: 'M30 後の成功で前の失敗を片付けない',
         file: 'src/core/decide.mjs',

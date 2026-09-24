@@ -11,7 +11,8 @@ import { createDecoder, encode } from '../protocol/ndjson.mjs';
 import { groupHasLiveMembers } from '../run/group.mjs';
 import { VERSION } from '../version.mjs';
 import { pathsOf, SOCKET_PATH_LIMIT } from './paths.mjs';
-import { appendRecord, createStateWriter, loadEscapes, loadEstimates, parseState, readJournal, readJson, rotateRecords, takeUnmanaged } from './store.mjs';
+import { rightSize } from '../core/usage.mjs';
+import { appendRecord, createStateWriter, loadEscapes, loadEstimates, loadUsage, parseState, readJournal, readJson, rotateRecords, takeUnmanaged } from './store.mjs';
 import { t } from '../i18n.mjs';
 
 /** @typedef {import('../core/types.mjs').State} State */
@@ -29,6 +30,7 @@ import { t } from '../i18n.mjs';
  *   heartbeatTimeoutMs?: number,
  *   recoveryGraceMs?: number,
  *   idleExitMs?: number | null,
+ *   adaptive?: boolean,
  *   onIdleExit?: () => void,
  *   isAlive?: (pgid: number) => boolean,
  *   monoNow?: () => number,
@@ -80,6 +82,7 @@ export async function startDaemon(opts) {
     heartbeatTimeoutMs = 30_000,
     recoveryGraceMs = 60_000,
     idleExitMs = 120_000,
+    adaptive = true,
     onIdleExit = null,
     isAlive = isGroupAlive,
     monoNow = defaultMono,
@@ -100,6 +103,7 @@ export async function startDaemon(opts) {
   };
   rotateJournals();
   const estimates = loadEstimates(journal.records);
+  const usage = loadUsage(journal.records);
   const escapes = loadEscapes(journal.records);
   /** @param {string} repo @param {string} profile @returns {string[]} */
   const escapesOf = (repo, profile) => [...(escapes.get(JSON.stringify([repo, profile])) ?? [])].sort();
@@ -131,7 +135,8 @@ export async function startDaemon(opts) {
   const dispatch = (a) => {
     if (a.type === 'history') {
       estimates.record(a.repo, a.profile, a.durationMs, a.code);
-      appendRecord(p.events, { at: wallNow(), kind: 'history', repo: a.repo, profile: a.profile, class: a.class, cpus: a.cpus, durationMs: a.durationMs, code: a.code });
+      usage.record(a.repo, a.profile, { durationMs: a.durationMs, cpuMs: a.cpuMs ?? null, cpus: a.cpus, code: a.code });
+      appendRecord(p.events, { at: wallNow(), kind: 'history', repo: a.repo, profile: a.profile, class: a.class, cpus: a.cpus, durationMs: a.durationMs, code: a.code, cpuMs: a.cpuMs ?? null });
       return;
     }
     // 決定(入場と、待たせた順番・理由)も記録に残す。包みが繋がっていなくても残すので、
@@ -189,6 +194,8 @@ export async function startDaemon(opts) {
         id: l.job.id, session: l.job.session, class: l.job.class, cmd: l.job.cmd, why: l.job.why,
         cpus: l.cpus, locks: l.job.locks, phase: l.phase, recovering: l.recovering, sinceWall: toWall(l.grantedAt), expectedMs: l.job.expectedMs,
         escapes: escapesOf(l.job.repo, l.job.profile),
+        sizedFrom: l.job.sizedFrom ?? null,
+        measuredCores: l.job.measuredCores ?? null,
       })),
       waiting: sortWaiting(state.waiting, now).map((w) => {
         const n = state.notes[w.job.id];
@@ -196,6 +203,8 @@ export async function startDaemon(opts) {
           id: w.job.id, session: w.job.session, class: w.job.class, cmd: w.job.cmd, why: w.job.why,
           cpus: w.job.cpus, locks: w.job.locks, recovering: w.recovering, sinceWall: toWall(w.arrivedAt),
           escapes: escapesOf(w.job.repo, w.job.profile),
+          sizedFrom: w.job.sizedFrom ?? null,
+          measuredCores: w.job.measuredCores ?? null,
           note: n === undefined ? null : { jobId: n.jobId, position: n.position, reason: n.reason, etaWall: n.etaAt === null ? null : toWall(n.etaAt) },
         };
       }),
@@ -255,7 +264,7 @@ export async function startDaemon(opts) {
           const id = newJobId();
           bind(id);
           send(conn, { t: 'accepted', jobId: id });
-          apply({ type: 'request', now: monoNow(), job: { ...req, id, expectedMs: estimates.expected(req.repo, req.profile) } });
+          apply({ type: 'request', now: monoNow(), job: rightSize({ ...req, id, expectedMs: estimates.expected(req.repo, req.profile) }, adaptive ? usage.cores(req.repo, req.profile) : null) });
           return;
         }
         case 'resume': {
@@ -297,7 +306,7 @@ export async function startDaemon(opts) {
             for (const e of escape.escaped) names.add(e.comm);
             escapes.set(key, names);
           }
-          apply({ type: 'exit', now: monoNow(), jobId: id, code: numOrNull(m.code), killedByCaller: m.killedByCaller === true, durationMs: Number(m.durationMs) });
+          apply({ type: 'exit', now: monoNow(), jobId: id, code: numOrNull(m.code), killedByCaller: m.killedByCaller === true, durationMs: Number(m.durationMs), cpuMs: numOrNull(m.cpuMs) });
           send(conn, { t: 'ok' });
           return;
         }

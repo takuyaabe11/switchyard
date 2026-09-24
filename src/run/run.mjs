@@ -9,7 +9,7 @@ import { heldLocks, repoRoot } from '../config/context.mjs';
 import { applyTemplate, classifiableCommand, classify, loadProfiles } from '../config/profiles.mjs';
 import { pathsOf } from '../daemon/paths.mjs';
 import { appendRecord } from '../daemon/store.mjs';
-import { readPgid, renicePriority, signalGroup, spawnInOwnGroup, verifiedGroup, waitGroupGone } from './group.mjs';
+import { readPgid, renicePriority, signalGroup, spawnMeasured, verifiedGroup, waitGroupGone } from './group.mjs';
 import { createEscapeTracker, nextWatchMs } from './watch.mjs';
 import { t } from '../i18n.mjs';
 
@@ -165,6 +165,20 @@ export function runJob(opts) {
     let ch = null;
     /** @type {import('node:child_process').ChildProcess | null} */
     let child = null;
+    /** @type {() => number | null} sh の下で走る、コマンドそのものの pid(グループを確かめられないとき、信号を直に送る先) */
+    let commandPid = () => null;
+    /** グループを確かめられないとき: sh(TERM を子へ送り直す)とコマンドそのものへ送る @param {NodeJS.Signals} sig */
+    const signalDirect = (sig) => {
+      const p = commandPid();
+      if (p !== null) {
+        try {
+          process.kill(p, sig);
+        } catch {
+          // 既に居ない
+        }
+      }
+      child?.kill(sig);
+    };
     /** @type {number | null} */
     let pgid = null;
     let childStartedAt = 0;
@@ -221,8 +235,8 @@ export function runJob(opts) {
       resolve(code);
     };
 
-    /** @param {number} code @param {EscapeReport | null} escape */
-    const report = (code, escape) => {
+    /** @param {number} code @param {EscapeReport | null} escape @param {number | null} [cpuMs] 子と子孫の CPU 時間 */
+    const report = (code, escape, cpuMs = null) => {
       if (phase === 'done') return;
       phase = 'done';
       if (killTimer !== null) clearTimeout(killTimer);
@@ -240,7 +254,7 @@ export function runJob(opts) {
         ch.onMessage((m) => {
           if (m.t === 'ok') finish(code);
         });
-        ch.send({ t: 'exit', jobId, code, killedByCaller, durationMs: Date.now() - childStartedAt, escape: summary });
+        ch.send({ t: 'exit', jobId, code, killedByCaller, durationMs: Date.now() - childStartedAt, escape: summary, cpuMs });
         setTimeout(() => finish(code), 1_000).unref();
       } else {
         finish(code);
@@ -261,8 +275,12 @@ export function runJob(opts) {
       // 入れ子の印(設計 §4.3 の 7): CPU を持つジョブの子だけに立てる(鍵だけのジョブの子は、中の重い走行を別に管理させる)
       if (cpus > 0) childEnv.SWITCHYARD_IN_JOB = '1';
       childEnv.SWITCHYARD_HELD_LOCKS = [...new Set([...heldLocks(env), ...job.locks])].join(',');
-      const c = spawnInOwnGroup([...argv, ...tpl.args], { env: childEnv, cwd, stdio: 'inherit' });
+      const measured = spawnMeasured([...argv, ...tpl.args], { env: childEnv, cwd });
+      const c = measured.child;
       child = c;
+      commandPid = measured.commandPid;
+      // 子と子孫の CPU 時間。終わってから times の出力が届くまで少しかかるので、長くは待たない
+      const cpuOf = () => Promise.race([measured.cpuMs, new Promise((r) => setTimeout(() => r(null), 500))]);
       c.once('error', (e) => {
         out(t(`[switchyard] 起動できない: ${e.message}`, `[switchyard] cannot start: ${e.message}`));
         report(127, null);
@@ -271,7 +289,9 @@ export function runJob(opts) {
         const result = code ?? signalCode(sig);
         if (watchTimer !== null) clearTimeout(watchTimer);
         tracker?.sample();
-        const done = () => report(result, tracker === null ? null : tracker.report());
+        const done = () => {
+          void cpuOf().then((cpuMs) => report(result, tracker === null ? null : tracker.report(), /** @type {number | null} */ (cpuMs)));
+        };
         if (!killedByCaller || pgid === null) {
           done();
           return;
@@ -332,7 +352,7 @@ export function runJob(opts) {
       if (killTimer !== null) {
         // 既に猶予のタイマーが動いている: 送り直すのは SIGTERM だけで、タイマーは残す
         // (設計 §4.3 の 5 = 猶予は最初の転送から killGraceMs。信号を受けるたびに始まり直さない)
-        if (pgid === null) child.kill('SIGTERM');
+        if (pgid === null) signalDirect('SIGTERM');
         else signalGroup(pgid, 'SIGTERM', ownPgid);
         return;
       }
@@ -340,9 +360,9 @@ export function runJob(opts) {
         // グループを確かめられないので、呼び出し元の終了だけを子の pid へ伝える(グループへは送らない)。
         // 相手は自分で起動した子そのものなので、猶予の後に生きていれば SIGKILL へ格上げしてよい
         const c = child;
-        c.kill('SIGTERM');
+        signalDirect('SIGTERM');
         killTimer = setTimeout(() => {
-          if (c.exitCode === null && c.signalCode === null) c.kill('SIGKILL');
+          if (c.exitCode === null && c.signalCode === null) signalDirect('SIGKILL');
         }, killGraceMs);
         return;
       }
