@@ -1,0 +1,3 @@
+#!/bin/sh
+name=yarn
+. "${0%/*}/_shim.sh"

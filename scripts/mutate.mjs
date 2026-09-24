@@ -432,7 +432,7 @@ const SUITES = {
         // 改善 2: node -e のコードの中身(benchmarks・vitest run など)で分類する(直す前の形)
         name: 'H18 node -e のコードの中身で分類する',
         file: 'src/config/profiles.mjs',
-        from: "if (words.length === 0 || basename(words[0]) !== 'node') return words.join(' ');",
+        from: "if (basename(words[0]) !== 'node') return words.join(' ');",
         to: "return words.join(' ');",
       },
       {
@@ -518,7 +518,7 @@ const SUITES = {
       {
         name: 'H8 SessionStart が同じ行を何度も足す',
         file: 'src/hooks/session.mjs',
-        from: "if (!(existsSync(envFile) ? readFileSync(envFile, 'utf8') : '').split('\\n').includes(line)) appendFileSync(",
+        from: "if (!text.split('\\n').includes(line)) appendFileSync(",
         to: 'if (true) appendFileSync(',
       },
       {

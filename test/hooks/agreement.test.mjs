@@ -125,8 +125,9 @@ const ROWS = [
   // shim の語でないものをパスで呼ぶ形・shim の無い語は拒否しない(改善 2。IRC の記録で拒否 320 件がすべてこの形だった)。
   // node_modules/.bin の実行ファイルは #!/usr/bin/env node で node の shim を通り、スクリプトの中の npm も PATH の shim を通る。重ければ背景に回すだけ
   { command: './node_modules/.bin/vitest run', shims: [[['node', './node_modules/.bin/vitest', 'run'], 'run vitest']], hook: 'background' },
-  { command: './node_modules/.bin/eslint src', shims: [[['node', './node_modules/.bin/eslint', 'src'], 'pass']], hook: null },
-  { command: 'eslint src', shims: [[['node', '/r/node_modules/.bin/eslint', 'src'], 'pass']], hook: null },
+  // node_modules/.bin の実行ファイルは npx と同じ形で分類する(npx eslint src と同じ答え)
+  { command: './node_modules/.bin/eslint src', shims: [[['node', './node_modules/.bin/eslint', 'src'], 'run lint']], hook: null },
+  { command: 'eslint src', shims: [[['node', '/r/node_modules/.bin/eslint', 'src'], 'run lint']], hook: null },
   { command: 'scripts/probe-run.sh benchmark', shims: [], hook: null },
   { command: 'scripts/probe-run.sh gates npm run bench', shims: [[['npm', 'run', 'bench'], 'run bench']], hook: 'background' },
   { command: './jc.sh https://example.com/cross-media-measurement', shims: [], hook: null },

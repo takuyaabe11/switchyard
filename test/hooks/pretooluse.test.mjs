@@ -81,8 +81,22 @@ describe('preToolUse(設計 §9.2)', () => {
     assert.match(out.hookSpecificOutput.permissionDecisionReason, /switchyard run -- <その部分>/);
   });
 
+  it('PATH の差し替え・SWITCHYARD_IN_JOB などで shim を素通りさせる形は拒否する', () => {
+    const decision = (/** @type {string} */ c) => /** @type {any} */ (preToolUse(bash(c), opts))?.hookSpecificOutput?.permissionDecision ?? null;
+    for (const c of ['PATH=/usr/bin:/bin npm test', 'env PATH=/usr/bin npm test', 'SWITCHYARD_IN_JOB=1 npm test', 'env -i npm test', 'env -u PATH npm test', 'SWITCHYARD_HELD_LOCKS=x git -C . commit -m x']) {
+      assert.equal(decision(c), 'deny', c);
+    }
+    // $PATH を後ろに残す形は shims が先頭に残るので拒否しない。重くない語・shim の無い語も拒否しない
+    assert.notEqual(decision('PATH=/opt/x:$PATH npm test'), 'deny');
+    assert.equal(decision('PATH=/usr/bin npm install'), null);
+    assert.equal(decision('PATH=/usr/bin ls'), null);
+    assert.equal(decision('SWITCHYARD_IN_JOB=1 git status'), null);
+  });
+
   it('パスで呼ぶ git commit は拒否し、git commit は通す', () => {
     assert.equal(/** @type {any} */ (preToolUse(bash('/usr/bin/git commit -m x'), opts)).hookSpecificOutput.permissionDecision, 'deny');
+    assert.equal(/** @type {any} */ (preToolUse(bash('/usr/bin/git -C . commit -m x'), opts)).hookSpecificOutput.permissionDecision, 'deny');
+    assert.equal(preToolUse(bash('/usr/bin/git -C . status'), opts), null);
     assert.equal(preToolUse(bash('git commit -m x'), opts), null);
   });
 

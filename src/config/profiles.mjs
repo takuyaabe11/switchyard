@@ -61,13 +61,17 @@ export const DEFAULT_PROFILES = [
     name: 'default:batch',
     profile: {
       match: [
-        'npm test', 'npm test *',
+        'npm test', 'npm test *', 'npm t', 'npm t *', 'npm run test*',
         'npm run build*',
         'npx vitest run*',
+        'npx jest*',
         'npx playwright test*',
-        'cargo build*', 'cargo test*',
+        'yarn test*', 'yarn run test*', 'yarn build*', 'yarn run build*',
+        'pnpm test*', 'pnpm run test*', 'pnpm build*', 'pnpm run build*',
+        'bun test*', 'bun run test*', 'bun run build*',
+        'cargo build*', 'cargo test*', 'cargo nextest*', 'cargo clippy*', 'cargo check*',
         'pytest', 'pytest *',
-        'go test*',
+        'go test*', 'go build*',
         'make', 'make *',
       ],
       class: 'batch',
@@ -91,6 +95,9 @@ export function defaultHeadWords() {
   return [...words].sort();
 }
 
+/** node_modules/.bin の下の実行ファイルのパスか(語そのものではなくパスで呼んだ形だけ) @param {string} w */
+const isLocalBin = (w) => /(^|\/)node_modules\/\.bin\/[^/]+$/.test(w);
+
 /** node の、インラインのコードを値に取るオプション */
 const NODE_INLINE = new Set(['-e', '--eval', '-p', '--print']);
 
@@ -101,7 +108,10 @@ const NODE_INLINE = new Set(['-e', '--eval', '-p', '--print']);
  * @param {string[]} words 先頭の語とその引数 @returns {string}
  */
 export function classifiableCommand(words) {
-  if (words.length === 0 || basename(words[0]) !== 'node') return words.join(' ');
+  if (words.length === 0) return '';
+  // node_modules/.bin の実行ファイルを直に呼ぶ形(./node_modules/.bin/vitest run)は npx と同じ走行なので、npx の形で分類する
+  if (isLocalBin(words[0])) return ['npx', basename(words[0]), ...words.slice(1)].join(' ');
+  if (basename(words[0]) !== 'node') return words.join(' ');
   const out = [words[0]];
   let script = false;
   for (let i = 1; i < words.length; i += 1) {
@@ -117,7 +127,11 @@ export function classifiableCommand(words) {
         i += 1;
         continue;
       }
-      if (!w.startsWith('-')) script = true;
+      if (!w.startsWith('-')) {
+        script = true;
+        // `#!/usr/bin/env node` の shebang で起動した node_modules/.bin のスクリプト(node …/.bin/vitest run)も npx の形にする
+        if (isLocalBin(w)) return ['npx', basename(w), ...words.slice(i + 1)].join(' ');
+      }
     }
     out.push(w);
   }

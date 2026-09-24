@@ -10,7 +10,7 @@ queue instead of collide. A switchyard is where trains are sorted onto the right
 one at a time — that is what this does for heavy runs.
 
 You do not change how you type commands. A `PATH` shim in front of `npm`, `npx`, `node`,
-`cargo`, `pytest`, `go`, `make` and `git` classifies each command and routes it through
+`yarn`, `pnpm`, `bun`, `cargo`, `pytest`, `go`, `make` and `git` classifies each command and routes it through
 switchyard automatically.
 
 ## Install
@@ -42,7 +42,7 @@ switchyard top                      # the whole board: what runs, what waits, wh
 switchyard stop                     # stop the daemon (it starts again on the next request)
 switchyard restart                  # stop it and bring the current version back up
 switchyard why <job>                # one job's reason for waiting
-switchyard ack <job>                # mark a failed job as looked at
+switchyard ack <job> [--session <id>] # mark a failed job as looked at
 switchyard run --why "..." -- <cmd> # run something through switchyard explicitly
 switchyard probe <seconds> -- <cmd> # measure a command to pick cpus/class
 switchyard replay [--since 7d]      # re-run past decisions against a config
@@ -99,24 +99,53 @@ Drop a `switchyard.json` at the repo root to classify that project's commands:
   before the suite runs, the way this repo's `npm test` does with `env -u SWITCHYARD_IN_JOB`.
 - `{cpus}` in `env` is replaced with the share the job was actually granted.
 
-Without a `switchyard.json`, a built-in table covers the usual commands.
+Without a `switchyard.json`, a built-in table covers the usual commands: `npm test` / `npm t` /
+`npm run test*` / `npm run build*`, the same for `yarn`, `pnpm` and `bun`, `npx vitest run`, `npx jest`,
+`npx playwright test`, `cargo build|test|nextest|clippy|check`, `pytest`, `go test|build` and `make`.
+A script under `node_modules/.bin` (`./node_modules/.bin/vitest run`) is classified as its `npx` form.
+Anything else — `python -m pytest`, `uv run pytest`, `tsc` — is not classified unless your
+`switchyard.json` names it, and runs outside the queue.
+
+`git` takes the repository's index lock for the subcommands that write the index: `commit`, `merge`,
+`rebase`, `cherry-pick`, `stash`, `am`, `add`, `rm`, `mv`, `reset`, `restore`, `checkout`, `switch`,
+`pull` and `revert`. Global options before the subcommand (`git -C <dir> commit`, `git -c k=v add`)
+are read past, and the lock is taken on the repository they point to.
+
+The daemon reads its capacity (`SWITCHYARD_CAPACITY`, `reserve` in `~/.switchyard/config.json`) when it
+starts. After changing either, run `switchyard restart`.
 
 A part that carries `--version`, `--help`, `--list` or `--dry-run` (or ends in `-V`, `-h`, `-n`)
 is never classified: it asks a question instead of running work, so `make --version` and
 `npx playwright test --list` stay out of the queue.
 
+## Updating
+
+switchyard is installed from its own marketplace, and Claude Code does not auto-update third-party
+marketplaces by default. Claude Code only sees a new release when the `version` in
+`plugin.json` goes up. To update by hand:
+
+```
+/plugin marketplace update switchyard
+/reload-plugins
+```
+
+The same works in the VS Code extension, where `/plugins` opens the Manage plugins dialog.
+After an update the daemon that is already running keeps the old version; the next session says so,
+and `switchyard restart` brings the new one up. `PATH` lines that point at the old install are
+removed by the next `SessionStart`.
+
 ## Turning it off, and taking it out
 
 switchyard installs three hooks, and two of them can stop you: `PreToolUse` refuses a
-command that calls a shimmed binary by path, and `Stop` holds the session back while a job
+command that calls a shimmed binary by path or overrides the environment to get past the shim, and `Stop` holds the session back while a job
 of yours ended in a way nobody has looked at. The ways out:
 
 | Want | Do |
 |---|---|
-| Let a blocked session end | `switchyard ack <job>` for each job it names |
+| Let a blocked session end | `switchyard ack <job>` for each job it names. From your own terminal this finds the session by job id; from a Claude session it only acks that session's jobs. An id that is not waiting to be acked is reported as an error |
 | Silence every hook for one session | `SWITCHYARD_THINKER=1` in the environment |
 | Stop the daemon | `switchyard stop` (it starts again on the next request) |
-| Run one command outside the queue | Call it from a path, e.g. `$(command -v npm) test` — the hook refuses that for shimmed words, so wrap it instead: `switchyard run --class quick -- <command>` |
+| Run one command outside the queue | `switchyard run --class quick -- <command>`. The hook refuses the other ways around the shim for a command it would queue: calling a shimmed binary by path (`/usr/local/bin/npm test`), replacing `PATH` without keeping `$PATH`, `env -i`, and setting `SWITCHYARD_IN_JOB` or `SWITCHYARD_HELD_LOCKS` |
 | Remove it | `/plugin uninstall switchyard@switchyard`, then `switchyard stop`, then delete the `export PATH=.../shims:"$PATH"` line from the file Claude Code uses for session environment (`CLAUDE_ENV_FILE`), and `rm -rf ~/.switchyard` |
 
 Uninstalling the plugin does not stop a running daemon and does not remove the `PATH` line,
@@ -169,7 +198,7 @@ MIT. See [LICENSE](LICENSE).
 (ポート・git の index・任意の名前)を割り振り、それらの走行をぶつけずに順番へ流す。
 switchyard は操車場のこと。重い走行を 1 本ずつ、正しい線路へ振り分ける。
 
-コマンドの打ち方は変えない。`npm` / `npx` / `node` / `cargo` / `pytest` / `go` / `make` /
+コマンドの打ち方は変えない。`npm` / `npx` / `node` / `yarn` / `pnpm` / `bun` / `cargo` / `pytest` / `go` / `make` /
 `git` の前に入る `PATH` の shim が、打たれたコマンドを分類して自動で switchyard に通す。
 
 ## 導入
@@ -199,7 +228,7 @@ switchyard top                      # 盤面全体。何が走り、何が待ち
 switchyard stop                     # デーモンを止める(次の要求で自動的に起動し直す)
 switchyard restart                  # 止めて、いまの版で立て直す
 switchyard why <job>                # 1 本の待ちの理由
-switchyard ack <job>                # 失敗したジョブを確認済みにする
+switchyard ack <job> [--session <id>] # 失敗したジョブを確認済みにする
 switchyard run --why "..." -- <cmd> # 明示的に switchyard を通して走らせる
 switchyard probe <秒> -- <cmd>      # cpus / class を決めるためにコマンドを計測する
 switchyard replay [--since 7d]      # 過去の決定を、今の設定でやり直して見る
@@ -230,19 +259,43 @@ repo の根に `switchyard.json` を置くと、その repo のコマンドの�
   `env -u SWITCHYARD_IN_JOB` で落としている)。
 - `env` の中の `{cpus}` は、そのジョブに実際に渡された取り分に置き換わる。
 
-`switchyard.json` が無ければ、組み込みの既定表がよくあるコマンドを見る。
+`switchyard.json` が無ければ、組み込みの既定表がよくあるコマンドを見る: `npm test` / `npm t` /
+`npm run test*` / `npm run build*` と、`yarn` / `pnpm` / `bun` の同じ形、`npx vitest run`・`npx jest`・
+`npx playwright test`、`cargo build|test|nextest|clippy|check`、`pytest`、`go test|build`、`make`。
+`node_modules/.bin` の下のスクリプト(`./node_modules/.bin/vitest run`)は `npx` の形として分類する。
+それ以外(`python -m pytest`・`uv run pytest`・`tsc` など)は、`switchyard.json` で名指ししない限り分類されず、順番待ちの外で走る。
+
+`git` は index を書き換えるサブコマンド(`commit`・`merge`・`rebase`・`cherry-pick`・`stash`・`am`・
+`add`・`rm`・`mv`・`reset`・`restore`・`checkout`・`switch`・`pull`・`revert`)のとき、その repo の index の鍵を取る。
+サブコマンドの前の大域オプション(`git -C <dir> commit`・`git -c k=v add`)は読み飛ばし、鍵はそれが指す repo のものを取る。
+
+デーモンは容量(`SWITCHYARD_CAPACITY`・`~/.switchyard/config.json` の `reserve`)を起動時に読む。変えたら `switchyard restart`。
 
 `--version` / `--help` / `--list` / `--dry-run` を含む部分(と、末尾が `-V` / `-h` / `-n` の部分)は
 どの表にも当てない。走らせずに訊いているだけなので、`make --version` や
 `npx playwright test --list` は順番待ちに乗らない。
 
+## 更新する
+
+switchyard は自前のマーケットプレイスから入るので、Claude Code は既定ではそれを自動で更新しない。
+Claude Code が新しい版に気づくのは、`plugin.json` の `version` が上がったときだけ。手で更新するには:
+
+```
+/plugin marketplace update switchyard
+/reload-plugins
+```
+
+VS Code の拡張でも同じで、`/plugins` で Manage plugins の画面が開く。
+更新しても、走っているデーモンは古い版のまま残る。次のセッションがそれを知らせるので、`switchyard restart` で入れ替える。
+古い置き場を指す `PATH` の行は、次の `SessionStart` が取り除く。
+
 ## 切る・外す
 
-switchyard は hook を 3 つ入れる。そのうち 2 つは作業を止めうる。`PreToolUse` は shim の語の実行ファイルをパスで直に呼ぶコマンドを拒否し、`Stop` は自分のジョブに誰も見ていない終わり方があるとセッションの終了を差し戻す。逃げ道:
+switchyard は hook を 3 つ入れる。そのうち 2 つは作業を止めうる。`PreToolUse` は shim の語の実行ファイルをパスで直に呼ぶコマンドと、環境変数で shim を素通りさせるコマンドを拒否し、`Stop` は自分のジョブに誰も見ていない終わり方があるとセッションの終了を差し戻す。逃げ道:
 
 | したいこと | すること |
 |---|---|
-| 差し戻されたセッションを終わらせる | 挙がったジョブごとに `switchyard ack <job>` |
+| 差し戻されたセッションを終わらせる | 挙がったジョブごとに `switchyard ack <job>`。人の端末からはジョブ id でセッションを探す。Claude のセッションからは自分のセッションのジョブだけ。確認待ちに無い id はエラーになる |
 | このセッションだけ hook を全部黙らせる | 環境変数 `SWITCHYARD_THINKER=1` |
 | デーモンを止める | `switchyard stop`(次の要求で起動し直す) |
 | 1 本だけ順番待ちの外で走らせる | `switchyard run --class quick -- <コマンド>` で包む |

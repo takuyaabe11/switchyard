@@ -50,6 +50,31 @@ describe('preempt(計測が先頭のときだけ発動。設計 §6.7)', () => {
     checkInvariants(r.state);
   });
 
+  it('譲らない(never の)走行が残っていて計測が入れないうちは、pause の走行も止めない', () => {
+    const s = state({
+      capacity: 4,
+      leases: [lease({ id: 'p', preempt: 'pause', cpus: { min: 2, max: 2 } }, { cpus: 2 }), lease({ id: 'n', preempt: 'never' }, { cpus: 1 })],
+      waiting: [waiting({ id: 'm', class: 'measure', cpus: { min: 1, max: 4 } })],
+    });
+    const r = schedule(s, 0);
+    assert.deepEqual(holds(r.actions), [], '止めても計測は入れないので止めない');
+    assert.deepEqual(grants(r.actions), []);
+    // never が終われば、その回に止めて計測を入れる
+    const after = schedule({ ...r.state, leases: r.state.leases.filter((l) => l.job.id !== 'n') }, 1);
+    assert.deepEqual(holds(after.actions), [['p', 'pause']]);
+    assert.deepEqual(grants(after.actions), [['m', 4]]);
+    checkInvariants(after.state);
+  });
+
+  it('計測がまだ入れないのに止まっている走行は戻す', () => {
+    const s = state({
+      capacity: 4,
+      leases: [lease({ id: 'p', preempt: 'pause' }, { cpus: 1, held: 'pause' }), lease({ id: 'n', preempt: 'never' }, { cpus: 1 })],
+      waiting: [waiting({ id: 'm', class: 'measure', cpus: { min: 1, max: 4 } })],
+    });
+    assert.deepEqual(holds(schedule(s, 0).actions), [['p', 'unhold']]);
+  });
+
   it('計測と同じ鍵を持つジョブは止めない(止めると鍵が返らず、計測が永久に入れない)', () => {
     const s = state({
       capacity: 4,
@@ -59,6 +84,18 @@ describe('preempt(計測が先頭のときだけ発動。設計 §6.7)', () => {
     const r = schedule(s, 0);
     assert.deepEqual(holds(r.actions), []);
     assert.deepEqual(grants(r.actions), []);
+  });
+
+  it('鍵の容量に空きがあっても、計測と同じ鍵を持つジョブは止めない(鍵の保持者は止めない、を容量によらず守る)', () => {
+    const s = state({
+      capacity: 4,
+      lockCaps: { 'db:test': 2 },
+      leases: [lease({ id: 'run', preempt: 'pause', locks: ['db:test'], cpus: { min: 2, max: 2 } }, { cpus: 2 })],
+      waiting: [waiting({ id: 'm', class: 'measure', locks: ['db:test'], cpus: { min: 1, max: 4 } })],
+    });
+    const r = schedule(s, 0);
+    assert.deepEqual(holds(r.actions), []);
+    assert.deepEqual(grants(r.actions), [], '止められない走行が残るので、計測は終わるのを待つ');
   });
 
   it('止めるのは CPU を持つリースだけ(鍵だけのジョブは計測と並んでよい)', () => {

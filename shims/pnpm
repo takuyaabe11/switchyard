@@ -1,0 +1,3 @@
+#!/bin/sh
+name=pnpm
+. "${0%/*}/_shim.sh"

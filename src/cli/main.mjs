@@ -127,16 +127,24 @@ export async function cli(args, opts = {}) {
         stderr('他のセッションのジョブは、Claude のセッションからは確認済みにできない(人の端末から実行する)\n');
         return 2;
       }
-      const session = command.session ?? own;
+      // Claude のセッションからは自分のセッションのジョブだけ。人の端末からは --session を省けば、ジョブ id でどのセッションのものでも確認済みにする
+      // (人の端末のセッションは human:<pid> で、Claude のセッションのジョブとは一致しない)
+      const session = command.session ?? (isClaudeSession(env) ? own : null);
+      /** @type {string} */
+      let acked;
       try {
         const conn = await connect({ home, env, autoStart: false });
-        await ask(conn, { t: 'ack', session, jobId: command.jobId }, (x) => x.t === 'ok');
+        const m = await ask(conn, { t: 'ack', jobId: command.jobId, ...(session === null ? {} : { session }) }, (x) => x.t === 'ok');
+        acked = typeof m.session === 'string' ? m.session : String(session);
       } catch (e) {
-        if (!(e instanceof DaemonUnavailableError)) throw e;
-        stderr('デーモンは動いていない\n');
+        if (e instanceof DaemonUnavailableError) {
+          stderr('デーモンは動いていない\n');
+          return 1;
+        }
+        stderr(`確認済みにできない: ${e instanceof Error ? e.message : String(e)}\n`);
         return 1;
       }
-      stdout(`確認済みにした: ${command.jobId}(セッション ${session})\n`);
+      stdout(`確認済みにした: ${command.jobId}(セッション ${acked})\n`);
       return 0;
     }
     case 'replay': {

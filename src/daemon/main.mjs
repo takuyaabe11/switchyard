@@ -1,7 +1,7 @@
 // @ts-check
 // デーモンの起動: ロックファイル・容量の決定・シグナルでの停止。
 import { execFileSync } from 'node:child_process';
-import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from 'node:fs';
+import { closeSync, linkSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { join } from 'node:path';
 import { commandLooksLikeSwitchyardd } from './control.mjs';
@@ -75,10 +75,18 @@ function isSwitchyarddProcess(pid) {
  */
 export function acquireLock(file, pid = process.pid, isAlive = pidAlive, isSwitchyardd = isSwitchyarddProcess) {
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    // pid を書き終えた一時ファイルを link でロックの名前に付ける(link は名前が既にあれば EEXIST で失敗する)。
+    // openSync(file, 'wx') で作ってから書くと、書き終える前の空のロックを、同時に起動したもう 1 本が
+    // 「持ち主が読めない古いロック」とみなして消し、2 本が互いに自分が持ち主だと思って走る(CI の macOS で実測)
+    const tmp = `${file}.${pid}.${process.hrtime.bigint()}.tmp`;
+    const fd = openSync(tmp, 'wx');
     try {
-      const fd = openSync(file, 'wx');
       writeSync(fd, String(pid));
+    } finally {
       closeSync(fd);
+    }
+    try {
+      linkSync(tmp, file);
       return true;
     } catch (e) {
       if (/** @type {NodeJS.ErrnoException} */ (e).code !== 'EEXIST') throw e;
@@ -93,6 +101,12 @@ export function acquireLock(file, pid = process.pid, isAlive = pidAlive, isSwitc
         unlinkSync(file);
       } catch {
         // 他のプロセスが先に消した
+      }
+    } finally {
+      try {
+        unlinkSync(tmp);
+      } catch {
+        // 既に無い
       }
     }
   }
@@ -114,6 +128,22 @@ export async function main(env = process.env) {
     process.stderr.write(`[switchyardd] 別の switchyardd(pid ${holder})が動いているので終わる\n`);
     return;
   }
+  // 起動が終わるまでに SIGTERM / SIGINT を受けても、ロックを残さずに終わる
+  // (既定の動作で死ぬとロックが残る。次の起動は持ち主が死んだロックを取り直せるが、止める側はロックが消えるのを待ち続ける)
+  // ハンドラは付け替えずに 1 つのまま、中の処理だけを差し替える。最後のリスナーを外すと Node は信号の監視を閉じ、
+  // その間に届いて配られる前だった信号を捨てる(実測: 起動の直後に送った SIGTERM が 40 回に 1 回失われた)
+  /** @type {() => void} */
+  let onSignal = () => {
+    try {
+      unlinkSync(p.lock);
+    } catch {
+      // 既に無い
+    }
+    process.exit(0);
+  };
+  const handler = () => onSignal();
+  process.on('SIGTERM', handler);
+  process.on('SIGINT', handler);
   const config = readJson(join(home, 'config.json'));
   /** @type {(() => Promise<void>) | null} 起動が終わるまでは呼べない */
   let shutdown = null;
@@ -141,8 +171,9 @@ export async function main(env = process.env) {
       process.exit(0);
     };
     shutdown = stop;
-    process.on('SIGTERM', stop);
-    process.on('SIGINT', stop);
+    onSignal = () => {
+      void stop();
+    };
   } catch (e) {
     unlinkSync(p.lock);
     throw e;

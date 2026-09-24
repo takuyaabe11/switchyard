@@ -1,7 +1,7 @@
 // @ts-check
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ask, connectDaemon, DaemonUnavailableError } from '../../src/client/connect.mjs';
@@ -12,19 +12,50 @@ import { waitFor } from '../../testkit/wait.mjs';
 
 /** @type {string[]} 片付けるデーモンの home */
 let homes = [];
-afterEach(async () => {
-  for (const home of homes) {
-    const lock = pathsOf(home).lock;
-    if (!existsSync(lock)) continue;
-    const pid = Number(readFileSync(lock, 'utf8'));
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch {
-      // 既に居ない
-    }
-    await waitFor(() => !existsSync(lock), 3_000);
+/** @param {number} pid */
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
   }
+};
+
+afterEach(async () => {
+  const list = homes;
+  // 待ちが切れても、次のテストの後片付けにこの home を持ち越さない
   homes = [];
+  for (const home of list) {
+    const lock = pathsOf(home).lock;
+    // 同時に自動起動したとき、負けた方のデーモンは負荷が高いと起動が遅れ、勝った方を止めてロックが消えた後に
+    // ロックを取って新しいデーモンになる(CI の macOS で実測)。持ち主が変わるたびに止め直し、
+    // ロックが 1 秒続けて無いのを見てから次へ進む
+    /** @type {number | null} */
+    let killed = null;
+    let goneSince = Date.now();
+    await waitFor(() => {
+      if (existsSync(lock)) {
+        goneSince = Date.now();
+        const pid = Number(readFileSync(lock, 'utf8'));
+        // 持ち主が居ないロック(古いロック)は、デーモンが次の起動で取り直すものなので消してよい
+        if (!Number.isInteger(pid) || pid <= 0 || (pid === killed && !alive(pid))) {
+          rmSync(lock, { force: true });
+          return false;
+        }
+        if (pid !== killed) {
+          try {
+            process.kill(pid, 'SIGTERM');
+          } catch {
+            // 既に居ない
+          }
+          killed = pid;
+        }
+        return false;
+      }
+      return Date.now() - goneSince >= 1_000;
+    }, 15_000);
+  }
 });
 
 describe('connectDaemon', () => {

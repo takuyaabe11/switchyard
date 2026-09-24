@@ -28,7 +28,7 @@ switchyard は、同じマシンで動く Claude Code のセッションが重�
 
 ## 拒否されたとき
 
-- 拒否されるのは、shim の語(`npm` / `npx` / `node` / `cargo` / `pytest` / `go` / `make` / `git`)の実行ファイルをパスで直に呼んだとき(`/usr/local/bin/npm test`・`/usr/bin/git commit`)だけ。
+- 拒否されるのは、shim の語(`npm` / `npx` / `node` / `yarn` / `pnpm` / `bun` / `cargo` / `pytest` / `go` / `make` / `git`)の実行ファイルをパスで直に呼んだとき(`/usr/local/bin/npm test`・`/usr/bin/git commit`)と、管理対象のコマンドに `PATH` の差し替え(`$PATH` を残さない形)・`env -i`・`SWITCHYARD_IN_JOB` / `SWITCHYARD_HELD_LOCKS` を付けたとき。
 - パスを付けずに名前で呼ぶ形(例: `npm test`・`git commit`)に書き直す。書き直せないときだけ `switchyard run -- <その部分>` で包む(包んだコマンドには普段どおり権限の確認が出る)。
 - スクリプトをパスで呼ぶ形(`scripts/probe-run.sh …`・`./node_modules/.bin/vitest run`)は拒否されない。`cat` / `grep` / `ls` / `cd` のような読むだけのコマンドは、引数に `bench` や `measure` があっても何もされない。包まない(包むと重い走行として順番を待つ)。
 

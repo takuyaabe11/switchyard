@@ -9,15 +9,15 @@ import { basename } from 'node:path';
 import { parseArgs } from '../cli/args.mjs';
 import { repoRoot } from '../config/context.mjs';
 import { classifiableCommand, classify, globMatch, loadProfiles } from '../config/profiles.mjs';
-import { GIT_LOCK_SUBCOMMANDS } from '../shim/decide.mjs';
+import { GIT_LOCK_SUBCOMMANDS, gitSubcommand } from '../shim/decide.mjs';
 import { simpleCommands } from './shell.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
 /** @typedef {import('../core/types.mjs').JobClass} JobClass */
 /** @typedef {import('../run/run.mjs').RunFlags} RunFlags */
 
-/** shim を置く語(設計 §9.1)。shims/ の実物と同じ 8 語 */
-export const SHIM_WORDS = ['npm', 'npx', 'node', 'cargo', 'pytest', 'go', 'make', 'git'];
+/** shim を置く語(設計 §9.1)。shims/ の実物と同じ 11 語 */
+export const SHIM_WORDS = ['npm', 'npx', 'node', 'cargo', 'pytest', 'go', 'make', 'git', 'yarn', 'pnpm', 'bun'];
 
 /** `-c 文字列` の文字列をコマンドとして走らせるシェル */
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
@@ -26,16 +26,46 @@ const RESERVED = new Set(['!', '{', 'if', 'then', 'elif', 'else', 'do', 'while',
 /** env の、値の語を取るオプション(GNU と BSD) */
 const ENV_VALUE_OPTIONS = new Set(['-u', '--unset', '-C', '--chdir', '-P', '-S', '--split-string']);
 
+/** shim を素通りさせる環境変数。PATH を差し替えると shim が引かれず、残りの 2 つは shim に「ジョブの中」「鍵は祖先が持つ」と思わせる */
+const BYPASS_VARS = ['PATH', 'SWITCHYARD_IN_JOB', 'SWITCHYARD_HELD_LOCKS'];
+
+/**
+ * コマンドの前の代入(VAR=値・env NAME=値・env -i・env -u NAME)のうち、shim を素通りさせるもの。
+ * PATH は元の $PATH を後ろに残す形(PATH=/x:$PATH)なら shims が先頭に残るので数えない。
+ * @param {string[]} assigns `NAME=値` の語 @param {string[]} unset env -u の名前 @param {boolean} cleared env -i
+ * @returns {string[]}
+ */
+function bypasses(assigns, unset, cleared) {
+  /** @type {string[]} */
+  const out = cleared ? ['env -i'] : [];
+  for (const a of assigns) {
+    const name = a.slice(0, a.indexOf('='));
+    const value = a.slice(a.indexOf('=') + 1);
+    if (!BYPASS_VARS.includes(name)) continue;
+    if (name === 'PATH' && /\$\{?PATH\}?/.test(value)) continue;
+    out.push(a);
+  }
+  for (const n of unset) if (n === 'PATH') out.push(`env -u ${n}`);
+  return out;
+}
+
 /**
  * 単純コマンドの語の列の、先頭の語とそれより後ろの語。
  * VAR=値・予約語(if / then / do など)と、env [-u NAME などのオプション] / timeout [オプション] N / nice [-n N] / time / nohup / command を読み飛ばす。
- * @param {string[]} words @returns {{ head: string, rest: string[] }}
+ * 読み飛ばした代入のうち shim を素通りさせるもの(bypasses)も返す。
+ * @param {string[]} words @returns {{ head: string, rest: string[], bypass: string[] }}
  */
 function headOf(words) {
   let i = 0;
+  /** @type {string[]} */
+  const assigns = [];
+  /** @type {string[]} */
+  const unset = [];
+  let cleared = false;
   while (i < words.length) {
     const w = words[i];
     if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(w) || RESERVED.has(w)) {
+      if (!RESERVED.has(w)) assigns.push(w);
       i += 1;
     } else if (w === 'timeout') {
       // timeout [オプション] 時間 コマンド
@@ -49,7 +79,11 @@ function headOf(words) {
     } else if (w === 'env') {
       // env [オプション] [NAME=値]... コマンド。-u NAME などは値の語も飛ばす(NAME=値 は上の枝が飛ばす)
       i += 1;
-      while (i < words.length && words[i].startsWith('-')) i += ENV_VALUE_OPTIONS.has(words[i]) ? 2 : 1;
+      while (i < words.length && words[i].startsWith('-')) {
+        if (words[i] === '-i' || words[i] === '-' || words[i] === '--ignore-environment') cleared = true;
+        if ((words[i] === '-u' || words[i] === '--unset') && words[i + 1] !== undefined) unset.push(words[i + 1]);
+        i += ENV_VALUE_OPTIONS.has(words[i]) ? 2 : 1;
+      }
     } else if (w === 'time' || w === 'nohup' || w === 'command') {
       i += 1;
       while (i < words.length && words[i].startsWith('-')) i += 1;
@@ -57,7 +91,7 @@ function headOf(words) {
       break;
     }
   }
-  return { head: words[i] ?? '', rest: words.slice(i + 1) };
+  return { head: words[i] ?? '', rest: words.slice(i + 1), bypass: bypasses(assigns, unset, cleared) };
 }
 
 /**
@@ -65,7 +99,8 @@ function headOf(words) {
  * @param {string} segment @returns {{ head: string, rest: string[] }}
  */
 export function headWord(segment) {
-  return headOf(segment.split(' ').filter((w) => w !== ''));
+  const { head, rest } = headOf(segment.split(' ').filter((w) => w !== ''));
+  return { head, rest };
 }
 
 /** glob の先頭の字句(先頭の * を除いた最初の語の、ワイルドカードより前) @param {string} glob @returns {string} */
@@ -133,16 +168,19 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
   const found = { heavy: false };
   /** @type {string[]} */
   const unshimmed = [];
+  /** @type {string[]} 環境変数で shim を素通りさせる部分 */
+  const overridden = [];
 
   /**
    * 単純コマンド 1 つを判定する。
    * @param {string[]} words @param {boolean} wrapped switchyard run で包んだ中(拒否の判定にかけない)
    */
   const visit = (words, wrapped) => {
-    const { head, rest } = headOf(words);
+    const { head, rest, bypass } = headOf(words);
     if (head === '') return;
     const base = basename(head);
     const text = [head, ...rest].join(' ');
+    const bypassText = `${bypass.join(' ')} ${text}`;
     // bash -c "…" / sh -c '…': 引用の中の npm なども PATH の shim を通るので、中を単純コマンドとして見る
     if (SHELLS.has(base)) {
       const script = shellScript(rest);
@@ -162,7 +200,9 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
     }
     // git は profile で分類しない。shim と同じく、index を書き換えるサブコマンドだけが鍵だけのジョブになる(CPU を持たないので前景のまま)
     if (base === 'git') {
-      if (head !== 'git' && !wrapped && GIT_LOCK_SUBCOMMANDS.has(rest[0] ?? '')) unshimmed.push(text);
+      const locks = GIT_LOCK_SUBCOMMANDS.has(gitSubcommand(rest).sub);
+      if (head !== 'git' && !wrapped && locks) unshimmed.push(text);
+      else if (!wrapped && locks && bypass.length > 0) overridden.push(bypassText);
       return;
     }
     const pathHead = head.includes('/');
@@ -173,6 +213,7 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
       if (hit === null) return;
       if (!pathHead) {
         if (hit.profile.class !== 'quick') found.heavy = true;
+        if (!wrapped && bypass.length > 0) overridden.push(bypassText);
       } else if (!wrapped) {
         unshimmed.push(text);
       }
@@ -204,6 +245,17 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
         permissionDecisionReason:
           `[switchyard] shim の語(${SHIM_WORDS.join(' / ')})の実行ファイルをパスで直に呼ぶと、shim を迂回して順番待ちを通らない: ${unshimmed.join(' / ')}。` +
           'パスを付けずに名前で呼ぶ(例: npm test)か、`switchyard run -- <その部分>` で包んでから実行する(包んだコマンドには普段どおり権限の確認が出る)。',
+      },
+    };
+  }
+  if (overridden.length > 0) {
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason:
+          `[switchyard] 環境変数(${BYPASS_VARS.join(' / ')}・env -i)を差し替えて呼ぶと、shim が順番待ちを通さない: ${overridden.join(' / ')}。` +
+          '差し替えを外すか(PATH を足すなら PATH=/足す場所:$PATH の形)、`switchyard run -- <その部分>` で包んでから実行する。',
       },
     };
   }

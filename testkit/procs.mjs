@@ -3,12 +3,13 @@ import { execFileSync } from 'node:child_process';
 
 /** プロセスグループに今いる pid の一覧 @param {number} pgid @returns {number[]} */
 export function pidsInGroup(pgid) {
-  return execFileSync('ps', ['-A', '-o', 'pid=,pgid='], { encoding: 'utf8' })
+  // ゾンビ(終わって回収を待つだけ。init が回収しないコンテナで残る)は数えない
+  return execFileSync('ps', ['-A', '-o', 'pid=,pgid=,stat='], { encoding: 'utf8' })
     .trim()
     .split('\n')
-    .map((l) => l.trim().split(' ').filter((x) => x !== '').map(Number))
-    .filter(([, g]) => g === pgid)
-    .map(([p]) => p);
+    .map((l) => l.trim().split(' ').filter((x) => x !== ''))
+    .filter(([, g, st]) => Number(g) === pgid && !String(st).startsWith('Z'))
+    .map(([p]) => Number(p));
 }
 
 /** テストの後始末: グループに残ったプロセスを SIGKILL で消す @param {number} pgid */
