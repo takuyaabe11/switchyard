@@ -9,6 +9,7 @@ import { createInterface } from 'node:readline';
 import { classifiableCommand, classify } from '../config/profiles.mjs';
 import { headWord, SHIM_WORDS } from '../hooks/pretooluse.mjs';
 import { simpleCommands } from '../hooks/shell.mjs';
+import { maskSecrets } from '../redact.mjs';
 import { t } from '../i18n.mjs';
 import { duration } from '../cli/render.mjs';
 
@@ -137,7 +138,7 @@ export function suggest({ calls, profiles, minCount = 2, minMs = 20_000 }) {
     if (pattern === null) continue;
     const { head, rest } = headWord(words.join(' '));
     if (classify(classifiableCommand([head, ...rest]), profiles) !== null) continue;
-    const g = groups.get(pattern) ?? { durations: [], example: c.command, shimmed: SHIM_WORDS.includes(head) || /(^|\/)node_modules\/\.bin\//.test(head) };
+    const g = groups.get(pattern) ?? { durations: [], example: maskSecrets(c.command), shimmed: SHIM_WORDS.includes(head) || /(^|\/)node_modules\/\.bin\//.test(head) };
     g.durations.push(c.ms);
     groups.set(pattern, g);
   }

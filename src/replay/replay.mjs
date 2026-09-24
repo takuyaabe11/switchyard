@@ -9,6 +9,7 @@ import { createInterface } from 'node:readline';
 import { headWord, preToolUse, SHIM_WORDS } from '../hooks/pretooluse.mjs';
 import { simpleCommands } from '../hooks/shell.mjs';
 import { decideShim } from '../shim/decide.mjs';
+import { maskSecrets } from '../redact.mjs';
 import { t } from '../i18n.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
@@ -221,7 +222,7 @@ export function formatReport(r, { cwdPrefix, sinceDays, examples }) {
     ])) {
       if (xs.length === 0) continue;
       lines.push(t(`${label}の例(新しい順に最大 ${examples} 件)`, `${label}: examples (newest first, up to ${examples})`));
-      for (const x of xs) lines.push(`  ${x.timestamp.slice(0, 16).replace('T', ' ')}  ${x.cwd}  ${oneLine(x.command)}`);
+      for (const x of xs) lines.push(`  ${x.timestamp.slice(0, 16).replace('T', ' ')}  ${x.cwd}  ${oneLine(maskSecrets(x.command))}`);
     }
   }
   lines.push(

@@ -9,6 +9,7 @@ import { repoRoot } from '../config/context.mjs';
 import { preToolUse, waitExpected } from './pretooluse.mjs';
 import { sessionStart, stop } from './session.mjs';
 import { t } from '../i18n.mjs';
+import { loggedCommand } from '../redact.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
 
@@ -30,7 +31,7 @@ function recordPreToolUse(input, out, env, observe = false) {
       decision,
       session: typeof input.session_id === 'string' ? input.session_id : '',
       cwd: typeof input.cwd === 'string' ? input.cwd : '',
-      cmd: typeof ti.command === 'string' ? ti.command : '',
+      cmd: typeof ti.command === 'string' ? loggedCommand(ti.command, env) : '',
       ...(observe ? { observe: true } : {}),
     });
   } catch {
