@@ -41,8 +41,11 @@ describe('plugin の形(設計 §9・§9.6)', () => {
     /** @type {Record<string, string>} */
     const arg = { SessionStart: 'session-start', PreToolUse: 'pre-tool-use', Stop: 'stop' };
     for (const [event, entries] of Object.entries(hooks)) {
-      assert.equal(entries[0].hooks[0].command, `node "\${CLAUDE_PLUGIN_ROOT}/bin/switchyard-hook.mjs" ${arg[event]}`);
+      // PreToolUse だけは sh のふるいを通す(Bash の呼び出しごとに node を起動しない)。ふるいは node の同じ入口へ渡す
+      const expected = event === 'PreToolUse' ? 'sh "${CLAUDE_PLUGIN_ROOT}/bin/switchyard-pretooluse.sh"' : `node "\${CLAUDE_PLUGIN_ROOT}/bin/switchyard-hook.mjs" ${arg[event]}`;
+      assert.equal(entries[0].hooks[0].command, expected);
     }
+    assert.match(readFileSync(join(ROOT, 'bin/switchyard-pretooluse.sh'), 'utf8'), /switchyard-hook\.mjs" pre-tool-use/);
     assert.ok(existsSync(join(ROOT, 'bin/switchyard-hook.mjs')));
   });
 

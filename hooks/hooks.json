@@ -8,7 +8,7 @@
     "PreToolUse": [
       {
         "matcher": "Bash",
-        "hooks": [{ "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/switchyard-hook.mjs\" pre-tool-use" }]
+        "hooks": [{ "type": "command", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/bin/switchyard-pretooluse.sh\"" }]
       }
     ],
     "Stop": [
