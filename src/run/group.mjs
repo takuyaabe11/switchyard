@@ -2,8 +2,7 @@
 // 子を別のプロセスグループで起動し、そのグループにだけ信号を送る(設計 §4.3 / §7.1)。
 // Windows にはプロセスグループが無い。グループを確かめない(null)ので、呼び出し側は子へ直に(taskkill /T で子の木ごと)伝える
 import { execFile, execFileSync, spawn } from 'node:child_process';
-import { readFileSync, unlinkSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { statSync } from 'node:fs';
 import { join } from 'node:path';
 import { findGitBash, IS_WINDOWS } from '../platform.mjs';
 
@@ -72,8 +71,6 @@ function gitBash(env = process.env) {
   return findGitBash(env) ?? 'bash';
 }
 
-let timesSeq = 0;
-
 /**
  * spawnInOwnGroup と同じく別のプロセスグループで起動し、子の実際の pid と、終わったときの子と子孫の CPU 時間(ms)を返す約束を付ける。
  * sh が信号で終わった・times を読めなかったときは null。
@@ -107,37 +104,44 @@ export function spawnMeasured(argv, opts = {}) {
 }
 
 /**
- * Windows 版の spawnMeasured。Git Bash の下で同じ台本を走らせ、番号 3 を一時ファイルへ向ける
- * (Node から MSYS の bash へ番号 3 のパイプが渡るとは限らない)。台本の $0 がそのファイル、"$@" がコマンド。
- * MSYS の pid は Windows の pid と別物なので、コマンドの pid は返さない(止めるときは bash の木ごと taskkill /T)。
+ * Windows 版の spawnMeasured。
+ * - 実行ファイル(.exe)はそのまま起動する。Git Bash を挟むと、引数が MSYS の変換を 2 度通って壊れることがある
+ *   (CI の実測: Git Bash を通した node -e が、引数で渡したパスにファイルを書かなかった)
+ * - それ以外(npm のような bash のスクリプト・拡張子の無い名前)は Git Bash の下で起動する(Bash ツールと同じ解決)
+ * CPU 時間は測らない(null)。Git Bash の times は Windows の子の CPU 時間を数えない(CI の実測: 忙しく回る子で 15ms)。
+ * MSYS の pid は Windows の pid と別物なので、コマンドの pid も返さない(止めるときは子の木ごと taskkill /T)。
  * @param {string[]} argv @param {{ env?: NodeJS.ProcessEnv, cwd?: string }} opts
  * @returns {{ child: import('node:child_process').ChildProcess, commandPid: () => number | null, cpuMs: Promise<number | null> }}
  */
 function spawnMeasuredWindows(argv, opts) {
-  timesSeq += 1;
-  const file = join(tmpdir(), `switchyard-times-${process.pid}-${timesSeq}.txt`);
-  const script = `exec 3>"$0"\n${MEASURE_SCRIPT}`;
-  const child = spawn(gitBash(opts.env), ['-c', script, file, ...argv], { env: opts.env, cwd: opts.cwd, stdio: 'inherit', windowsHide: true });
-  const cpuMs = new Promise((resolve) => {
-    const read = () => {
-      /** @type {number | null} */
-      let ms = null;
-      try {
-        ms = parseTimes(readFileSync(file, 'utf8'));
-      } catch {
-        // 書かれなかった(bash が起動できなかった・信号で終わった)
-      }
-      try {
-        unlinkSync(file);
-      } catch {
-        // 無い
-      }
-      resolve(ms);
-    };
-    child.once('exit', read);
-    child.once('error', () => resolve(null));
-  });
-  return { child, commandPid: () => null, cpuMs: /** @type {Promise<number | null>} */ (cpuMs) };
+  const exe = windowsExe(argv[0], opts.env);
+  const child =
+    exe === null
+      ? spawn(gitBash(opts.env), ['-c', '"$@"', 'bash', ...argv], { env: opts.env, cwd: opts.cwd, stdio: 'inherit', windowsHide: true })
+      : spawn(exe, argv.slice(1), { env: opts.env, cwd: opts.cwd, stdio: 'inherit', windowsHide: true });
+  return { child, commandPid: () => null, cpuMs: Promise.resolve(null) };
+}
+
+/**
+ * Windows で、名前かパスが指す .exe を探す。見つからなければ null(bash のスクリプトや .cmd は Git Bash に任せる)。
+ * @param {string} cmd @param {NodeJS.ProcessEnv} [env] @returns {string | null}
+ */
+export function windowsExe(cmd, env = process.env) {
+  const isExe = (/** @type {string} */ p) => {
+    try {
+      return statSync(p).isFile();
+    } catch {
+      return false;
+    }
+  };
+  const names = /\.exe$/i.test(cmd) ? [cmd] : [`${cmd}.exe`];
+  if (/[\\/]/.test(cmd)) return names.find(isExe) ?? null;
+  const pathKey = Object.keys(env).find((k) => k.toUpperCase() === 'PATH');
+  for (const dir of (pathKey === undefined ? '' : env[pathKey] ?? '').split(';')) {
+    if (dir === '') continue;
+    for (const n of names) if (isExe(join(dir, n))) return join(dir, n);
+  }
+  return null;
 }
 
 /**

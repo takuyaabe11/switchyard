@@ -15,6 +15,7 @@ import { compareVersions, deadShimPaths, pathExportLine, pruneShimLines, session
 import { openClient } from '../../testkit/client.mjs';
 import { jobRequest } from '../../testkit/requests.mjs';
 import { tempHome } from '../../testkit/tmp.mjs';
+import { POSIX_ONLY } from '../../testkit/platform.mjs';
 
 /** 更新の確認で外へ問わない(既定で有効なので、テストでは差し替える) */
 const noUpdate = async () => null;
@@ -160,7 +161,7 @@ describe('sessionStart の PATH の知らせ', () => {
 });
 
 describe('SessionStart(設計 §9.2)', () => {
-  it('shims を PATH の先頭へ足す行を CLAUDE_ENV_FILE に 1 度だけ書き、知らせることが無ければ何も返さない', async () => {
+  it('shims を PATH の先頭へ足す行を CLAUDE_ENV_FILE に 1 度だけ書き、知らせることが無ければ何も返さない', { skip: POSIX_ONLY }, async () => {
     const { home } = await daemon();
     const file = envFileIn();
     const env = { SWITCHYARD_HOME: home, CLAUDE_ENV_FILE: file };
@@ -170,7 +171,7 @@ describe('SessionStart(設計 §9.2)', () => {
     assert.equal(pathAfterSourcing(file), '/p/r/shims:/usr/bin:/bin');
   });
 
-  it('パスに単一引用符があっても、PATH の書き方が壊れない', () => {
+  it('パスに単一引用符があっても、PATH の書き方が壊れない', { skip: POSIX_ONLY }, () => {
     const file = envFileIn();
     execFileSync('/bin/sh', ['-c', `cat > "${file}"`], { input: `${pathExportLine("/a'b")}\n` });
     assert.equal(pathAfterSourcing(file), "/a'b/shims:/usr/bin:/bin");

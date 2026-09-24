@@ -14,6 +14,7 @@ import { buildRequest, runJob } from '../../src/run/run.mjs';
 import { killGroupLeftovers, pidsInGroup } from '../../testkit/procs.mjs';
 import { tempHome } from '../../testkit/tmp.mjs';
 import { waitFor } from '../../testkit/wait.mjs';
+import { POSIX_ONLY } from '../../testkit/platform.mjs';
 
 /** @type {Array<() => Promise<unknown>>} */
 let cleanups = [];
@@ -110,7 +111,7 @@ describe('runJob', () => {
     assert.deepEqual(history.map((h) => [h.profile, h.code]), [['x', 33]]);
   });
 
-  it('preempt: pause を宣言したジョブは、計測が先頭に立つと本当に止まり、計測の後で動き出す(設計 §6.7)', async () => {
+  it('preempt: pause を宣言したジョブは、計測が先頭に立つと本当に止まり、計測の後で動き出す(設計 §6.7)', { skip: POSIX_ONLY }, async () => {
     const { d, home } = await daemon();
     const cwd = project({
       long: { match: ['never'], class: 'batch', cpus: { min: 1, max: 1 }, preempt: 'pause' },
@@ -146,7 +147,7 @@ describe('runJob', () => {
     await running;
   });
 
-  it('preempt: never(既定)のジョブは止められない', async () => {
+  it('preempt: never(既定)のジョブは止められない', { skip: POSIX_ONLY }, async () => {
     const { d, home } = await daemon();
     const cwd = project({
       long: { match: ['never'], class: 'batch', cpus: { min: 1, max: 1 } },
@@ -197,7 +198,7 @@ describe('runJob', () => {
     assert.equal(await blocker, 0);
   });
 
-  it('走行中に SIGTERM を受けたら子のグループへ転送し、killed として記録する', async () => {
+  it('走行中に SIGTERM を受けたら子のグループへ転送し、killed として記録する', { skip: POSIX_ONLY }, async () => {
     const { d, home } = await daemon();
     const cwd = mkdtempSync(join(tmpdir(), 'cproj-'));
     const signals = new EventEmitter();
@@ -218,7 +219,7 @@ describe('runJob', () => {
     assert.equal(d.getState().unacked.sessKill[0].kind, 'killed');
   });
 
-  it('SIGTERM の後に生まれた子も、グループごと終わらせてから終了を返す', async () => {
+  it('SIGTERM の後に生まれた子も、グループごと終わらせてから終了を返す', { skip: POSIX_ONLY }, async () => {
     const { d, home } = await daemon();
     const signals = new EventEmitter();
     const running = runJob({
@@ -243,7 +244,7 @@ describe('runJob', () => {
     }
   });
 
-  it('実行中にプロセスグループから抜けた子を検出し、表示してデーモンに記録させる', async () => {
+  it('実行中にプロセスグループから抜けた子を検出し、表示してデーモンに記録させる', { skip: POSIX_ONLY }, async () => {
     const { home } = await daemon();
     /** @type {string[]} */
     const lines = [];
@@ -263,7 +264,7 @@ describe('runJob', () => {
     await waitFor(() => readFileSync(pathsOf(home).events, 'utf8').includes('"kind":"escape"'));
   });
 
-  it('普通に終わった後もグループに残る子を、終了後も生きている子として表示する', async () => {
+  it('普通に終わった後もグループに残る子を、終了後も生きている子として表示する', { skip: POSIX_ONLY }, async () => {
     const { d, home } = await daemon();
     /** @type {string[]} */
     const lines = [];
@@ -287,7 +288,7 @@ describe('runJob', () => {
     }
   });
 
-  it('信号を短時間に 2 回受けても、SIGKILL までの猶予は最初の転送から測る(R5)', async () => {
+  it('信号を短時間に 2 回受けても、SIGKILL までの猶予は最初の転送から測る(R5)', { skip: POSIX_ONLY }, async () => {
     const dir = mkdtempSync(join(tmpdir(), 'cproj-'));
     const script = join(dir, 'repeat-signal-timing.mjs');
     const root = new URL('../../', import.meta.url);

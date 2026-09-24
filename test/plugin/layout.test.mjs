@@ -3,9 +3,10 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SHIM_WORDS } from '../../src/hooks/pretooluse.mjs';
+import { POSIX_ONLY, SH_BIN, WIN } from '../../testkit/platform.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 /** @param {string} rel */
@@ -15,9 +16,9 @@ const executable = (rel) => (statSync(join(ROOT, rel)).mode & 0o111) !== 0;
 
 /** 呼び出し元の PATH から shims を除いたもの */
 const BASE_PATH = (process.env.PATH ?? '')
-  .split(':')
+  .split(delimiter)
   .filter((d) => d !== '' && (!existsSync(d) || realpathSync(d) !== realpathSync(join(ROOT, 'shims'))))
-  .join(':');
+  .join(delimiter);
 
 describe('plugin の形(設計 §9・§9.6)', () => {
   it('plugin.json と marketplace.json の名前と版が、package.json の版とそろう', () => {
@@ -51,22 +52,23 @@ describe('plugin の形(設計 §9・§9.6)', () => {
 
   it('hooks.json のコマンドを sh で実際に走らせると、判定の無い入力には何も出さずに終わる', () => {
     const command = json('hooks/hooks.json').hooks.PreToolUse[0].hooks[0].command;
-    const out = execFileSync('/bin/sh', ['-c', command], { input: JSON.stringify({ tool_name: 'Read', tool_input: {} }), encoding: 'utf8', env: { PATH: BASE_PATH, CLAUDE_PLUGIN_ROOT: ROOT } });
+    const out = execFileSync(SH_BIN, ['-c', command], { input: JSON.stringify({ tool_name: 'Read', tool_input: {} }), encoding: 'utf8', env: { PATH: BASE_PATH, CLAUDE_PLUGIN_ROOT: ROOT } });
     assert.equal(out, '');
   });
 
   it('shims/ の実行ファイルは、PreToolUse が知っている 21 語とちょうど同じ', () => {
     const files = readdirSync(join(ROOT, 'shims')).filter((f) => !f.startsWith('_'));
     assert.deepEqual(files.sort(), [...SHIM_WORDS].sort());
-    for (const f of files) assert.ok(executable(`shims/${f}`), f);
+    // Windows のファイルには実行の権限の印が無い(Git Bash は shebang で起動する)
+    if (!WIN) for (const f of files) assert.ok(executable(`shims/${f}`), f);
   });
 
-  it('bin/switchyard は実行でき、CLI へつながる', () => {
+  it('bin/switchyard は実行でき、CLI へつながる', { skip: POSIX_ONLY }, () => {
     assert.ok(executable('bin/switchyard'));
     assert.match(execFileSync(join(ROOT, 'bin/switchyard'), ['help'], { encoding: 'utf8', env: { PATH: BASE_PATH, SWITCHYARD_LANG: 'ja' } }), /^使い方:/);
   });
 
-  it('言語の指定が無く、ロケールも日本語でなければ英語で出す。LANG が ja なら日本語', () => {
+  it('言語の指定が無く、ロケールも日本語でなければ英語で出す。LANG が ja なら日本語', { skip: POSIX_ONLY }, () => {
     const help = (/** @type {Record<string, string>} */ env) => execFileSync(join(ROOT, 'bin/switchyard'), ['help'], { encoding: 'utf8', env: { PATH: BASE_PATH, ...env } });
     assert.match(help({}), /^Usage:/);
     assert.match(help({ LANG: 'en_US.UTF-8' }), /^Usage:/);

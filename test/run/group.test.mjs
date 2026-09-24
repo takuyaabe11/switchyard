@@ -6,6 +6,7 @@ import { execFileSync } from 'node:child_process';
 import { parseTimes, readPgid, signalGroup, spawnInOwnGroup, spawnMeasured, verifiedGroup, waitGroupGone } from '../../src/run/group.mjs';
 import { killGroupLeftovers, pidsInGroup } from '../../testkit/procs.mjs';
 import { waitFor } from '../../testkit/wait.mjs';
+import { POSIX_ONLY } from '../../testkit/platform.mjs';
 
 /** ppid が一致する子の pid 一覧(孫プロセスを見つけるため) @param {number} ppid @returns {number[]} */
 function childrenOf(ppid) {
@@ -17,7 +18,7 @@ function childrenOf(ppid) {
     .map(([p]) => p);
 }
 
-describe('別グループでの起動(V4)', () => {
+describe('別グループでの起動(V4)', { skip: POSIX_ONLY }, () => {
   it('子は自分の pid と同じ pgid を持ち、呼び出し元のグループと違う', async () => {
     const child = spawnInOwnGroup(['sleep', '5'], { stdio: 'ignore' });
     const pid = /** @type {number} */ (child.pid);
@@ -130,7 +131,7 @@ describe('spawnMeasured(子と子孫の CPU 時間を測る)', () => {
     assert.equal(parseTimes(''), null);
   });
 
-  it('子の終了コードを返し、CPU を使った子孫の時間を数え、子自身の pid を教える', async () => {
+  it('子の終了コードを返し、CPU を使った子孫の時間を数え、子自身の pid を教える', { skip: POSIX_ONLY }, async () => {
     const { child, cpuMs, commandPid } = spawnMeasured([process.execPath, '-e', 'const e=Date.now()+700;while(Date.now()<e){} process.exit(3)']);
     const code = await new Promise((r) => child.once('exit', (c) => r(c)));
     assert.equal(code, 3);
@@ -140,7 +141,7 @@ describe('spawnMeasured(子と子孫の CPU 時間を測る)', () => {
     assert.ok(pid !== null && pid !== child.pid, '子自身の pid は sh とは別');
   });
 
-  it('標準入力を子へ渡し、子には番号 3 を渡さない', () => {
+  it('標準入力を子へ渡し、子には番号 3 を渡さない', { skip: POSIX_ONLY }, () => {
     const script = [
       `import { spawnMeasured } from ${JSON.stringify(new URL('../../src/run/group.mjs', import.meta.url).href)};`,
       "const { child } = spawnMeasured(['sh', '-c', 'read x; [ -e /dev/fd/3 ] && echo leaked; echo \"got:$x\"']);",

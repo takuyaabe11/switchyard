@@ -9,6 +9,7 @@ import { openClient } from '../../testkit/client.mjs';
 import { jobRequest } from '../../testkit/requests.mjs';
 import { tempHome } from '../../testkit/tmp.mjs';
 import { waitFor } from '../../testkit/wait.mjs';
+import { POSIX_ONLY } from '../../testkit/platform.mjs';
 
 /** @typedef {import('../../src/daemon/server.mjs').DaemonOptions} DaemonOptions */
 /** @typedef {import('../../src/protocol/messages.mjs').Snapshot} Snapshot */
@@ -338,7 +339,7 @@ describe('daemon server', () => {
     assert.equal(d.getState().leases[0].job.expectedMs, 200);
   });
 
-  it('生きているデーモンが居れば起動を拒み、死んだ socket ファイルは片付けて起動する', async () => {
+  it('生きているデーモンが居れば起動を拒み、死んだ socket ファイルは片付けて起動する', { skip: POSIX_ONLY }, async () => {
     const { home } = await daemon();
     await assert.rejects(startDaemon({ home, capacity: 4 }), /別のデーモンが応答している/);
     const home2 = tempHome();

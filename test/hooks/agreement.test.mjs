@@ -19,11 +19,13 @@ import { buildRequest } from '../../src/run/run.mjs';
 import { decideShim, formatAnswer } from '../../src/shim/decide.mjs';
 
 /** この repo の switchyard の CLI の入口(bin/switchyard は PATH の node でこれを起動する) */
-const CLI = realpathSync(fileURLToPath(new URL('../../bin/switchyard.mjs', import.meta.url)));
+// Windows でもコマンドの中では / で書く(引用しない \ はシェルが食べる)
+const CLI = realpathSync(fileURLToPath(new URL('../../bin/switchyard.mjs', import.meta.url))).replace(/\\/g, '/');
 
 /** git init 済みで、プロジェクトの profile を持つ作業場所 */
 function project() {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'cagree-')));
+  // native: Windows の短い名前(RUNNER~1)を長い名前にする(git が返す git-dir と同じ形)
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'cagree-')));
   execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' });
   writeFileSync(
     join(dir, 'switchyard.json'),
@@ -168,7 +170,7 @@ function outcome(out) {
 
 describe('三者の判定の表(shim の分類器・switchyard run の包み・PreToolUse)', () => {
   const dir = project();
-  const lock = `lock git-index:${realpathSync(join(dir, '.git'))}`;
+  const lock = `lock git-index:${realpathSync.native(join(dir, '.git'))}`;
   const { profiles } = loadProfiles(dir);
   /** @param {string} name */
   const classOf = (name) => profiles.find((p) => p.name === name)?.profile.class;

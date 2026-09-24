@@ -3,6 +3,7 @@ import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
 import { findGitBash, fromBashPath, socketPath, toBashPath } from '../src/platform.mjs';
 import { pathExportLine } from '../src/hooks/session.mjs';
+import { join } from 'node:path';
 
 describe('Windows と POSIX の違い(src/platform.mjs)', () => {
   it('Windows のパスを Git Bash の形にし、戻せる', () => {
@@ -15,7 +16,7 @@ describe('Windows と POSIX の違い(src/platform.mjs)', () => {
 
   it('Windows の PATH の行は /c/… の形で書く(C:\\… のままだと : で PATH が切れる)', () => {
     assert.equal(pathExportLine('C:\\p\\switchyard', true), `export PATH='/c/p/switchyard/shims':"$PATH"`);
-    assert.equal(pathExportLine('/p/switchyard', false), `export PATH='/p/switchyard/shims':"$PATH"`);
+    assert.equal(pathExportLine('/p/switchyard', false), `export PATH='${join('/p/switchyard', 'shims')}':"$PATH"`);
   });
 
   it('デーモンの待ち受けは、POSIX は置き場所の socket、Windows は置き場所ごとの名前付きパイプ', () => {

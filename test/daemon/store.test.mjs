@@ -7,13 +7,14 @@ import { join } from 'node:path';
 import { switchyardHome, pathsOf } from '../../src/daemon/paths.mjs';
 import { appendRecord, createStateWriter, JOURNAL_MAX_BYTES, loadEscapes, loadEstimates, parseState, readJournal, readJson, readRecords, rotateRecords, writeJsonAtomic } from '../../src/daemon/store.mjs';
 import { state } from '../../testkit/fixtures.mjs';
+import { socketPath } from '../../src/platform.mjs';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'switchyard-'));
 
 describe('paths', () => {
   it('SWITCHYARD_HOME があればそれを使う', () => {
     assert.equal(switchyardHome({ SWITCHYARD_HOME: '/x/y' }), '/x/y');
-    assert.equal(pathsOf('/x/y').sock, '/x/y/switchyardd.sock');
+    assert.equal(pathsOf('/x/y').sock, socketPath('/x/y'));
     assert.equal(pathsOf('/x/y').hooks, '/x/y/hooks.jsonl');
   });
 });

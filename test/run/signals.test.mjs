@@ -10,6 +10,7 @@ import { DaemonUnavailableError } from '../../src/client/connect.mjs';
 import { runJob } from '../../src/run/run.mjs';
 import { tempHome } from '../../testkit/tmp.mjs';
 import { waitFor } from '../../testkit/wait.mjs';
+import { POSIX_ONLY } from '../../testkit/platform.mjs';
 
 const node = process.execPath;
 
@@ -40,7 +41,7 @@ function start({ argv, killGraceMs, cwd }) {
   return { signals, running };
 }
 
-describe('信号(pgid を確かめられないとき。設計 §4.3 の 3・5)', () => {
+describe('信号(pgid を確かめられないとき。設計 §4.3 の 3・5)', { skip: POSIX_ONLY }, () => {
   it('呼び出し元の SIGTERM は子の pid だけに届き、グループ(孫)には送らない', async () => {
     const cwd = mkdtempSync(join(tmpdir(), 'cproj-'));
     const pidFile = join(cwd, 'grandchild.pid');

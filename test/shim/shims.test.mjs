@@ -12,6 +12,7 @@ import { stopDaemon } from '../../src/daemon/control.mjs';
 import { pathsOf } from '../../src/daemon/paths.mjs';
 import { startDaemon } from '../../src/daemon/server.mjs';
 import { tempHome } from '../../testkit/tmp.mjs';
+import { POSIX_ONLY } from '../../testkit/platform.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const SHIMS = realpathSync(join(ROOT, 'shims'));
@@ -90,7 +91,7 @@ function shimsWithClassifier(decideSource) {
   return realpathSync(join(root, 'shims'));
 }
 
-describe('shims(設計 §9.1)', () => {
+describe('shims(設計 §9.1)', { skip: POSIX_ONLY }, () => {
   it('shims に 21 語がそろい、どれも実行できる', () => {
     for (const word of SHIM_WORDS) assert.ok((statSync(join(SHIMS, word)).mode & 0o111) !== 0, word);
   });

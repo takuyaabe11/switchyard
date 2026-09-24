@@ -13,6 +13,8 @@ import { openClient } from '../../testkit/client.mjs';
 import { jobRequest } from '../../testkit/requests.mjs';
 import { tempHome } from '../../testkit/tmp.mjs';
 import { waitFor } from '../../testkit/wait.mjs';
+import { POSIX_ONLY, WIN } from '../../testkit/platform.mjs';
+import { stopDaemon } from '../../src/daemon/control.mjs';
 
 const BIN = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin', 'switchyard.mjs');
 
@@ -114,7 +116,7 @@ describe('cli', () => {
     assert.equal(again.code, 1);
   });
 
-  it('probe はグループから抜ける子を報告する', async () => {
+  it('probe はグループから抜ける子を報告する', { skip: POSIX_ONLY }, async () => {
     const r = await capture(['probe', '0.5', '--', 'sh', '-c', 'perl -e "use POSIX; POSIX::setsid(); sleep 30" & sleep 30 & wait'], { SWITCHYARD_HOME: tempHome() });
     assert.equal(r.code, 0, r.err);
     assert.match(r.out, /グループから抜けた子: perl ×1/);
@@ -126,10 +128,14 @@ describe('cli', () => {
     cleanups.push(async () => {
       const lock = pathsOf(home).lock;
       if (!existsSync(lock)) return;
-      try {
-        process.kill(Number(readFileSync(lock, 'utf8')), 'SIGTERM');
-      } catch {
-        // 既に居ない
+      // Windows の SIGTERM は後片付けの無い強制終了なので、接続で止まるよう頼む
+      if (WIN) await stopDaemon({ home });
+      else {
+        try {
+          process.kill(Number(readFileSync(lock, 'utf8')), 'SIGTERM');
+        } catch {
+          // 既に居ない
+        }
       }
       await waitFor(() => !existsSync(lock), 3_000);
     });
