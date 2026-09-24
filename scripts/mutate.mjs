@@ -284,8 +284,44 @@ const SUITES = {
     ],
   },
   report: {
-    tests: ['test/report/report.test.mjs', 'test/cli/report.test.mjs', 'test/report/share.test.mjs'],
+    tests: ['test/report/report.test.mjs', 'test/cli/report.test.mjs', 'test/report/share.test.mjs', 'test/replay/reruns.test.mjs'],
     mutations: [
+      {
+        name: 'R15 ファイルへの書き出し(>)を読むだけとみなす',
+        file: 'src/replay/reruns.mjs',
+        from: "  if (rest.includes('>')) return false;\n",
+        to: '',
+      },
+      {
+        name: 'R16 書き換えのツールを挟んでも走り直しと数える',
+        file: 'src/replay/reruns.mjs',
+        from: '      strictLast.clear();\n      looseLast.clear();\n      continue;',
+        to: '      continue;',
+      },
+      {
+        name: 'R17 書き換えうる Bash を挟んでも厳しめに数える',
+        file: 'src/replay/reruns.mjs',
+        from: '      if (!isReadOnly(s.command)) strictLast.clear();\n',
+        to: '',
+      },
+      {
+        name: 'R18 失敗の直後の走り直しを数えない',
+        file: 'src/replay/reruns.mjs',
+        from: '      if (prevStrict.isError === true) acc.afterFailure += 1;\n',
+        to: '',
+      },
+      {
+        name: 'R19 背景の走行の(すぐ返る)所要を足す',
+        file: 'src/replay/reruns.mjs',
+        from: 'const ms = p.background || !Number.isFinite',
+        to: 'const ms = !Number.isFinite',
+      },
+      {
+        name: 'R20 再開したセッションが持ち越した行を 2 度数える',
+        file: 'src/replay/replay.mjs',
+        from: "          if (st.id !== '' && stepSeen.has(st.id)) {",
+        to: '          if (false) {',
+      },
       {
         name: 'R8 --share が switchyard.json の profile 名を出す',
         file: 'src/report/share.mjs',

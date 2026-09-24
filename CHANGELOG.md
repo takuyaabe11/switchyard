@@ -3,6 +3,16 @@
 All notable changes to switchyard. Versions follow `plugin.json`; Claude Code only offers an update when that
 version goes up.
 
+## 0.15.0
+
+### Added
+- `switchyard replay` counts re-runs with nothing changed: the same heavy command run again in the same place, within
+  the same session, with no file edited in between. Strict counting treats any Bash call that is not plainly
+  read-only (`python`, `sed -i`, `> file`, `git checkout`, ...) as a possible edit; loose counting only looks at the
+  edit tools. It also reports how many re-runs came right after a failure, the foreground time they took, and the
+  commands re-run most. This is the work that merging identical runs or reusing their results could save, measured
+  on your own logs before any such feature is built. On the maintainer's logs (196 heavy runs) it was one re-run.
+
 ## 0.14.0
 
 ### Added
