@@ -90,6 +90,30 @@ describe('cli', () => {
     assert.equal(d.getState().unacked.other123, undefined);
   });
 
+  it('ack: 人の端末からは --session を省いてもジョブ id で確認済みにでき、確認待ちに無いジョブは失敗で返す', async () => {
+    const home = tempHome();
+    const d = await startDaemon({ home, capacity: 4, tickMs: 20 });
+    cleanups.push(() => d.close());
+    const c = await openClient(d.sock);
+    cleanups.push(() => c.close());
+    c.send({ t: 'request', job: jobRequest({ session: 'claude12' }) });
+    const acc = await c.next((m) => m.t === 'accepted');
+    await c.next((m) => m.t === 'grant');
+    c.send({ t: 'exit', jobId: acc.jobId, code: 1, killedByCaller: false, durationMs: 1 });
+    await c.next((m) => m.t === 'ok');
+    // Claude の別セッションからは、自分のセッションに無いので失敗で返す(黙って成功と出さない)
+    const other = await capture(['ack', String(acc.jobId)], { SWITCHYARD_HOME: home, CLAUDE_CODE_SESSION_ID: 'mine5678xx' });
+    assert.equal(other.code, 1);
+    assert.match(other.err, /確認済みにできない/);
+    assert.equal(d.getState().unacked.claude12?.length, 1);
+    const human = await capture(['ack', String(acc.jobId)], { SWITCHYARD_HOME: home });
+    assert.equal(human.code, 0, human.err);
+    assert.match(human.out, /セッション claude12/);
+    assert.equal(d.getState().unacked.claude12, undefined);
+    const again = await capture(['ack', String(acc.jobId)], { SWITCHYARD_HOME: home });
+    assert.equal(again.code, 1);
+  });
+
   it('probe はグループから抜ける子を報告する', async () => {
     const r = await capture(['probe', '0.5', '--', 'sh', '-c', 'perl -e "use POSIX; POSIX::setsid(); sleep 30" & sleep 30 & wait'], { SWITCHYARD_HOME: tempHome() });
     assert.equal(r.code, 0, r.err);

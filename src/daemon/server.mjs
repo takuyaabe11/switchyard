@@ -298,10 +298,21 @@ export async function startDaemon(opts) {
         case 'status':
           send(conn, { t: 'status', snapshot: snapshot() });
           return;
-        case 'ack':
-          apply({ type: 'ack', now: monoNow(), session: String(m.session), jobId: String(m.jobId) });
-          send(conn, { t: 'ok' });
+        case 'ack': {
+          // session を省いた要求(人の端末から)は、そのジョブを持つセッションを探す。
+          // 確認待ちに無いジョブは黙って ok を返さない(効いていないのに「確認済みにした」と出ていた)
+          const jobId = String(m.jobId);
+          const has = (/** @type {string} */ s) => (state.unacked[s] ?? []).some((u) => u.jobId === jobId);
+          const session = typeof m.session === 'string' ? m.session : Object.keys(state.unacked).find(has);
+          if (session === undefined || !has(session)) {
+            const where = typeof m.session === 'string' ? `セッション ${m.session} の` : 'どのセッションの';
+            send(conn, { t: 'error', message: `${where}確認待ちにも ${jobId} は無い(switchyard top の「未確認」で id とセッションを確かめる)` });
+            return;
+          }
+          apply({ type: 'ack', now: monoNow(), session, jobId });
+          send(conn, { t: 'ok', session });
           return;
+        }
         case 'unacked':
           send(conn, { t: 'unacked', jobs: state.unacked[String(m.session)] ?? [] });
           return;
