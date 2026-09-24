@@ -30,11 +30,12 @@ async function capture(args, h) {
 
 describe('parseArgs report', () => {
   it('オプションが無ければ既定の値', () => {
-    assert.deepEqual(parseArgs(['report']), { cmd: 'report', repoPrefix: null, sinceDays: null });
+    assert.deepEqual(parseArgs(['report']), { cmd: 'report', repoPrefix: null, sinceDays: null, share: false });
   });
 
   it('--repo と --since を読む', () => {
-    assert.deepEqual(parseArgs(['report', '--repo', '/home/u/dev/irc', '--since', '7d']), { cmd: 'report', repoPrefix: '/home/u/dev/irc', sinceDays: 7 });
+    assert.deepEqual(parseArgs(['report', '--repo', '/home/u/dev/irc', '--since', '7d']), { cmd: 'report', repoPrefix: '/home/u/dev/irc', sinceDays: 7, share: false });
+    assert.deepEqual(parseArgs(['report', '--share', '--since', '7d']), { cmd: 'report', repoPrefix: null, sinceDays: 7, share: true });
   });
 
   it('--since の形が違えば使い方の誤り', () => {
@@ -59,6 +60,22 @@ describe('switchyard report', () => {
     assert.match(r.out, /ジョブ 1 件/);
     assert.match(r.out, /CPU 待ち 1 件/);
     assert.match(r.out, /背景へ回した 1 件/);
+  });
+
+  it('--share は数だけの英語の報告を出し、repo もコマンドも出さない', async () => {
+    const h = home(
+      [
+        { at: T0, kind: 'event', event: { type: 'request', now: T0, job: { id: 'a', session: 's1', repo: '/home/alice/secret-repo', profile: 'unit', cmd: 'npm test', class: 'batch', cpus: { min: 2, max: 4 }, locks: [], preempt: 'throttle', why: null, expectedMs: null } } },
+        { at: T0 + 12 * MIN, kind: 'history', repo: '/home/alice/secret-repo', profile: 'unit', class: 'batch', cpus: 2, durationMs: 10 * MIN, code: 0 },
+      ],
+      [],
+    );
+    const r = await capture(['report', '--share'], h);
+    assert.equal(r.code, 0);
+    assert.match(r.out, /^### switchyard field report$/m);
+    assert.match(r.out, /finished runs: 1;/);
+    assert.match(r.out, /\d+ cores, \d+ GB/);
+    assert.doesNotMatch(r.out, /alice|secret-repo|npm test|unit/);
   });
 
   it('記録がまだ無ければ、その旨を出して 0 で終わる', async () => {

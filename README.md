@@ -100,6 +100,9 @@ On a 4-core, 16 GB machine ([0.6–0.8](docs/verification/2026-09-24-effect.md),
 - The clue on a failed run is a hint, not a diagnosis: a run can fail for its own reasons on a busy machine too.
 - The numbers above come from controlled runs on one machine, not from people's everyday use yet.
   `switchyard report` shows what it did on yours: how many runs it held back, how long they waited, what it packed in.
+  `switchyard report --share` prints the same as counts only (no repository, path, command, project profile name or
+  session id) for a [field report](https://github.com/takuyaabe11/switchyard/issues/new?template=field-report.md);
+  posting one is the fastest way to replace these numbers with real ones.
 - macOS and Linux only (Windows through WSL).
 
 ## Install
@@ -137,6 +140,7 @@ switchyard run --why "..." -- <cmd> # run something through switchyard explicitl
 switchyard probe <seconds> -- <cmd> # measure a command to pick cpus/class
 switchyard replay [--since 7d]      # re-run past decisions against a config
 switchyard report [--since 7d]      # aggregate decisions and hook verdicts, and what the queue saved
+switchyard report --share           # the same as counts only, to paste into a field report
 switchyard init [--write]           # suggest switchyard.json profiles from your past sessions in this repo
 switchyard uninstall [--dry-run]    # clean up before /plugin uninstall: daemon, PATH line, ~/.switchyard
 ```
@@ -188,7 +192,8 @@ the profiles already there.
   lock with the measure is never held — releasing that lock is what the measure is waiting for.
   Only declare `pause` or `throttle` on work that survives being suspended: a stopped job
   still holds its locks, its memory and its open files, and a test runner inside it may hit
-  its own timeout once it resumes.
+  its own timeout once it resumes. Tests that start containers (Testcontainers, docker compose) should stay on
+  `never` (the default): their wait strategies and the container runtime keep time on their own.
 - A wrapped job runs with `SWITCHYARD_IN_JOB=1` in its environment. If your own test suite
   reads that variable, do not classify the command that starts it — or strip the variable
   before the suite runs, the way this repo's `npm test` does with `env -u SWITCHYARD_IN_JOB`.
@@ -460,6 +465,9 @@ node bin/switchyard.mjs replay --since 14d
 - 失敗に添える手がかりは見立てで、診断ではない。忙しい機械の上でも、走行はそれ自身の理由で失敗しうる。
 - 上の数字は 1 台の機械で条件をそろえて測ったもので、まだ普段使いの利用者のデータではない。自分の機械で何をしたかは
   `switchyard report` で見られる(待たせた本数・待ち時間・詰めて入れた本数など)。
+  `switchyard report --share` は同じものを数だけ(repo・パス・コマンド・profile の名前・セッション id を含まない)で出す。
+  [利用報告](https://github.com/takuyaabe11/switchyard/issues/new?template=field-report.md)に貼ってもらえると、
+  上の数字を本物の数字に置き換えられる。
 - macOS と Linux だけ(Windows は WSL で)。
 
 ## 導入
@@ -496,6 +504,7 @@ switchyard run --why "..." -- <cmd> # 明示的に switchyard を通して走ら
 switchyard probe <秒> -- <cmd>      # cpus / class を決めるためにコマンドを計測する
 switchyard replay [--since 7d]      # 過去の決定を、今の設定でやり直して見る
 switchyard report [--since 7d]      # 決定と hook の判断、順番待ちの効果を集計する
+switchyard report --share           # 同じものを数だけで出す(利用報告に貼る)
 switchyard init [--write]           # この repo の過去のセッションから switchyard.json の profile を提案する
 switchyard uninstall [--dry-run]    # /plugin uninstall の前の後片付け。デーモン・PATH の行・~/.switchyard
 ```
@@ -520,7 +529,8 @@ repo の根に `switchyard.json` を置くと、その repo のコマンドの�
   `throttle` は `renice` で優先度を下げ、計測の隣で走り続けさせる。
   計測と同じ鍵を持つジョブは止めない —— その鍵が返るのを計測が待っているため。
   `pause` / `throttle` を宣言するのは、中断に耐える走行だけにする。止まったジョブは鍵もメモリも
-  開いたファイルも握ったままで、中のテストランナーは動き出した後に自分のタイムアウトを踏みうる。
+  開いたファイルも握ったままで、中のテストランナーは動き出した後に自分のタイムアウトを踏みうる。コンテナを起動するテスト
+  (Testcontainers・docker compose)は `never`(既定)のままにする。待ちの判定もコンテナの実行環境も、自分で時間を数えている。
 - 包まれたジョブの環境には `SWITCHYARD_IN_JOB=1` が立つ。自分のテストがその変数を読むなら、
   それを起こすコマンドは分類しないこと。あるいは走らせる前に変数を落とす(この repo の `npm test` は
   `env -u SWITCHYARD_IN_JOB` で落としている)。

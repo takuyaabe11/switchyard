@@ -23,7 +23,7 @@ import { t } from '../i18n.mjs';
  * )} Command
  */
 /** @typedef {{ cmd: 'replay', cwdPrefix: string | null, sinceDays: number | null, config: string | null, examples: number, dir: string | null }} ReplayCommand */
-/** @typedef {{ cmd: 'report', repoPrefix: string | null, sinceDays: number | null }} ReportCommand */
+/** @typedef {{ cmd: 'report', repoPrefix: string | null, sinceDays: number | null, share: boolean }} ReportCommand */
 /** @typedef {{ cmd: 'init', dir: string | null, sinceDays: number | null, minSeconds: number, minCount: number, write: boolean }} InitCommand */
 
 export const USAGE = t(
@@ -37,7 +37,7 @@ export const USAGE = t(
     '  switchyard ack <job> [--session <id>]',
     '  switchyard probe <秒> -- <コマンド...>',
     '  switchyard replay [--cwd 前方一致] [--since 日数d] [--config switchyard.json] [--examples 件数] [--dir 記録の根]',
-    '  switchyard report [--repo 前方一致] [--since 日数d]',
+    '  switchyard report [--repo 前方一致] [--since 日数d] [--share]',
     '  switchyard init [--since 日数d] [--min-seconds 秒] [--min-count 回数] [--dir 記録の根] [--write]',
     '  switchyard uninstall [--keep-logs] [--dry-run]',
   ].join('\n'),
@@ -51,7 +51,7 @@ export const USAGE = t(
     '  switchyard ack <job> [--session <id>]',
     '  switchyard probe <seconds> -- <command...>',
     '  switchyard replay [--cwd prefix] [--since <days>d] [--config switchyard.json] [--examples count] [--dir log-root]',
-    '  switchyard report [--repo prefix] [--since <days>d]',
+    '  switchyard report [--repo prefix] [--since <days>d] [--share]',
     '  switchyard init [--since <days>d] [--min-seconds seconds] [--min-count count] [--dir log-root] [--write]',
     '  switchyard uninstall [--keep-logs] [--dry-run]',
   ].join('\n'),
@@ -167,9 +167,13 @@ function parseReplay(rest) {
 /** @param {string[]} rest @returns {ReportCommand} */
 function parseReport(rest) {
   /** @type {ReportCommand} */
-  const out = { cmd: 'report', repoPrefix: null, sinceDays: null };
+  const out = { cmd: 'report', repoPrefix: null, sinceDays: null, share: false };
   for (let i = 0; i < rest.length; i += 1) {
     const name = rest[i];
+    if (name === '--share') {
+      out.share = true;
+      continue;
+    }
     const value = rest[i + 1];
     if (value === undefined) throw new UsageError(t(`${name} に値が無い`, `${name} needs a value`));
     i += 1;

@@ -87,7 +87,7 @@ describe('summarize(改善のための集計)', () => {
 
   it('hooks.jsonl の背景化と拒否を数える', () => {
     const s = summarize({ events: [], hooks: [hook('background', T0), hook('background', T0), hook('deny', T0)] });
-    assert.deepEqual(s.hook, { background: 2, deny: 1, wrap: 0 });
+    assert.deepEqual(s.hook, { background: 2, deny: 1, wrap: 0, ask: 0 });
   });
 
   it('repo の前方一致と期間で絞る(決定は、その要求の repo で絞る)', () => {
@@ -101,7 +101,7 @@ describe('summarize(改善のための集計)', () => {
     assert.equal(s.jobs, 1);
     assert.equal(s.waitMs.max, MIN);
     assert.deepEqual(s.byProfile, []);
-    assert.deepEqual(s.hook, { background: 0, deny: 1, wrap: 0 });
+    assert.deepEqual(s.hook, { background: 0, deny: 1, wrap: 0, ask: 0 });
   });
 });
 

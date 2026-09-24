@@ -3,6 +3,18 @@
 All notable changes to switchyard. Versions follow `plugin.json`; Claude Code only offers an update when that
 version goes up.
 
+## 0.14.0
+
+### Added
+- `switchyard report --share` prints the report as counts only, in English, for pasting into a field report: machine
+  (cores, memory, OS, versions), settings changed from the defaults, sessions and days covered, runs held back and
+  their waits, packing, runs per built-in profile, failures (and how many looked environmental), hook decisions, and
+  the observe-mode overlaps. No repository, path, command, project profile name, lock name or session id is included.
+  A field-report issue template takes the output. Real numbers from everyday use were the gap most people pointed at
+  in the second persona round.
+- `switchyard report` also counts the approvals `PreToolUse` asked for (0.12.1).
+- README: tests that start containers should keep `preempt: never`.
+
 ## 0.13.0
 
 ### Added

@@ -57,7 +57,7 @@ describe('summarizeObserved', () => {
 
   it('report の普段の集計は、観察だけのモードの hook の行を数えない', () => {
     const s = summarize({ events: [], hooks: [{ kind: 'hook', observe: true, decision: 'deny', at: 0, cwd: '/r' }] });
-    assert.deepEqual(s.hook, { background: 0, deny: 0, wrap: 0 });
+    assert.deepEqual(s.hook, { background: 0, deny: 0, wrap: 0, ask: 0 });
   });
 });
 
