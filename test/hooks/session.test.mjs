@@ -247,6 +247,25 @@ describe('Stop(設計 §9.2)', () => {
     assert.equal(other, null, 'SWITCHYARD_OFF=1 なら何もしない');
   });
 
+  it('環境のせいかもしれない失敗には、その手がかりを添えて知らせる', async () => {
+    const jobs = [{ jobId: 'j1', kind: 'failed', code: 137, cmd: 'npm test', hint: ['SIGKILL で終わった'] }];
+    /** 確認待ちを返すだけの偽の接続 */
+    const connect = /** @type {any} */ (async () => {
+      const { EventEmitter } = await import('node:events');
+      const sock = Object.assign(new EventEmitter(), {
+        destroyed: false,
+        setEncoding() {},
+        write() {
+          setImmediate(() => sock.emit('data', `${JSON.stringify({ t: 'unacked', jobs })}\n`));
+        },
+        destroy() {},
+      });
+      return sock;
+    });
+    const out = /** @type {any} */ (await stop({ session_id: 'hintSess-1' }, { env: { SWITCHYARD_HOME: tempHome() }, connect }));
+    assert.ok(out.systemMessage.includes('j1 失敗(終了コード 137): npm test(環境のせいかもしれない: SIGKILL で終わった)'), out.systemMessage);
+  });
+
   it('SWITCHYARD_STOP=block なら、ack されていない失敗があれば decision: block で差し戻す', async () => {
     const { d, home } = await daemon();
     const jobId = await failedJob(d.sock);

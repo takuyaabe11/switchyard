@@ -65,6 +65,15 @@ function writeFileAtomic(file, text) {
 }
 
 /**
+ * 確認待ちの 1 行。環境のせいかもしれない失敗には、その手がかりを添える。
+ * @param {Unacked} j @param {Record<UnackedKind, string>} kind @returns {string}
+ */
+function unackedLine(j, kind) {
+  const hint = j.hint !== undefined && j.hint.length > 0 ? t(`(環境のせいかもしれない: ${j.hint.join('・')})`, ` (may not be the code: ${j.hint.join('; ')})`) : '';
+  return t(`- ${j.jobId} ${kind[j.kind]}(終了コード ${j.code ?? 'なし'}): ${j.cmd}${hint}`, `- ${j.jobId} ${kind[j.kind]} (exit code ${j.code ?? 'none'}): ${j.cmd}${hint}`);
+}
+
+/**
  * Stop で知らせたジョブを覚え、まだ知らせていないものだけを返す(同じ失敗を毎回のターンの終わりに出さない)。
  * 覚えられなくても知らせる(記録は補助)。セッションごとに直近 200 件まで。
  * @param {string} home @param {string} session @param {string[]} jobIds @returns {string[]}
@@ -257,7 +266,7 @@ export async function stop(input, { env = process.env, connect = connectDaemon }
     if (fresh.length === 0) return null;
     const lines = jobs
       .filter((j) => fresh.includes(j.jobId))
-      .map((j) => t(`- ${j.jobId} ${kind[j.kind]}(終了コード ${j.code ?? 'なし'}): ${j.cmd}`, `- ${j.jobId} ${kind[j.kind]} (exit code ${j.code ?? 'none'}): ${j.cmd}`))
+      .map((j) => unackedLine(j, kind))
       .join('\n');
     return {
       systemMessage: t(
@@ -269,7 +278,7 @@ export async function stop(input, { env = process.env, connect = connectDaemon }
     };
   }
   const list = jobs
-    .map((j) => t(`- ${j.jobId} ${kind[j.kind]}(終了コード ${j.code ?? 'なし'}): ${j.cmd}`, `- ${j.jobId} ${kind[j.kind]} (exit code ${j.code ?? 'none'}): ${j.cmd}`))
+    .map((j) => unackedLine(j, kind))
     .join('\n');
   return {
     decision: 'block',

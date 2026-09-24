@@ -53,6 +53,12 @@ describe('summarize(改善のための集計)', () => {
     assert.deepEqual(s.reasons, { measure: 1, cpu: 1, lock: 1, behind: 1, memory: 2 });
   });
 
+  it('環境のせいかもしれない失敗を数える', () => {
+    const history = (/** @type {Record<string, unknown>} */ over) => ({ at: T0, kind: 'history', repo: '/repo', profile: 'unit', class: 'batch', cpus: 2, durationMs: 1000, code: 1, ...over });
+    const s = summarize({ events: [history({ environmental: ['x'] }), history({}), history({ code: 0 })], hooks: [] });
+    assert.deepEqual([s.failures, s.environmental], [2, 1]);
+  });
+
   it('実測の空きに詰め込んだ入場を数える', () => {
     const events = [req('a', T0), grant('a', T0, { cpus: 1, overcommit: true }), req('b', T0), grant('b', T0)];
     assert.equal(summarize({ events, hooks: [] }).packed, 1);

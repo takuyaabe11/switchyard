@@ -40,10 +40,11 @@ const removeLease = (s, id) => ({ ...s, leases: s.leases.filter((l) => l.job.id 
 /** @param {State} s @param {string} id @param {(l: Lease) => Lease} f @returns {State} */
 const mapLease = (s, id, f) => ({ ...s, leases: s.leases.map((l) => (l.job.id === id ? f(l) : l)) });
 
-/** @param {State} s @param {Lease} l @param {UnackedKind} kind @param {number | null} code @returns {State} */
-function addUnacked(s, l, kind, code) {
+/** @param {State} s @param {Lease} l @param {UnackedKind} kind @param {number | null} code @param {string[]} [hint] @returns {State} */
+function addUnacked(s, l, kind, code, hint = []) {
   const list = s.unacked[l.job.session] ?? [];
-  return { ...s, unacked: { ...s.unacked, [l.job.session]: [...list, { jobId: l.job.id, kind, code, cmd: l.job.cmd, repo: l.job.repo, profile: l.job.profile }] } };
+  const entry = { jobId: l.job.id, kind, code, cmd: l.job.cmd, repo: l.job.repo, profile: l.job.profile, ...(hint.length > 0 ? { hint } : {}) };
+  return { ...s, unacked: { ...s.unacked, [l.job.session]: [...list, entry] } };
 }
 
 /** 後の成功で片付く終わり方。orphan は子がまだ走っているので片付けない */
@@ -96,9 +97,9 @@ export function decide(input, e, opts = {}) {
         break;
       }
       s = removeLease(s, e.jobId);
-      extra.push({ type: 'history', repo: l.job.repo, profile: l.job.profile, class: l.job.class, cpus: l.cpus, durationMs: e.durationMs, code: e.code, cpuMs: e.cpuMs ?? null, peakMemMb: e.peakMemMb ?? null });
+      extra.push({ type: 'history', repo: l.job.repo, profile: l.job.profile, class: l.job.class, cpus: l.cpus, durationMs: e.durationMs, code: e.code, cpuMs: e.cpuMs ?? null, peakMemMb: e.peakMemMb ?? null, ...(e.environmental !== undefined && e.environmental.length > 0 ? { environmental: e.environmental } : {}) });
       if (e.killedByCaller) s = addUnacked(s, l, 'killed', e.code);
-      else if (e.code !== 0) s = addUnacked(s, l, 'failed', e.code);
+      else if (e.code !== 0) s = addUnacked(s, l, 'failed', e.code, e.environmental ?? []);
       else s = resolveBySuccess(s, l.job.session, l.job.repo, l.job.profile, l.job.cmd);
       s = afterMeasure(s, l);
       break;
