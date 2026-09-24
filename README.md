@@ -25,7 +25,10 @@ it queues).
 
 **Check before you install.** `switchyard replay` reads your past Claude Code sessions (`~/.claude/projects`) and
 shows how many of your past commands it would have treated as heavy runs and put in the queue, and which ones it would
-have refused. It needs nothing installed and writes nothing:
+have refused. It also counts re-runs with nothing changed: the same heavy command run again in the same place with no
+file edited in between, and how long those runs took. That is the work a cache of results could have saved. And it shows
+how long heavy runs take and how often runs from different sessions actually ran at the same time, which is what
+switchyard can sort out. It needs nothing installed and writes nothing:
 
 ```
 git clone https://github.com/takuyaabe11/switchyard && cd switchyard
@@ -396,7 +399,9 @@ switchyard が効くのは、重い走行が重なりそうなときだけ。振
 足される)。
 
 **入れる前に確かめる。** `switchyard replay` は過去の Claude Code のセッション(`~/.claude/projects`)を読み、自分の
-コマンドのうち何本を重い走行として順番待ちに乗せ、どれを拒否していたかを出す。入れなくても動き、何も書かない:
+コマンドのうち何本を重い走行として順番待ちに乗せ、どれを拒否していたかを出す。変更なしの走り直し(間にファイルを書き換えずに、
+同じ場所で同じ重いコマンドをもう一度)の本数と所要も数える。結果を使い回せていれば省けた仕事の量になる。重い走行 1 本の所要と、
+別のセッションの走行が実際にどれだけ同時に走っていたか(switchyard が並べ替えられる量)も出す。入れなくても動き、何も書かない:
 
 ```
 git clone https://github.com/takuyaabe11/switchyard && cd switchyard

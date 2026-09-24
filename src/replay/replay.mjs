@@ -11,6 +11,8 @@ import { simpleCommands } from '../hooks/shell.mjs';
 import { decideShim } from '../shim/decide.mjs';
 import { maskSecrets } from '../redact.mjs';
 import { t } from '../i18n.mjs';
+import { duration } from '../cli/render.mjs';
+import { countSession, emptyReruns, intervalsOf, stepsOf, timingOf } from './reruns.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
 /** @typedef {{ id: string, command: string, runInBackground: boolean, cwd: string, timestamp: string }} BashCall */
@@ -26,7 +28,9 @@ import { t } from '../i18n.mjs';
  *   last: string | null,
  *   hook: { deny: number, ask: number, wrap: number, background: number, alreadyBackground: number, none: number },
  *   shim: { run: Record<string, number>, lock: number, pass: number },
- *   examples: { deny: Example[], wrap: Example[], background: Example[] }
+ *   examples: { deny: Example[], wrap: Example[], background: Example[] },
+ *   reruns: import('./reruns.mjs').Reruns,
+ *   timing: import('./reruns.mjs').Timing
  * }} Report
  */
 
@@ -137,7 +141,31 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
     hook: { deny: 0, ask: 0, wrap: 0, background: 0, alreadyBackground: 0, none: 0 },
     shim: { run: {}, lock: 0, pass: 0 },
     examples: { deny: [], wrap: [], background: [] },
+    reruns: emptyReruns(),
+    timing: timingOf([], 0),
   };
+  /** @type {import('./reruns.mjs').Interval[]} */
+  const intervals = [];
+  let backgroundRuns = 0;
+  /** @type {Map<string, boolean>} 重い走行かの判定(同じコマンドを何度も判定しない) */
+  const heavyCache = new Map();
+  /** @param {{ command: string, cwd: string }} call */
+  const isHeavy = (call) => {
+    if (cwdPrefix !== null && !call.cwd.startsWith(cwdPrefix)) return false;
+    const key = `${call.cwd}\u0000${call.command}`;
+    let v = heavyCache.get(key);
+    if (v === undefined) {
+      // git の鍵だけのジョブは走り直しの対象にしない(CPU を持たない)
+      const h = judgeCall({ id: '', command: call.command, runInBackground: false, cwd: call.cwd, timestamp: '' }, { profilesFor, git: false }).hook;
+      v = h === 'background' || h === 'wrap' || h === 'deny';
+      heavyCache.set(key, v);
+    }
+    return v;
+  };
+  /** @type {Map<string, { count: number, ms: number }>} */
+  const rerunByCommand = new Map();
+  /** @type {Set<string>} 走り直しの数え方で見た tool_use の id(再開したセッションが持ち越した行を 2 度数えない) */
+  const stepSeen = new Set();
   /** @type {{ deny: Example[], wrap: Example[], background: Example[] }} */
   const all = { deny: [], wrap: [], background: [] };
   // 再開したセッションは前の行を持ち越すことがあるので、同じ tool_use の id は 1 回だけ数える
@@ -146,7 +174,24 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
 
   for (const file of files) {
     const lines = createInterface({ input: createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
+    /** @type {import('./reruns.mjs').Step[]} */
+    const steps = [];
+    /** @type {Set<string>} この記録で落とした(前の記録で見た)tool_use の id */
+    const dropped = new Set();
     for await (const line of lines) {
+      for (const st of stepsOf(line)) {
+        if (st.kind === 'bash') {
+          if (since !== null && !(st.at >= since)) continue;
+          if (st.id !== '' && stepSeen.has(st.id)) {
+            dropped.add(st.id);
+            continue;
+          }
+          if (st.id !== '') stepSeen.add(st.id);
+        } else if (st.kind === 'result' && dropped.has(st.id)) {
+          continue;
+        }
+        steps.push(st);
+      }
       for (const c of bashCallsOf(line)) {
         if (c.id !== '') {
           if (seen.has(c.id)) continue;
@@ -194,7 +239,16 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
         }
       }
     }
+    countSession(steps, isHeavy, report.reruns, rerunByCommand);
+    const got = intervalsOf(steps, isHeavy, files.indexOf(file));
+    for (const iv of got.intervals) intervals.push(iv);
+    backgroundRuns += got.background;
   }
+  report.timing = timingOf(intervals, backgroundRuns);
+  report.reruns.top = [...rerunByCommand]
+    .map(([key, v]) => ({ command: key.slice(key.indexOf('\u0000') + 1), count: v.count, ms: v.ms }))
+    .sort((a, b) => b.count - a.count || b.ms - a.ms)
+    .slice(0, examples);
 
   const newest = (/** @type {Example[]} */ xs) => [...xs].sort((a, b) => (a.timestamp < b.timestamp ? 1 : a.timestamp > b.timestamp ? -1 : 0)).slice(0, examples);
   report.examples = { deny: newest(all.deny), wrap: newest(all.wrap), background: newest(all.background) };
@@ -259,6 +313,24 @@ export function formatReport(r, { cwdPrefix, sinceDays, examples }) {
     lines.push(t(`  包む: ${runTotal} 件${byProfile}`, `  wrapped: ${runTotal}${byProfile}`));
     lines.push(t(`  鍵だけ: ${r.shim.lock} 件`, `  locks only: ${r.shim.lock}`));
     lines.push(t(`  素通し: ${r.shim.pass} 件`, `  passed through: ${r.shim.pass}`));
+    const rr = r.reruns;
+    if (rr.runs > 0) {
+      const rp = (/** @type {number} */ n) => ((n / rr.runs) * 100).toFixed(1);
+      lines.push(t(`同じ状態での走り直し(重い走行 ${rr.runs} 件のうち。間にファイルを書き換えずに、同じ場所で同じコマンドをもう一度)`, `Re-runs with nothing changed (of ${rr.runs} heavy runs: the same command in the same place again, with no file edits in between)`));
+      lines.push(t(`  厳しめ: ${rr.strict.count} 件(${rp(rr.strict.count)}%)・前景の所要の合計 ${duration(rr.strict.ms)}`, `  strict: ${rr.strict.count} (${rp(rr.strict.count)}%), ${duration(rr.strict.ms)} in the foreground`));
+      lines.push(t(`  緩め(Bash での書き換えは見ない): ${rr.loose.count} 件(${rp(rr.loose.count)}%)・${duration(rr.loose.ms)}`, `  loose (ignoring edits made through Bash): ${rr.loose.count} (${rp(rr.loose.count)}%), ${duration(rr.loose.ms)}`));
+      lines.push(t(`  うち失敗の直後の走り直し: ${rr.afterFailure} 件`, `  of which right after a failure: ${rr.afterFailure}`));
+      for (const x of rr.top) lines.push(t(`    ${x.count} 回・${duration(x.ms)}  ${oneLine(maskSecrets(x.command))}`, `    ${x.count}x, ${duration(x.ms)}  ${oneLine(maskSecrets(x.command))}`));
+    }
+    const tm = r.timing;
+    if (tm.runs > 0) {
+      const tp = (/** @type {number} */ n) => ((n / tm.runs) * 100).toFixed(1);
+      const mp = (/** @type {number} */ n) => (tm.totalMs === 0 ? '0.0' : ((n / tm.totalMs) * 100).toFixed(1));
+      lines.push(t(`重い走行の時間(前景で結果を待った ${tm.runs} 本。背景の ${tm.background} 本は終わりが分からないので除く)`, `Heavy-run time (${tm.runs} runs whose result was waited for in the foreground; ${tm.background} background runs left out, their end is unknown)`));
+      lines.push(t(`  1 本の所要: 中央 ${duration(tm.medianMs)}・90% は ${duration(tm.p90Ms)} 以下・10 秒未満 ${tp(tm.under10s)}%・1 分未満 ${tp(tm.under60s)}%`, `  per run: median ${duration(tm.medianMs)}, 90% within ${duration(tm.p90Ms)}, under 10 s ${tp(tm.under10s)}%, under 1 min ${tp(tm.under60s)}%`));
+      lines.push(t(`  Claude が結果を待った時間の合計: ${duration(tm.totalMs)}`, `  total time Claude waited for results: ${duration(tm.totalMs)}`));
+      lines.push(t(`  セッションをまたいだ重なり: 他と重なった走行 ${tm.overlappedRuns} 本(${tp(tm.overlappedRuns)}%)・2 本以上が同時に走っていた時間 ${duration(tm.overlapMs)}(待った時間の合計の ${mp(tm.overlapMs)}%)・最大同時 ${tm.maxConcurrent} 本`, `  overlap across sessions: ${tm.overlappedRuns} runs overlapped another (${tp(tm.overlappedRuns)}%); 2 or more ran at once for ${duration(tm.overlapMs)} (${mp(tm.overlapMs)}% of the total wait); at most ${tm.maxConcurrent} at once`));
+    }
 
     for (const [label, xs] of /** @type {Array<[string, Example[]]>} */ ([
       [t('拒否', 'Refused'), r.examples.deny],
