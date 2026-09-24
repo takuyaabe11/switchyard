@@ -50,6 +50,10 @@ export function renderTop(snap, nowWall) {
       `CPU ${snap.used} / ${snap.capacity} in use  running ${snap.leases.length}  waiting ${snap.waiting.length}`,
     ),
   ];
+  if (snap.memory !== undefined && snap.memory !== null) {
+    const m = snap.memory;
+    lines.push(t(`メモリ 空き ${Math.round(m.availableMb)}MB(残す ${Math.round(m.floorMb)}MB)`, `Memory free ${Math.round(m.availableMb)}MB (keeps ${Math.round(m.floorMb)}MB)`));
+  }
   if (snap.leases.length === 0 && snap.waiting.length === 0) lines.push(t('走行も待ちも無い', 'nothing running or waiting'));
   if (snap.leases.length > 0) {
     lines.push(t('走行:', 'Running:'));
@@ -61,6 +65,7 @@ export function renderTop(snap, nowWall) {
         l.locks.length === 0 ? '' : t(`鍵: ${l.locks.join(', ')}`, `locks: ${l.locks.join(', ')}`),
         l.escapes.length === 0 ? '' : t(`抜ける子: ${l.escapes.join(', ')}`, `escaping children: ${l.escapes.join(', ')}`),
         sizedText(l),
+        l.overcommit === true ? t('実測の空きに詰め込んだ', 'packed into measured spare CPU') : '',
       ].filter((x) => x !== '');
       lines.push(`  ${l.id} [${label[l.class]}] ${phase} CPU ${l.cpus} ${duration(nowWall - l.sinceWall)}  ${l.cmd}${extras.length === 0 ? '' : `  (${extras.join(' / ')})`}`);
     }

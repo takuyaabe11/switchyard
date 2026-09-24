@@ -7,7 +7,9 @@ import { checkInvariants } from './invariants.mjs';
 /** @typedef {import('../src/core/types.mjs').JobSpec} JobSpec */
 /** @typedef {import('../src/core/types.mjs').Event} Event */
 /** @typedef {{ id: string, arriveAt: number, runMs: number, code: number, spec: Partial<JobSpec> }} PlannedJob */
-/** @typedef {{ capacity: number, lockCaps: Record<string, number>, jobs: PlannedJob[] }} Scenario */
+/** spare は、どの出来事でもデーモンが渡す実測の空き(詰め込み)。省けば渡さない */
+/** memory は、どの出来事でも渡す空きメモリの見積もりと下限。省けば渡さない */
+/** @typedef {{ capacity: number, lockCaps: Record<string, number>, jobs: PlannedJob[], spare?: number | null, memory?: import('../src/core/schedule.mjs').MemoryView | null }} Scenario */
 
 /**
  * @param {Scenario} sc
@@ -31,7 +33,7 @@ export function simulate(sc) {
     const queue = [first];
     while (queue.length > 0) {
       const e = /** @type {Event} */ (queue.shift());
-      const r = decide(s, e);
+      const r = decide(s, e, { spare: sc.spare ?? null, memory: sc.memory ?? null });
       s = r.state;
       checkInvariants(s);
       for (const a of r.actions) {

@@ -9,7 +9,7 @@
 /** 見込みに使う直近の回数 */
 export const USAGE_WINDOW = 10;
 /** 縮めるのに必要な最少の回数 */
-export const USAGE_MIN_SAMPLES = 3;
+export const USAGE_MIN_SAMPLES = 2;
 /** 測り方が粗い短い走行は数えない(ms) */
 export const USAGE_MIN_DURATION_MS = 2_000;
 /**
@@ -54,6 +54,16 @@ export class UsageBook {
    */
   cores(repo, profile) {
     return this.#coresOf(this.#byKey.get(usageKey(repo, profile)) ?? []);
+  }
+
+  /**
+   * いつもの使用コア数(縮めるかどうかに関わらず、直近の中央値)。回数が足りなければ null。
+   * デーモンが、走行中のジョブがこれから使いそうなコア数を見込むのに使う(実測の空きへの詰め込み)。
+   * @param {string} repo @param {string} profile @returns {number | null}
+   */
+  typical(repo, profile) {
+    const list = this.#byKey.get(usageKey(repo, profile)) ?? [];
+    return list.length < USAGE_MIN_SAMPLES ? null : median(list.map((x) => x.cores));
   }
 
   /** 縮めてよい全ての repo × profile と、その使用コア数(盤面に載せ、PreToolUse が待ちの見込みに使う) @returns {Record<string, number>} */

@@ -2,8 +2,8 @@
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "switchyard",
   "displayName": "switchyard",
-  "version": "0.8.0",
-  "description": "Keeps Claude Code sessions on one machine from fighting over heavy runs, by handing out CPU shares and exclusive locks.",
+  "version": "0.9.0",
+  "description": "For running several Claude Code sessions or agents on one machine: queues heavy test and build runs so they take turns instead of colliding (CPU shares, memory, exclusive locks, clean benchmarks).",
   "author": {
     "name": "twoyearsold",
     "url": "https://github.com/takuyaabe11"
@@ -11,5 +11,5 @@
   "homepage": "https://github.com/takuyaabe11/switchyard#readme",
   "repository": "https://github.com/takuyaabe11/switchyard",
   "license": "MIT",
-  "keywords": ["resources", "scheduler", "hooks", "sessions"]
+  "keywords": ["parallel-sessions", "worktrees", "tests", "builds", "benchmarks", "scheduler", "resources", "hooks"]
 }

@@ -3,6 +3,31 @@
 All notable changes to switchyard. Versions follow `plugin.json`; Claude Code only offers an update when that
 version goes up.
 
+## 0.9.0
+
+### Added
+- Packing into measured spare CPU. The daemon samples machine-wide CPU use once a second. When the queue head does not
+  fit in the declared free CPU but fits in capacity minus what the machine really uses (and minus what the running
+  jobs usually use, once learned), it is admitted beyond capacity, one run at a time, after the running jobs have had
+  1 s (learned) or 3 s (not yet learned) to start. Never while a measurement runs or waits, never past a held lock.
+  `top` marks packed runs and `report` counts them. `SWITCHYARD_OVERCOMMIT=0` turns it off.
+- Memory-aware admission. The daemon samples each running job's process-group RSS every 2 s and records its peak.
+  A run whose usual peak (the largest of its last three) would push free memory, minus what running jobs are still
+  expected to take, below a floor (10% of total or the cgroup limit; `SWITCHYARD_MEM_FLOOR_MB`) waits. With nothing
+  running it always starts. `top` shows free memory; `report` counts "memory" waits. `SWITCHYARD_MEMORY=0` turns it off.
+
+### Changed
+- `PreToolUse` goes through a `sh`/`awk` sieve first. Commands that name no default-table tool, no wrapper, no
+  index-writing `git` subcommand, in a directory with no `switchyard.json` above it, return in about 4 ms instead of
+  about 60 ms, without starting Node.
+- Two runs (was three) are enough to size a profile down to its measured CPU use.
+- `PreToolUse` expects no wait for a single heavy run that fits in the measured spare CPU.
+
+### Docs
+- The README (English and Japanese) now opens with who switchyard is for and who can skip it, how to check with
+  `switchyard replay` before installing, what changes once it is installed, and what it does not do. The plugin
+  description and keywords say the same. `docs/marketplace-submission.md` holds the directory submission text.
+
 ## 0.8.0
 
 ### Security

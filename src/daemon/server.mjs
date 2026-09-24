@@ -2,17 +2,19 @@
 // デーモンの殻。socket・時計・ファイルを持ち、判断は decide に任せる(設計 §4.2)。
 import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { connect as netConnect, createServer } from 'node:net';
+import { cpus as osCpus, freemem, totalmem } from 'node:os';
 import { decide, initialState } from '../core/decide.mjs';
 import { rebaseForRecovery } from '../core/recovery.mjs';
 import { usedCpus } from '../core/schedule.mjs';
 import { sortWaiting } from '../core/score.mjs';
 import { numOrNull, parseEscape, parseJobRequest } from '../protocol/messages.mjs';
 import { createDecoder, encode } from '../protocol/ndjson.mjs';
-import { groupHasLiveMembers } from '../run/group.mjs';
+import { groupHasLiveMembers, rssByGroup } from '../run/group.mjs';
+import { effectiveAvailableMb } from '../core/memory.mjs';
 import { VERSION } from '../version.mjs';
 import { ensurePrivateDir, pathsOf, SOCKET_PATH_LIMIT, tightenFiles } from './paths.mjs';
 import { rightSize } from '../core/usage.mjs';
-import { appendRecord, createStateWriter, loadEscapes, loadEstimates, loadUsage, parseState, readJournal, readJson, rotateRecords, takeUnmanaged } from './store.mjs';
+import { appendRecord, createStateWriter, loadEscapes, loadEstimates, loadMemory, loadUsage, parseState, readJournal, readJson, rotateRecords, takeUnmanaged } from './store.mjs';
 import { t } from '../i18n.mjs';
 
 /** @typedef {import('../core/types.mjs').State} State */
@@ -31,6 +33,14 @@ import { t } from '../i18n.mjs';
  *   recoveryGraceMs?: number,
  *   idleExitMs?: number | null,
  *   adaptive?: boolean,
+ *   overcommit?: boolean,
+ *   sampleMs?: number,
+ *   readBusyMs?: () => number,
+ *   memory?: boolean,
+ *   memFloorMb?: number,
+ *   memSampleMs?: number,
+ *   readAvailableMb?: () => number,
+ *   readRss?: () => Promise<Map<number, number>>,
  *   onIdleExit?: () => void,
  *   isAlive?: (pgid: number) => boolean,
  *   monoNow?: () => number,
@@ -53,6 +63,52 @@ export function isGroupAlive(pgid) {
 }
 
 const defaultMono = () => Number(process.hrtime.bigint() / 1_000_000n);
+
+/** 機械全体で CPU が働いた時間の累計(全コアの合計・ms)。idle 以外の時間 */
+export function busyMsOfMachine() {
+  let busy = 0;
+  for (const c of osCpus()) busy += c.times.user + c.times.nice + c.times.sys + c.times.irq;
+  return busy;
+}
+
+/** 機械(コンテナなら cgroup の上限の中)で使えるメモリ(MB) */
+export function availableMbOfMachine() {
+  const avail = typeof process.availableMemory === 'function' ? process.availableMemory() : freemem();
+  return avail / 1_048_576;
+}
+
+/** 全体のメモリ(MB)。コンテナの上限があればそちら */
+export function totalMbOfMachine() {
+  const limit = typeof process.constrainedMemory === 'function' ? process.constrainedMemory() : 0;
+  return (limit > 0 && limit < totalmem() ? limit : totalmem()) / 1_048_576;
+}
+
+/** 残しておくメモリの既定(全体の 10%) */
+export const MEM_FLOOR_RATIO = 0.1;
+
+/** 実測の空きを測る窓の長さ(ms) */
+export const SPARE_WINDOW_MS = 1_500;
+/** 入場した走行が立ち上がるまで待つ時間(ms)。使い方を学んだ profile の走行 */
+export const RAMP_KNOWN_MS = 1_000;
+/** 使い方をまだ学んでいない profile の走行(テストランナーの起動・コンパイルの間は CPU を使わないことがある) */
+export const RAMP_UNKNOWN_MS = 3_000;
+
+/**
+ * 実測の空き(schedule の詰め込みに渡す)。容量から、機械全体で実際に使われているコア数と、走行中のジョブが
+ * 学んだ使い方で見込まれるコア数の大きい方を引く。どの走行も立ち上がった後の窓で測れていなければ null。
+ * @param {{ capacity: number, samples: Array<{ at: number, busy: number }>, leases: Array<{ grantedAt: number, typical: number | null }> }} input
+ * @returns {number | null}
+ */
+export function spareOf({ capacity, samples, leases }) {
+  const settled = leases.reduce((at, l) => Math.max(at, l.grantedAt + (l.typical === null ? RAMP_UNKNOWN_MS : RAMP_KNOWN_MS)), -Infinity);
+  const last = samples[samples.length - 1];
+  if (last === undefined) return null;
+  const first = samples.find((x) => x.at >= settled && last.at - x.at >= SPARE_WINDOW_MS);
+  if (first === undefined) return null;
+  const busyCores = Math.max(0, last.busy - first.busy) / (last.at - first.at);
+  const predicted = leases.reduce((n, l) => n + (l.typical ?? 0), 0);
+  return capacity - Math.max(busyCores, predicted);
+}
 
 /** 残っている socket ファイルに誰かが応答すれば投げ、応答しなければ消す @param {string} sock */
 async function removeStaleSocket(sock) {
@@ -83,6 +139,16 @@ export async function startDaemon(opts) {
     recoveryGraceMs = 60_000,
     idleExitMs = 120_000,
     adaptive = true,
+    // 既定は無効(startDaemon を直に使うテストで、機械の実際の空きで入場が変わらないように)。switchyardd は既定で有効にして渡す
+    overcommit = false,
+    sampleMs = 1_000,
+    readBusyMs = busyMsOfMachine,
+    // メモリを見た受け入れ。既定は無効(startDaemon を直に使うテストで、機械の実際の空きで入場が変わらないように)
+    memory = false,
+    memFloorMb = totalMbOfMachine() * MEM_FLOOR_RATIO,
+    memSampleMs = 2_000,
+    readAvailableMb = availableMbOfMachine,
+    readRss = rssByGroup,
     onIdleExit = null,
     isAlive = isGroupAlive,
     monoNow = defaultMono,
@@ -106,6 +172,7 @@ export async function startDaemon(opts) {
   rotateJournals();
   const estimates = loadEstimates(journal.records);
   const usage = loadUsage(journal.records);
+  const memBook = loadMemory(journal.records);
   const escapes = loadEscapes(journal.records);
   /** @param {string} repo @param {string} profile @returns {string[]} */
   const escapesOf = (repo, profile) => [...(escapes.get(JSON.stringify([repo, profile])) ?? [])].sort();
@@ -138,7 +205,8 @@ export async function startDaemon(opts) {
     if (a.type === 'history') {
       estimates.record(a.repo, a.profile, a.durationMs, a.code);
       usage.record(a.repo, a.profile, { durationMs: a.durationMs, cpuMs: a.cpuMs ?? null, cpus: a.cpus, code: a.code });
-      appendRecord(p.events, { at: wallNow(), kind: 'history', repo: a.repo, profile: a.profile, class: a.class, cpus: a.cpus, durationMs: a.durationMs, code: a.code, cpuMs: a.cpuMs ?? null });
+      memBook.record(a.repo, a.profile, a.peakMemMb);
+      appendRecord(p.events, { at: wallNow(), kind: 'history', repo: a.repo, profile: a.profile, class: a.class, cpus: a.cpus, durationMs: a.durationMs, code: a.code, cpuMs: a.cpuMs ?? null, peakMemMb: a.peakMemMb ?? null });
       return;
     }
     // 決定(入場と、待たせた順番・理由)も記録に残す。包みが繋がっていなくても残すので、
@@ -162,10 +230,32 @@ export async function startDaemon(opts) {
     } else send(conn, { t: 'queued', jobId: a.jobId, position: a.position, reason: a.reason, etaWall: a.etaAt === null ? null : wallNow() + (a.etaAt - monoNow()) });
   };
 
+  /** @type {Array<{ at: number, busy: number }>} 機械全体の CPU の使い方の標本(新しいものが後ろ) */
+  const samples = [];
+  /** 実測の空き。測れていなければ null(詰め込みを止めていれば標本を取らないので、いつも null) */
+  const spare = () =>
+    state.leases.length === 0
+      ? null
+      : spareOf({ capacity: state.capacity, samples, leases: state.leases.map((l) => ({ grantedAt: l.grantedAt, typical: usage.typical(l.job.repo, l.job.profile) })) });
+
+  /** @type {Map<string, { rssMb: number, peakMb: number }>} jobId → 今の RSS とピーク(MB)。メモリを見るときだけ測る */
+  const rss = new Map();
+  /** 空きメモリの見積もりと下限。メモリを見ないなら null @returns {import('../core/schedule.mjs').MemoryView | null} */
+  const memoryView = () =>
+    !memory
+      ? null
+      : {
+          availableMb: effectiveAvailableMb({
+            availableMb: readAvailableMb(),
+            leases: state.leases.map((l) => ({ memMb: l.job.memMb ?? null, rssMb: rss.get(l.job.id)?.rssMb ?? null })),
+          }),
+          floorMb: memFloorMb,
+        };
+
   /** @param {Event} e */
   const apply = (e) => {
     if (e.type !== 'tick') appendRecord(p.events, { at: wallNow(), kind: 'event', event: e });
-    const r = decide(state, e);
+    const r = decide(state, e, { spare: spare(), memory: memoryView() });
     state = r.state;
     writeState(state);
     for (const a of r.actions) dispatch(a);
@@ -198,6 +288,7 @@ export async function startDaemon(opts) {
         escapes: escapesOf(l.job.repo, l.job.profile),
         sizedFrom: l.job.sizedFrom ?? null,
         measuredCores: l.job.measuredCores ?? null,
+        overcommit: l.overcommit === true,
       })),
       waiting: sortWaiting(state.waiting, now).map((w) => {
         const n = state.notes[w.job.id];
@@ -216,6 +307,10 @@ export async function startDaemon(opts) {
       version: VERSION,
       // 実測で要求を縮める repo × profile と使用コア数。PreToolUse が「待たされるか」の見込みに使う
       sized: adaptive ? usage.sizedAll() : {},
+      // 空きメモリの見積もりと下限(メモリを見ないなら null)
+      memory: memoryView(),
+      // 実測の空き(詰め込みに使う)。測れていなければ null
+      spare: spare(),
     };
   };
 
@@ -268,7 +363,9 @@ export async function startDaemon(opts) {
           const id = newJobId();
           bind(id);
           send(conn, { t: 'accepted', jobId: id });
-          apply({ type: 'request', now: monoNow(), job: rightSize({ ...req, id, expectedMs: estimates.expected(req.repo, req.profile) }, adaptive ? usage.cores(req.repo, req.profile) : null) });
+          const memMb = memory ? memBook.expected(req.repo, req.profile) : null;
+          const job = rightSize({ ...req, id, expectedMs: estimates.expected(req.repo, req.profile), ...(memMb === null ? {} : { memMb }) }, adaptive ? usage.cores(req.repo, req.profile) : null);
+          apply({ type: 'request', now: monoNow(), job });
           return;
         }
         case 'resume': {
@@ -310,7 +407,9 @@ export async function startDaemon(opts) {
             for (const e of escape.escaped) names.add(e.comm);
             escapes.set(key, names);
           }
-          apply({ type: 'exit', now: monoNow(), jobId: id, code: numOrNull(m.code), killedByCaller: m.killedByCaller === true, durationMs: Number(m.durationMs), cpuMs: numOrNull(m.cpuMs) });
+          const peakMemMb = rss.get(id)?.peakMb ?? null;
+          rss.delete(id);
+          apply({ type: 'exit', now: monoNow(), jobId: id, code: numOrNull(m.code), killedByCaller: m.killedByCaller === true, durationMs: Number(m.durationMs), cpuMs: numOrNull(m.cpuMs), peakMemMb: peakMemMb === null ? null : Math.round(peakMemMb) });
           send(conn, { t: 'ok' });
           return;
         }
@@ -415,6 +514,43 @@ export async function startDaemon(opts) {
     apply({ type: 'tick', now });
   }, tickMs);
 
+  // 機械全体の CPU の使い方を測り続け、待っているジョブがあって実測の空きがあれば、tick を待たずに割り振りを見直す(詰め込み)
+  const sampler = overcommit
+    ? setInterval(() => {
+        const now = monoNow();
+        samples.push({ at: now, busy: readBusyMs() });
+        while (samples.length > 0 && now - samples[0].at > SPARE_WINDOW_MS * 4) samples.shift();
+        const sp = state.waiting.length > 0 ? spare() : null;
+        if (sp !== null && sp >= 1) apply({ type: 'tick', now });
+      }, sampleMs)
+    : null;
+
+  // 走行中のジョブのプロセスグループの RSS を測り、ピークを覚える(終わったときに記録へ残し、次の見込みにする)。
+  // 待っているジョブがあれば、測った後に割り振りを見直す(空きメモリが戻ったら tick を待たずに入れる)
+  let memBusy = false;
+  const memSampler = memory
+    ? setInterval(() => {
+        const running = state.leases.filter((l) => l.pgid !== null);
+        if (memBusy || (running.length === 0 && state.waiting.length === 0)) return;
+        memBusy = true;
+        readRss()
+          .then((byGroup) => {
+            for (const l of state.leases) {
+              if (l.pgid === null) continue;
+              const now = byGroup.get(l.pgid) ?? 0;
+              const prev = rss.get(l.job.id);
+              rss.set(l.job.id, { rssMb: now, peakMb: Math.max(prev?.peakMb ?? 0, now) });
+            }
+            for (const id of [...rss.keys()]) if (!state.leases.some((l) => l.job.id === id)) rss.delete(id);
+            if (!closing && state.waiting.length > 0) apply({ type: 'tick', now: monoNow() });
+          })
+          .catch(() => {})
+          .finally(() => {
+            memBusy = false;
+          });
+      }, memSampleMs)
+    : null;
+
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(p.sock, () => {
@@ -430,6 +566,8 @@ export async function startDaemon(opts) {
       new Promise((resolve) => {
         closing = true;
         clearInterval(timer);
+        if (sampler !== null) clearInterval(sampler);
+        if (memSampler !== null) clearInterval(memSampler);
         for (const c of conns) c.destroy();
         server.close(() => resolve(undefined));
       }),

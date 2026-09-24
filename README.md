@@ -1,31 +1,78 @@
 # switchyard
 
-**A traffic controller for heavy runs across Claude Code sessions on one machine.**
+**Keeps heavy test and build runs from colliding when several Claude Code sessions share one machine.**
 
-When several Claude Code sessions share a laptop, they all want to run `npm test`,
-`cargo build`, `playwright test` at the same time. The machine thrashes, benchmarks
-become meaningless, and two sessions rewrite the same git index. switchyard hands out
-CPU shares and exclusive locks (ports, the git index, anything you name) so those runs
-queue instead of collide. A switchyard is where trains are sorted onto the right track,
-one at a time — that is what this does for heavy runs.
+Run two or three Claude Code sessions on one laptop — one per worktree, or parallel agents — and sooner or later they
+all start `npm test`, `cargo build` or `./gradlew test` at once. Every run slows down, a benchmark taken in the middle
+means nothing, memory runs out, and two sessions trip over the same git index. switchyard puts those runs in a queue:
+it hands out CPU shares, watches memory, and gives out exclusive locks (a port, the git index, any name you pick), so
+heavy runs take turns instead of colliding. You keep typing commands the way you do now.
 
-You do not change how you type commands. A `PATH` shim in front of `npm`, `npx`, `node`,
-`yarn`, `pnpm`, `bun`, `cargo`, `pytest`, `python`, `python3`, `uv`, `poetry`, `go`, `mvn`, `gradle`, `dotnet`,
-`bundle`, `rspec`, `deno`, `make` and `git` classifies each command and routes it through switchyard automatically.
+## Is it for you?
 
-## When it helps
+**Worth installing if** you often have more than one Claude Code session (or agent) working on the same machine *and*
+they run heavy things:
 
-Measured on a 4-core machine ([details](docs/verification/2026-09-24-effect.md)):
+- test suites that spread over several cores (Vitest, Jest, pytest-xdist, cargo test, Gradle, Maven, Go),
+  builds (`cargo build`, `npx tsc`, `make`), or browser E2E runs that also need a fixed port;
+- benchmarks or performance measurements whose numbers you actually compare;
+- a machine with limited cores or memory, where two heavy runs at once already make things crawl.
 
-- **Benchmarks stay meaningful.** Beside four CPU-bound runs, a fixed benchmark ran 20–50% slower and varied widely.
-  As a `measure` job it waited for those runs to finish (about 4 s) and then matched its alone-time.
-- **The first result comes back sooner.** Three CPU-bound test suites started together all finished at about 11.9 s.
-  Through switchyard they finished at 4.3 s, 8.4 s and 12.4 s: about 30% sooner on average, about 4% longer overall.
-- **Runs that mostly wait are sized down, not held back.** switchyard measures how much CPU each run really uses. A
-  profile whose runs keep using less than half of what they were given is admitted with a smaller share from then on
-  (never a larger one). Three copies of a suite that averages 0.78 cores took 25 s through switchyard when it took
-  their declared 2 cores at face value, and 18 s once it had learned (16 s side by side without switchyard). A run
-  that uses all it is given is never sized down. `SWITCHYARD_ADAPTIVE=0` keeps the declared shares.
+**Probably not worth it if** you run one session at a time, or your tests take a few seconds and rarely overlap.
+switchyard only helps when heavy runs would otherwise overlap; with nothing to sort, it just stays out of the way
+(about 4 ms added to most Bash calls, about 60 ms to calls that name a build or test tool, about 0.15 s to each run
+it queues).
+
+**Check before you install.** `switchyard replay` reads your past Claude Code sessions (`~/.claude/projects`) and
+shows how many of your past commands it would have treated as heavy runs and put in the queue, and which ones it would
+have refused. It needs nothing installed and writes nothing:
+
+```
+git clone https://github.com/takuyaabe11/switchyard && cd switchyard
+node bin/switchyard.mjs replay --since 14d
+```
+
+## What changes once it is installed
+
+- **Nothing in how you or Claude type commands.** A `PATH` shim in front of `npm`, `npx`, `node`, `yarn`, `pnpm`, `bun`,
+  `cargo`, `pytest`, `python`, `python3`, `uv`, `poetry`, `go`, `mvn`, `gradle`, `dotnet`, `bundle`, `rspec`, `deno`,
+  `make` and `git` recognizes test and build runs and queues them. Everything else passes straight through.
+- **Heavy runs take turns.** When a run has to wait, Claude runs it in the background and is told when it finishes,
+  so the session is not stuck. `switchyard top` shows what runs, what waits and why.
+- **A failed run is not forgotten.** If a queued run fails and nobody looks at it, the session is asked to look before
+  it stops. Running the same command successfully later, or `switchyard ack <job>`, clears it.
+- **A few forms are refused, with a fix.** Commands a shim cannot see (`./gradlew test`, `.venv/bin/pytest`, a tool
+  called by its full path) would skip the queue, so they are refused with the exact `switchyard run -- …` to use
+  instead. Claude follows it on its own.
+- **It learns.** After two runs of the same command it knows how much CPU and memory that run really needs and sizes
+  its share to that.
+
+## What it does, measured
+
+On a 4-core, 16 GB machine ([0.6–0.8](docs/verification/2026-09-24-effect.md), [0.9](docs/verification/2026-09-24-throughput.md)):
+
+- **Results come back sooner.** Three CPU-heavy suites started together all finished at about 12 s. Through
+  switchyard they finished at about 4.5, 8.5 and 12 s: the average result arrived about 30% sooner, and the last one
+  at about the same time.
+- **Benchmarks stay meaningful.** Beside four CPU-heavy runs a fixed benchmark ran 20–50% slower and varied widely.
+  Run as a `measure` job, it waited about 4 s for them to finish and then matched its alone-time.
+- **Light runs are not held back for long.** A suite that mostly waits on I/O is sized down to what it uses, and idle
+  cores are filled from the queue. Three such suites together took 20.4 s on average once learned (19.4 s without
+  switchyard); before anything was learned, 24.4 s.
+- **Heavy runs are not stacked into swap.** A run whose usual peak memory would push free memory below 10% waits until
+  something ends. With nothing running, a run always starts.
+
+## What it does not do
+
+- It does not make the machine faster or use less CPU in total. It decides the order, so runs stop fighting.
+- It does not help a single session running one thing at a time.
+- The first one or two runs of a new command are handled conservatively: in the test above, 24.4 s instead of 19.4 s
+  before switchyard had learned the suite.
+- It only queues commands it recognizes. For others (`bazel test`, `npm run e2e`, a custom script), add them to a
+  `switchyard.json`; `switchyard init` suggests entries from your own history.
+- The numbers above come from controlled runs on one machine, not from people's everyday use yet.
+  `switchyard report` shows what it did on yours: how many runs it held back, how long they waited, what it packed in.
+- macOS and Linux only (Windows through WSL).
 
 ## Install
 
@@ -47,7 +94,7 @@ Once installed, every new Claude Code session gets three hooks:
 | Hook | What it does |
 |---|---|
 | `SessionStart` | Puts `shims/` at the front of `PATH` for the session |
-| `PreToolUse` (Bash) | Sends a CPU-holding run to the background when it would have to wait (a queue, a measurement, a held lock, not enough free CPU); rejects bypasses that call the real binary by path. `SWITCHYARD_BACKGROUND=always` sends every heavy run to the background, `never` sends none |
+| `PreToolUse` (Bash) | Sends a CPU-holding run to the background when it would have to wait (a queue, a measurement, a held lock, not enough free CPU); rejects bypasses that call the real binary by path. `SWITCHYARD_BACKGROUND=always` sends every heavy run to the background, `never` sends none. A small `sh`/`awk` sieve answers commands that name no heavy tool (`ls`, `git status`, `node -e`) in about 4 ms without starting Node |
 | `Stop` | Holds the session back if one of its jobs ended in a way nobody has looked at |
 
 ## Commands
@@ -222,30 +269,73 @@ MIT. See [LICENSE](LICENSE).
 
 # switchyard(日本語)
 
-**同じマシンで動く Claude Code のセッションが、重い走行を取り合わないようにする司令塔。**
+**同じマシンで複数の Claude Code のセッションが動くとき、重いテストやビルドがぶつからないようにする。**
 
-1 台のノート PC で複数のセッションが動いていると、それぞれが同時に `npm test` や
-`cargo build`、`playwright test` を始める。マシンは詰まり、ベンチの数字は意味を失い、
-2 つのセッションが同じ git の index を書き換える。switchyard は CPU の取り分と排他の鍵
-(ポート・git の index・任意の名前)を割り振り、それらの走行をぶつけずに順番へ流す。
-switchyard は操車場のこと。重い走行を 1 本ずつ、正しい線路へ振り分ける。
+1 台のノート PC で Claude Code のセッションを 2〜3 本動かしていると(worktree ごとに 1 本、あるいは並列のエージェント)、
+いつかは全部が同時に `npm test` や `cargo build`、`./gradlew test` を始める。どの走行も遅くなり、その最中に取ったベンチの
+数字は意味を失い、メモリが尽き、2 つのセッションが同じ git の index で衝突する。switchyard はそれらの走行を順番待ちに
+乗せる。CPU の取り分を割り振り、メモリを見て、排他の鍵(ポート・git の index・好きな名前)を渡すので、重い走行は
+ぶつからずに順番に走る。コマンドの打ち方は今のまま。
 
-コマンドの打ち方は変えない。`npm` / `npx` / `node` / `yarn` / `pnpm` / `bun` / `cargo` / `pytest` / `python` / `python3` /
-`uv` / `poetry` / `go` / `mvn` / `gradle` / `dotnet` / `bundle` / `rspec` / `deno` / `make` / `git` の前に入る `PATH` の shim が、
-打たれたコマンドを分類して自動で switchyard に通す。
+## 向いている人・向いていない人
 
-## 効く場面
+**入れる価値があるのは**、同じマシンで Claude Code のセッション(やエージェント)を 2 本以上動かすことが多く、*かつ*
+重いものを走らせる人:
 
-4 コアの機械での実測([詳細](docs/verification/2026-09-24-effect.md)):
+- 複数のコアを使うテスト(Vitest・Jest・pytest-xdist・cargo test・Gradle・Maven・Go)、ビルド(`cargo build`・`npx tsc`・`make`)、
+  決まったポートも要るブラウザの E2E
+- 数字を比べるベンチマークや性能の計測
+- コア数やメモリが少なく、重い走行が 2 本重なるだけで遅くなる機械
 
-- **計測の数字が意味を保つ。** CPU を使う走行 4 本の横では、固定量のベンチが 20〜50% 遅くなり、ばらつきも大きかった。
+**たぶん要らないのは**、セッションを 1 本ずつしか動かさない人や、テストが数秒で終わってめったに重ならない人。
+switchyard が効くのは、重い走行が重なりそうなときだけ。振り分けるものが無ければ邪魔をしないだけ
+(たいていの Bash の呼び出しに約 4ms、ビルドやテストの道具の名前を含む呼び出しに約 60ms、順番待ちに乗せた走行 1 本に約 0.15 秒
+足される)。
+
+**入れる前に確かめる。** `switchyard replay` は過去の Claude Code のセッション(`~/.claude/projects`)を読み、自分の
+コマンドのうち何本を重い走行として順番待ちに乗せ、どれを拒否していたかを出す。入れなくても動き、何も書かない:
+
+```
+git clone https://github.com/takuyaabe11/switchyard && cd switchyard
+node bin/switchyard.mjs replay --since 14d
+```
+
+## 入れると何が変わるか
+
+- **自分も Claude も、コマンドの打ち方は変わらない。** `npm` / `npx` / `node` / `yarn` / `pnpm` / `bun` / `cargo` / `pytest` /
+  `python` / `python3` / `uv` / `poetry` / `go` / `mvn` / `gradle` / `dotnet` / `bundle` / `rspec` / `deno` / `make` / `git` の前に入る
+  `PATH` の shim が、テストやビルドの走行を見分けて順番待ちに乗せる。それ以外はそのまま通る。
+- **重い走行は順番に走る。** 待つことになる走行は、Claude が背景で走らせ、終わったら知らせを受けるので、セッションは
+  止まらない。`switchyard top` で、何が走り、何が待ち、なぜかが見える。
+- **失敗した走行を見落とさない。** 順番待ちに乗った走行が失敗して誰も見ていなければ、セッションは止まる前にそれを見るよう
+  求められる。後で同じコマンドが成功するか、`switchyard ack <job>` で消える。
+- **いくつかの形は拒否し、直し方を示す。** shim から見えない形(`./gradlew test`・`.venv/bin/pytest`・フルパスで呼ぶ道具)は
+  順番待ちを素通りするので拒否し、代わりに使う `switchyard run -- …` をそのまま示す。Claude は自分でそれに従う。
+- **学ぶ。** 同じコマンドを 2 回走らせると、その走行が実際に使う CPU とメモリが分かり、取り分をそれに合わせる。
+
+## 実測で何をするか
+
+4 コア・16GB の機械で([0.6〜0.8](docs/verification/2026-09-24-effect.md)・[0.9](docs/verification/2026-09-24-throughput.md)):
+
+- **結果が早く返る。** CPU を使うテストの全件を 3 本同時に始めると、3 本とも約 12 秒で終わった。switchyard を通すと約 4.5 秒・
+  8.5 秒・12 秒で終わり、結果が返るまでの平均は約 30% 早く、最後の 1 本はほぼ同じ時刻だった。
+- **ベンチの数字が意味を保つ。** CPU を使う走行 4 本の横では、固定量のベンチが 20〜50% 遅くなり、ばらつきも大きかった。
   `measure` として走らせると、4 本が終わるまで約 4 秒待ってから、単独と同じ数字で走った。
-- **最初の結果が早く返る。** CPU を使うテストの全件を 3 本同時に始めると、3 本とも約 11.9 秒で終わった。
-  switchyard を通すと 4.3 秒・8.4 秒・12.4 秒で終わり、平均は約 30% 早く、全体は約 4% 延びただけだった。
-- **待ちが中心の走行は、並ばせずに取り分を縮める。** switchyard は走行ごとに実際の CPU の使用量を測る。割り振られた量の
-  半分も使わない走行が続く profile は、次から小さい取り分で入場させる(大きくはしない)。平均 0.78 コアの全件を 3 本同時に
-  走らせると、宣言どおり 2 コアずつ取っていた間は 25 秒、学んだ後は 18 秒だった(switchyard なしで同時に走らせて 16 秒)。
-  割り振りを使い切る走行は縮めない。`SWITCHYARD_ADAPTIVE=0` で宣言どおりに並べる。
+- **軽い走行を長く待たせない。** 入出力の待ちが中心の全件は、実際に使う分まで取り分を縮め、空いているコアには待ち列から
+  詰めて入れる。そうした全件を 3 本同時に走らせると、学んだ後は平均 20.4 秒(switchyard なしで 19.4 秒)、学ぶ前は 24.4 秒だった。
+- **重い走行を重ねてスワップさせない。** いつものピークのメモリを足すと空きが全体の 10% を割る走行は、何かが終わるまで待つ。
+  何も走っていなければ必ず走る。
+
+## しないこと
+
+- 機械を速くしたり、CPU の総量を減らしたりはしない。順番を決めて、走行同士が取り合わないようにするだけ。
+- 1 本のセッションで 1 つずつ走らせる使い方には効かない。
+- 新しいコマンドの最初の 1〜2 回は控えめに扱う。上の実験では、学ぶ前は 19.4 秒のところが 24.4 秒だった。
+- 順番待ちに乗せるのは見分けられるコマンドだけ。それ以外(`bazel test`・`npm run e2e`・自作のスクリプト)は `switchyard.json`
+  に書く。`switchyard init` が自分の履歴から候補を出す。
+- 上の数字は 1 台の機械で条件をそろえて測ったもので、まだ普段使いの利用者のデータではない。自分の機械で何をしたかは
+  `switchyard report` で見られる(待たせた本数・待ち時間・詰めて入れた本数など)。
+- macOS と Linux だけ(Windows は WSL で)。
 
 ## 導入
 
@@ -266,7 +356,7 @@ switchyard は操車場のこと。重い走行を 1 本ずつ、正しい線路
 | Hook | すること |
 |---|---|
 | `SessionStart` | そのセッションの `PATH` の先頭に `shims/` を足す |
-| `PreToolUse` (Bash) | CPU を持つ走行が待たされる見込み(待ち列・計測・使われている鍵・CPU の空き不足)のときだけ背景実行に回す。本物の実行ファイルをパスで直に呼ぶ抜け道を拒否する。`SWITCHYARD_BACKGROUND=always` で重い走行を必ず背景へ、`never` で回さない |
+| `PreToolUse` (Bash) | CPU を持つ走行が待たされる見込み(待ち列・計測・使われている鍵・CPU の空き不足)のときだけ背景実行に回す。本物の実行ファイルをパスで直に呼ぶ抜け道を拒否する。`SWITCHYARD_BACKGROUND=always` で重い走行を必ず背景へ、`never` で回さない。重い道具の名前を含まないコマンド(`ls`・`git status`・`node -e`)は、`sh`/`awk` のふるいが Node を起動せずに約 4ms で通す |
 | `Stop` | そのセッションのジョブに、まだ誰も確かめていない終わり方があれば止まるのを差し戻す |
 
 ## コマンド

@@ -1,4 +1,4 @@
-# 本物の Claude Code での通し(0.8.0)
+# 本物の Claude Code での通し(0.9.0)
 
 ## 実行日時・環境
 
@@ -24,14 +24,14 @@
     "Stop の差し戻しの後、Claude が switchyard ack した": true,
     "./gradlew test を拒否し、Claude が switchyard run で包んで走らせた": true
   },
-  "costUsd": [0.018268, 0.033728, 0.0202228],
-  "result1": "LIVE_JOB=jmuf6czbm0",
-  "result2": "Done. I ran `npm test` which failed as expected, and acknowledged the switchyard job failure to clear the blocking error.",
-  "result3": "GRADLE_JOB=jmuf6di7p2 test"
+  "costUsd": [0.0164497, 0.0347207, 0.0199571],
+  "result1": "Here's the output line that starts with `LIVE_JOB=`:\n\n```\nLIVE_JOB=jmuf8955m0\n```",
+  "result2": "Done. I've run `npm test` which failed with exit code 1 as expected, and acknowledged the job with switchyard since the failure was intentional.",
+  "result3": "GRADLE_JOB=jmuf89no22 test"
 }
 ```
 
-終了コード: 0。費用の合計 $0.072。
+終了コード: 0。費用の合計 $0.071。
 
 ## 読み方
 
@@ -40,6 +40,9 @@
 - 2: 失敗した走行で Stop が差し戻し、Claude は `switchyard ack` で確認済みにしてから止まった。
 - 3: `./gradlew test` は shim から見えないので PreToolUse が拒否し、Claude は案内どおり `switchyard run -- ./gradlew test` で
   走らせ直した。記録にその要求が残り、子にジョブの id が渡っている。
+
+0.9.0 から PreToolUse は `sh`/`awk` のふるいを通る。3 の拒否は、ふるいが `gradlew` の語を見て node の判定へ回した結果で、
+ふるいを通した入口が実物の Claude Code でも効いていることを確かめた。
 
 以前の記録(2026-09-15)は 0.1 系のもので、背景に回ったかを "running in background" という文字列の有無だけで見ていた。
 いまの台本は `task_started` と tool_result の中身で見る。

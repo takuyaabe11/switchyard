@@ -70,9 +70,10 @@ export function resolveBySuccess(s, session, repo, profile, cmd) {
 const afterMeasure = (s, l) => (l.job.class === 'measure' ? { ...s, favorNonMeasure: true } : s);
 
 /**
- * @param {State} input @param {Event} e @returns {{ state: State, actions: Action[] }}
+ * @param {State} input @param {Event} e @param {{ spare?: number | null, memory?: import('./schedule.mjs').MemoryView | null }} [opts] 実測の CPU とメモリの空き(schedule)
+ * @returns {{ state: State, actions: Action[] }}
  */
-export function decide(input, e) {
+export function decide(input, e, opts = {}) {
   let s = input;
   /** @type {Action[]} */
   const extra = [];
@@ -95,7 +96,7 @@ export function decide(input, e) {
         break;
       }
       s = removeLease(s, e.jobId);
-      extra.push({ type: 'history', repo: l.job.repo, profile: l.job.profile, class: l.job.class, cpus: l.cpus, durationMs: e.durationMs, code: e.code, cpuMs: e.cpuMs ?? null });
+      extra.push({ type: 'history', repo: l.job.repo, profile: l.job.profile, class: l.job.class, cpus: l.cpus, durationMs: e.durationMs, code: e.code, cpuMs: e.cpuMs ?? null, peakMemMb: e.peakMemMb ?? null });
       if (e.killedByCaller) s = addUnacked(s, l, 'killed', e.code);
       else if (e.code !== 0) s = addUnacked(s, l, 'failed', e.code);
       else s = resolveBySuccess(s, l.job.session, l.job.repo, l.job.profile, l.job.cmd);
@@ -167,6 +168,6 @@ export function decide(input, e) {
     case 'tick':
       break;
   }
-  const r = schedule(s, e.now);
+  const r = schedule(s, e.now, opts);
   return { state: r.state, actions: [...extra, ...r.actions] };
 }

@@ -84,6 +84,15 @@ describe('背景へ回す方針(SWITCHYARD_BACKGROUND)', () => {
     assert.equal(waitExpected(busy, [unit]), true, 'repo が分からなければ宣言どおり');
   });
 
+  it('waitExpected: 宣言の空きが足りなくても、重い部分が 1 つで実測の空き(spare)に収まれば待たない(詰め込まれる)', () => {
+    const busy = { ...empty, used: 4, leases: [leaseView({ cpus: 4 })] };
+    assert.equal(waitExpected(busy, [batch(2)]), true, '実測の空きが分からない');
+    assert.equal(waitExpected({ ...busy, spare: null }, [batch(2)]), true, '測れていない');
+    assert.equal(waitExpected({ ...busy, spare: 2.5 }, [batch(2)]), false, '収まる');
+    assert.equal(waitExpected({ ...busy, spare: 1.5 }, [batch(2)]), true, '収まらない');
+    assert.equal(waitExpected({ ...busy, spare: 3 }, [batch(1), batch(1)]), true, '詰め込みは 1 回に 1 本');
+  });
+
   it('auto(既定): デーモンが居ない・空いているなら前景のまま、容量が埋まっていれば背景へ回す。never は回さない', async () => {
     const home = mkdtempSync(join(tmpdir(), 'chook-'));
     /** @type {string[]} */

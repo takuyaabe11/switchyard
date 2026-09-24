@@ -1,6 +1,6 @@
 // @ts-check
 // 子を別のプロセスグループで起動し、そのグループにだけ信号を送る(設計 §4.3 / §7.1)。
-import { execFileSync, spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 
 /** @param {number} pid @returns {number | null} */
 export function readPgid(pid) {
@@ -169,4 +169,30 @@ export async function waitGroupGone(pgid, timeoutMs, stepMs = 20) {
     if (Date.now() >= until) return false;
     await new Promise((r) => setTimeout(r, stepMs));
   }
+}
+
+/**
+ * プロセスグループごとの RSS の合計(MB)。ゾンビは数えない。ps が使えなければ空。
+ * デーモンが走行中のジョブのピークを測るのに使う(待たずに返す execFile で、割り振りを止めない)。
+ * @returns {Promise<Map<number, number>>}
+ */
+export function rssByGroup() {
+  return new Promise((resolve) => {
+    execFile('ps', ['-A', '-o', 'pgid=,rss=,stat='], { encoding: 'utf8' }, (err, out) => {
+      /** @type {Map<number, number>} */
+      const map = new Map();
+      if (err) {
+        resolve(map);
+        return;
+      }
+      for (const line of out.split('\n')) {
+        const [g, rss, st] = line.trim().split(/\s+/);
+        const pgid = Number(g);
+        const kb = Number(rss);
+        if (!Number.isInteger(pgid) || pgid <= 0 || !Number.isFinite(kb) || st === undefined || st.startsWith('Z')) continue;
+        map.set(pgid, (map.get(pgid) ?? 0) + kb / 1024);
+      }
+      resolve(map);
+    });
+  });
 }
