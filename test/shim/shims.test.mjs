@@ -110,6 +110,13 @@ describe('shims(設計 §9.1)', () => {
     assert.deepEqual(String(subs?.[1]).split('|').map((w) => w.trim()).sort(), [...GIT_LOCK_SUBCOMMANDS].sort());
   });
 
+  it('SWITCHYARD_OFF=1 なら、重い走行もデーモンに繋がずにそのまま本物を走らせる', async () => {
+    const { home } = await daemon();
+    const r = await sh('npm test', { cwd: plainDir(), home, env: { SWITCHYARD_OFF: '1' } });
+    assert.equal(r.code, 0, r.stderr);
+    assert.match(r.stdout, /job=none/);
+  });
+
   it('既定(SWITCHYARD_GIT が 1 でない)では、git commit もデーモンに繋がずにそのまま本物を走らせる', async () => {
     const { home } = await daemon();
     const repo = plainDir();

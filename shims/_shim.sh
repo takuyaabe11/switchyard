@@ -23,6 +23,9 @@ if [ -z "$real" ]; then
   exit 127
 fi
 
+# switchyard を止めている(SWITCHYARD_OFF=1・以前の名前 SWITCHYARD_THINKER=1)なら、何もせずに本物を走らせる
+if [ "${SWITCHYARD_OFF:-}" = 1 ] || [ "${SWITCHYARD_THINKER:-}" = 1 ]; then exec "$real" "$@"; fi
+
 # CPU を持つジョブの中なら、そのジョブの一部として走らせる(設計 §4.3 の 7。分類器を呼ぶまでもない)
 if [ "${SWITCHYARD_IN_JOB:-}" = 1 ]; then exec "$real" "$@"; fi
 

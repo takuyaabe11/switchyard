@@ -94,6 +94,11 @@ describe('PreToolUse の入口のふるい(bin/switchyard-pretooluse.awk)', () =
     }
   });
 
+  it('SWITCHYARD_OFF=1 なら、どれも node を起動しない(判定も何もしない)', () => {
+    const cwd = bare();
+    for (const c of ['npm test', '/usr/local/bin/npm test']) assert.equal(skips(input(c, cwd), { SWITCHYARD_OFF: '1' }), true, c);
+  });
+
   it('cwd から上に switchyard.json(改名前の conductor.json)があれば、どれも node の判定へ回す', () => {
     for (const name of ['switchyard.json', 'conductor.json']) {
       const repo = bare();

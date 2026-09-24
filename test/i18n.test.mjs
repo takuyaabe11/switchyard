@@ -40,7 +40,7 @@ describe('言語(i18n)', () => {
     const out = await stop(
       { session_id: 'abcdefgh-1' },
       {
-        env: { SWITCHYARD_HOME: '/tmp/none' },
+        env: { SWITCHYARD_HOME: '/tmp/none', SWITCHYARD_STOP: 'block' },
         connect: /** @type {any} */ (async () => {
           const { EventEmitter } = await import('node:events');
           const sock = Object.assign(new EventEmitter(), {

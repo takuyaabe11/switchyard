@@ -30,6 +30,8 @@ function field(s, key,    re, v) {
 { s = s $0 "\n" }
 
 END {
+  # switchyard を止めていれば、判定も何もしない
+  if (ENVIRON["SWITCHYARD_OFF"] == "1" || ENVIRON["SWITCHYARD_THINKER"] == "1") exit 0
   cmd = field(s, "command")
   if (cmd == "\001") exit 1
   # 改行・タブなどのエスケープ(\n)の字は語の一部ではない。語の境目にする

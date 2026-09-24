@@ -166,7 +166,9 @@ describe('preToolUse(設計 §9.2)', () => {
     assert.deepEqual(out.hookSpecificOutput, { hookEventName: 'PreToolUse', updatedInput: { command: 'switchyard run -- ./node_modules/.bin/vitest run', run_in_background: true } });
   });
 
-  it('SWITCHYARD_THINKER=1 と Bash 以外では何もしない', () => {
+  it('SWITCHYARD_OFF=1(以前の名前 SWITCHYARD_THINKER=1)と Bash 以外では何もしない。コマンドの前に付けて素通りする形は拒否する', () => {
+    assert.equal(preToolUse(bash('/usr/local/bin/npm test'), { ...opts, env: { SWITCHYARD_OFF: '1' } }), null);
+    assert.equal(/** @type {any} */ (preToolUse(bash('SWITCHYARD_OFF=1 npm test'), opts)).hookSpecificOutput.permissionDecision, 'deny');
     assert.equal(preToolUse(bash('/usr/local/bin/npm test'), { ...opts, env: { SWITCHYARD_THINKER: '1' } }), null);
     assert.equal(preToolUse({ ...bash('npm test'), tool_name: 'Read' }, opts), null);
   });
