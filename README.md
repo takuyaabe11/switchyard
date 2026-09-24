@@ -144,6 +144,11 @@ After an update the daemon that is already running keeps the old version; the ne
 and `switchyard restart` brings the new one up. `PATH` lines that point at the old install are
 removed by the next `SessionStart`.
 
+To hear about new releases, set `SWITCHYARD_UPDATE_CHECK=1` (for example in the `env` of your Claude Code settings).
+`SessionStart` then compares this version with the one published on GitHub, at most once a day, and says when a newer
+one is out. It is off by default, so nothing leaves the machine unless you turn it on. What changed in each release
+is in [CHANGELOG.md](CHANGELOG.md).
+
 ## Turning it off, and taking it out
 
 switchyard installs three hooks, and two of them can stop you: `PreToolUse` refuses a
@@ -175,7 +180,8 @@ Everything lives under `~/.switchyard` (or `SWITCHYARD_HOME`).
 Commands are stored verbatim, so anything you type on a command line — including a secret
 passed as an argument — ends up in `events.jsonl`. The journals are capped: past 8MB the
 current one is rolled to `<name>.1` and a new one starts, so at most two generations are
-kept. Nothing is sent anywhere; these files never leave the machine.
+kept. Nothing is sent anywhere; these files never leave the machine. The only network access is the opt-in
+update check (`SWITCHYARD_UPDATE_CHECK=1`), which fetches `plugin.json` from GitHub and sends nothing else.
 
 ### Why the tests ship with it
 
@@ -310,6 +316,10 @@ VS Code の拡張でも同じで、`/plugins` で Manage plugins の画面が開
 更新しても、走っているデーモンは古い版のまま残る。次のセッションがそれを知らせるので、`switchyard restart` で入れ替える。
 古い置き場を指す `PATH` の行は、次の `SessionStart` が取り除く。
 
+新しい版が出たことを知りたければ、`SWITCHYARD_UPDATE_CHECK=1` を設定する(Claude Code の設定の `env` など)。
+`SessionStart` がいまの版と GitHub で公開されている版を 1 日に 1 回まで比べ、新しい版が出ていれば知らせる。
+既定では無効で、有効にしない限り機械の外へは何も出ない。各版の変更は [CHANGELOG.md](CHANGELOG.md) にある。
+
 ## 切る・外す
 
 switchyard は hook を 3 つ入れる。そのうち 2 つは作業を止めうる。`PreToolUse` は shim の語の実行ファイルをパスで直に呼ぶコマンドと、環境変数で shim を素通りさせるコマンドを拒否し、`Stop` は自分のジョブに誰も見ていない終わり方があるとセッションの終了を差し戻す。逃げ道:
@@ -335,7 +345,7 @@ plugin を外しても、走っているデーモンは止まらず、`PATH` の
 | `hooks.jsonl` | `PreToolUse` の判断。コマンドの文字列と作業ディレクトリつき |
 | `unmanaged.jsonl` | デーモンに届かない間に走ったもの |
 
-コマンドはそのままの文字列で残る。引数に渡した秘密も `events.jsonl` に入る。記録には上限があり、8MB を超えると `<名前>.1` へ回して新しく始めるので、残るのは 2 世代まで。どこにも送信しない。機械の外へは出ない。
+コマンドはそのままの文字列で残る。引数に渡した秘密も `events.jsonl` に入る。記録には上限があり、8MB を超えると `<名前>.1` へ回して新しく始めるので、残るのは 2 世代まで。どこにも送信しない。機械の外へは出ない。外へ問い合わせるのは、有効にしたときの更新の確認(`SWITCHYARD_UPDATE_CHECK=1`)だけで、GitHub から `plugin.json` を取ってくる以外は何も送らない。
 
 ### テストを同梱している理由
 

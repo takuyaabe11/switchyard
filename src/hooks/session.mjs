@@ -1,6 +1,6 @@
 // @ts-check
 // SessionStart と Stop の hooks(設計 §9.2)。
-import { appendFileSync, existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ask, connectDaemon, DaemonUnavailableError } from '../client/connect.mjs';
@@ -63,13 +63,71 @@ function writeFileAtomic(file, text) {
   renameSync(tmp, file);
 }
 
+/** 最新の版を問う先(公開の repo の plugin.json) */
+export const LATEST_URL = 'https://raw.githubusercontent.com/takuyaabe11/switchyard/main/.claude-plugin/plugin.json';
+/** 最新の版を問い直すまでの間(1 日) */
+const UPDATE_CHECK_TTL_MS = 86_400_000;
+
+/** `1.2.3` の形の版を比べる。a が新しければ正 @param {string} a @param {string} b @returns {number} */
+export function compareVersions(a, b) {
+  const pa = a.split('.').map((x) => Number.parseInt(x, 10) || 0);
+  const pb = b.split('.').map((x) => Number.parseInt(x, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+/**
+ * 新しい版が出ていれば、知らせる 1 行。SWITCHYARD_UPDATE_CHECK=1 のときだけ、1 日に 1 回だけ外へ問う(既定では外へ出ない)。
+ * 問えなければ何も言わない(セッションの始まりを止めない)。
+ * @param {{ env: NodeJS.ProcessEnv, version: string, fetchLatest?: () => Promise<string | null>, now?: () => number }} opts
+ * @returns {Promise<string | null>}
+ */
+export async function updateNotice({ env, version, fetchLatest = defaultFetchLatest, now = Date.now }) {
+  if (env.SWITCHYARD_UPDATE_CHECK !== '1') return null;
+  const cache = join(switchyardHome(env), 'update-check.json');
+  /** @type {string | null} */
+  let latest = null;
+  try {
+    const c = JSON.parse(readFileSync(cache, 'utf8'));
+    if (typeof c.latest === 'string' && typeof c.checkedAt === 'number' && now() - c.checkedAt < UPDATE_CHECK_TTL_MS) latest = c.latest;
+  } catch {
+    // 控えが無い・読めない: 問い直す
+  }
+  if (latest === null) {
+    latest = await fetchLatest().catch(() => null);
+    if (latest === null) return null;
+    try {
+      mkdirSync(switchyardHome(env), { recursive: true });
+      writeFileAtomic(cache, JSON.stringify({ latest, checkedAt: now() }));
+    } catch {
+      // 控えられなくても知らせる
+    }
+  }
+  if (compareVersions(latest, version) <= 0) return null;
+  return t(
+    `[switchyard] 新しい版 ${latest} が出ている(いまは ${version})。/plugin marketplace update switchyard の後に /reload-plugins、その後 switchyard restart で入れ替わる`,
+    `[switchyard] version ${latest} is available (this is ${version}). Run /plugin marketplace update switchyard, then /reload-plugins, then switchyard restart`,
+  );
+}
+
+/** @returns {Promise<string | null>} */
+async function defaultFetchLatest() {
+  const res = await fetch(LATEST_URL, { signal: AbortSignal.timeout(1_500) });
+  if (!res.ok) return null;
+  const body = /** @type {Record<string, unknown>} */ (await res.json());
+  return typeof body.version === 'string' ? body.version : null;
+}
+
 /**
  * SessionStart: shims を PATH の先頭へ足し、知らせることがあれば行で返す(Claude の文脈に入る)。
  * @param {Record<string, unknown>} _input
- * @param {{ env?: NodeJS.ProcessEnv, connect?: typeof connectDaemon, root?: string, version?: string }} [opts]
+ * @param {{ env?: NodeJS.ProcessEnv, connect?: typeof connectDaemon, root?: string, version?: string, fetchLatest?: () => Promise<string | null> }} [opts]
  * @returns {Promise<string[]>}
  */
-export async function sessionStart(_input, { env = process.env, connect = connectDaemon, root = PLUGIN_ROOT, version = VERSION } = {}) {
+export async function sessionStart(_input, { env = process.env, connect = connectDaemon, root = PLUGIN_ROOT, version = VERSION, fetchLatest } = {}) {
   if (env.SWITCHYARD_THINKER === '1') return [];
   /** @type {string[]} */
   const lines = [];
@@ -127,6 +185,8 @@ export async function sessionStart(_input, { env = process.env, connect = connec
     const why = e instanceof Error ? e.message : String(e);
     lines.push(t(`[switchyard] デーモンに届かない(${why})。このセッションの重い走行は管理なしで走る`, `[switchyard] cannot reach the daemon (${why}); heavy runs in this session run unmanaged`));
   }
+  const update = await updateNotice({ env, version, ...(fetchLatest === undefined ? {} : { fetchLatest }) });
+  if (update !== null) lines.push(update);
   return lines;
 }
 

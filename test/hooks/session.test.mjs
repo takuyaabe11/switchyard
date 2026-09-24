@@ -11,7 +11,7 @@ import { connectDaemon, DaemonUnavailableError } from '../../src/client/connect.
 import { pathsOf } from '../../src/daemon/paths.mjs';
 import { startDaemon } from '../../src/daemon/server.mjs';
 import { runHook } from '../../src/hooks/main.mjs';
-import { deadShimPaths, pathExportLine, pruneShimLines, sessionStart, stop } from '../../src/hooks/session.mjs';
+import { compareVersions, deadShimPaths, pathExportLine, pruneShimLines, sessionStart, stop, updateNotice } from '../../src/hooks/session.mjs';
 import { openClient } from '../../testkit/client.mjs';
 import { jobRequest } from '../../testkit/requests.mjs';
 import { tempHome } from '../../testkit/tmp.mjs';
@@ -57,6 +57,36 @@ async function failedJob(sock) {
   await c.next((m) => m.t === 'ok');
   return String(acc.jobId);
 }
+
+describe('新しい版の知らせ(SWITCHYARD_UPDATE_CHECK=1 のときだけ)', () => {
+  it('compareVersions は数の並びで比べる', () => {
+    assert.ok(compareVersions('0.10.0', '0.9.9') > 0);
+    assert.ok(compareVersions('1.0.0', '1.0.0') === 0);
+    assert.ok(compareVersions('0.5.0', '0.6.0') < 0);
+  });
+
+  it('既定では外へ問わない。有効なら新しいときだけ知らせ、1 日は控えを使う。問えなければ黙る', async () => {
+    const home = tempHome();
+    let asked = 0;
+    const fetchLatest = async () => {
+      asked += 1;
+      return '9.0.0';
+    };
+    assert.equal(await updateNotice({ env: { SWITCHYARD_HOME: home }, version: '0.6.0', fetchLatest }), null);
+    assert.equal(asked, 0, '既定では外へ出ない');
+    const env = { SWITCHYARD_HOME: home, SWITCHYARD_UPDATE_CHECK: '1' };
+    assert.match(String(await updateNotice({ env, version: '0.6.0', fetchLatest, now: () => 1_000 })), /9\.0\.0/);
+    assert.match(String(await updateNotice({ env, version: '0.6.0', fetchLatest, now: () => 2_000 })), /9\.0\.0/);
+    assert.equal(asked, 1, '1 日の間は控えを使う');
+    await updateNotice({ env, version: '0.6.0', fetchLatest, now: () => 1_000 + 86_400_001 });
+    assert.equal(asked, 2, '1 日たてば問い直す');
+    assert.equal(await updateNotice({ env, version: '9.0.0', fetchLatest, now: () => 3_000 }), null, '同じ版なら知らせない');
+    const failing = async () => {
+      throw new Error('offline');
+    };
+    assert.equal(await updateNotice({ env: { SWITCHYARD_HOME: tempHome(), SWITCHYARD_UPDATE_CHECK: '1' }, version: '0.6.0', fetchLatest: failing }), null);
+  });
+});
 
 describe('deadShimPaths(PATH に残った死んだ shims)', () => {
   it('指す先が無い shims の行だけを挙げる', () => {
