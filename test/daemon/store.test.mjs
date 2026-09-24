@@ -15,7 +15,7 @@ describe('paths', () => {
   it('SWITCHYARD_HOME があればそれを使う', () => {
     assert.equal(switchyardHome({ SWITCHYARD_HOME: '/x/y' }), '/x/y');
     assert.equal(pathsOf('/x/y').sock, socketPath('/x/y'));
-    assert.equal(pathsOf('/x/y').hooks, '/x/y/hooks.jsonl');
+    assert.equal(pathsOf('/x/y').hooks, join('/x/y', 'hooks.jsonl'));
   });
 });
 

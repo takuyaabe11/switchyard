@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { DEFAULT_PROFILES, defaultHeadWords } from '../../src/config/profiles.mjs';
 import { preToolUse, SHIM_WORDS } from '../../src/hooks/pretooluse.mjs';
 import { GIT_LOCK_SUBCOMMANDS } from '../../src/shim/decide.mjs';
-import { basePath, SH_BIN } from '../../testkit/platform.mjs';
+import { basePath, SH_BIN, WIN } from '../../testkit/platform.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const AWK = join(ROOT, 'bin/switchyard-pretooluse.awk');
@@ -95,6 +95,13 @@ describe('PreToolUse の入口のふるい(bin/switchyard-pretooluse.awk)', () =
     }
   });
 
+  it('Windows の cwd(C:\\…・C:/…)も読み、ドライブの根まで設定ファイルを探して終わる', () => {
+    for (const cwd of ['C:\\Users\\a\\proj', 'C:/Users/a/proj', 'D:\\']) {
+      assert.equal(skips(input('ls -la', cwd)), true, cwd);
+      assert.equal(skips(input('npm test', cwd)), false, cwd);
+    }
+  });
+
   it('SWITCHYARD_OFF=1 なら、どれも node を起動しない(判定も何もしない)', () => {
     const cwd = bare();
     for (const c of ['npm test', '/usr/local/bin/npm test']) assert.equal(skips(input(c, cwd), { SWITCHYARD_OFF: '1' }), true, c);
@@ -115,6 +122,7 @@ describe('PreToolUse の入口のふるい(bin/switchyard-pretooluse.awk)', () =
     assert.equal(skips({ tool_name: 'Bash', cwd, tool_input: {} }), false);
     assert.equal(skips({ tool_name: 'Bash', tool_input: { command: 'ls' } }), false);
     assert.equal(skips(input('ls', 'rel/dir')), false);
+    assert.equal(skips(input('ls', 'C:\\a\\"b')), false);
     assert.equal(skips('not json'), false);
     // 説明の文字列の中に "command":"ls" があっても、本物の command(npm test)を見る
     assert.equal(skips({ tool_name: 'Bash', cwd, tool_input: { description: '","command":"ls', command: 'npm test' } }), false);
@@ -124,7 +132,7 @@ describe('PreToolUse の入口のふるい(bin/switchyard-pretooluse.awk)', () =
   it('入口の sh: 素通しは何も出さず、それ以外は node の判定の出力をそのまま返す。SWITCHYARD_HOOK_SIEVE=0 でふるいを外す', () => {
     const cwd = bare();
     const run = (/** @type {string} */ c, /** @type {Record<string, string>} */ env = {}) =>
-      execFileSync(SH_BIN, [SH], { input: JSON.stringify(input(c, cwd)), encoding: 'utf8', env: { PATH: `${BASE_PATH}:${process.env.PATH}`, SWITCHYARD_HOME: bare(), SWITCHYARD_LANG: 'en', ...env } });
+      execFileSync(SH_BIN, [SH], { input: JSON.stringify(input(c, cwd)), encoding: 'utf8', env: { PATH: WIN ? (process.env.PATH ?? '') : `${BASE_PATH}:${process.env.PATH}`, SWITCHYARD_HOME: bare(), SWITCHYARD_LANG: 'en', ...env } });
     assert.equal(run('ls -la'), '');
     assert.equal(JSON.parse(run('/usr/local/bin/npm test')).hookSpecificOutput.permissionDecision, 'deny');
     assert.equal(run('echo hi', { SWITCHYARD_HOOK_SIEVE: '0' }), '');
