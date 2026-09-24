@@ -99,7 +99,8 @@ export function buildRequest({ argv, flags, env, cwd }) {
       locks: declaredLocks.filter((k) => !held.has(k)),
       // 既定は never。宣言していないジョブは、計測のために止められない(設計 §6.7)。
       // 止める / 降格するのは、そのジョブが中断に耐えると書いた人だけ
-      preempt: flags.preempt ?? base?.preempt ?? 'never',
+      // Windows では子を止められない(プロセスグループが無い)。譲ると言うと、計測が止まっていない走行の横で走る
+      preempt: IS_WINDOWS ? 'never' : (flags.preempt ?? base?.preempt ?? 'never'),
       why: flags.why ?? null,
       ...(parent !== null ? { parent } : {}),
     },

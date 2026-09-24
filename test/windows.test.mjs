@@ -13,7 +13,7 @@ import { pathsOf } from '../src/daemon/paths.mjs';
 import { startDaemon } from '../src/daemon/server.mjs';
 import { findGitBash, toBashPath } from '../src/platform.mjs';
 import { spawnMeasured, windowsExe } from '../src/run/group.mjs';
-import { runJob } from '../src/run/run.mjs';
+import { buildRequest, runJob } from '../src/run/run.mjs';
 import { connectDaemon } from '../src/client/connect.mjs';
 import { tempHome } from '../testkit/tmp.mjs';
 import { waitFor } from '../testkit/wait.mjs';
@@ -73,6 +73,11 @@ describe('Windows(Git for Windows)', { skip: WIN ? false : 'Windows だけの通
     const code = await new Promise((r) => child.once('exit', (c) => r(c)));
     assert.equal(code, 5);
     assert.match(readFileSync(out, 'utf8'), /args:.*out\.txt b/);
+  });
+
+  it('子を止められないので、preempt の宣言は never として要求する', () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'cproj-'));
+    assert.equal(buildRequest({ argv: ['npm', 'test'], flags: { preempt: 'pause' }, env: {}, cwd }).job.preempt, 'never');
   });
 
   it('名前付きパイプのデーモンを通して走らせ、終了コードを返す', async () => {
