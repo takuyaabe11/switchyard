@@ -309,6 +309,34 @@ nothing else.
   `--profile` does not count, since it can be put in front of anything. A wrap you use on purpose (say
   `switchyard run --lock db -- docker compose up -d`) is asked about each time until a profile in `switchyard.json`
   matches it. This check stays on in observe mode; `SWITCHYARD_RUN_GUARD=0` turns it off.
+- **Subagents (the Task tool)?** Covered. A subagent's Bash calls go through the same hooks and the same shims, and
+  count as the parent session (checked with the real CLI: a subagent's `npm test` was queued and got a job id).
+  `switchyard top` and `switchyard ack` treat them as that session; `switchyard replay` reads subagent logs too.
+- **What if a run holding a lock dies?** When the `switchyard run` wrapper or shim goes away, its connection closes
+  and the daemon gives back the share and the locks. If the run's processes are still alive, it keeps them until
+  those processes end (listed as an orphan to ack), so a half-dead run cannot let a second one onto the same port.
+- **Where does the learning live, and do repos mix?** Per repository and profile: `npm test` in one repo never sizes
+  `npm test` in another. It is read from the run history in `~/.switchyard/events.jsonl`; `switchyard uninstall`
+  removes it (`--keep-logs` keeps it).
+- **A shared database, docker compose, Testcontainers?** switchyard has no shim for `docker`, so name what must not
+  overlap. Put a lock on the test command that uses it, in `switchyard.json`:
+  `"integration": { "match": ["go test ./integration/*"], "class": "batch", "locks": ["db"] }`. For the compose
+  commands themselves, add a profile such as `"compose": { "match": ["docker compose up*", "docker compose down*"],
+  "class": "quick", "locks": ["db"] }` and run them as `switchyard run -- docker compose up -d`; because a profile
+  matches, it is not asked about. Testcontainers on random ports need no port lock; a fixed port (`port:5432`) does.
+- **Inside a dev container, or WSL2?** The daemon, the shims and the measurements live where Claude Code runs. Memory
+  follows the container's limit. The CPU count and how busy the CPUs are come from what that system shows, which in a
+  container is usually the whole Docker VM, and in WSL2 is the WSL VM (sized by `.wslconfig`; Windows programs
+  are not seen). In a container with a CPU limit, set `SWITCHYARD_CAPACITY` to that limit.
+- **How much should a shared machine give it?** switchyard orders only the runs that go through it; other people's
+  jobs are only counted as load. On a shared server, cap it: `SWITCHYARD_CAPACITY=8`, or `"reserve": 24` in
+  `~/.switchyard/config.json` on a 32-core machine, then `switchyard restart`.
+- **What does installing change in my settings?** Nothing in `settings.json`. The three hooks come from the plugin's
+  own `hooks/hooks.json` and stop when the plugin is uninstalled. The only thing written outside `~/.switchyard` is one
+  `PATH` line in the session environment file Claude Code provides (`CLAUDE_ENV_FILE`), which `switchyard uninstall`
+  removes.
+- **GPUs?** Not measured or queued. A lock name can still keep two runs off the same card: a profile with
+  `"locks": ["gpu:0"]`.
 - **Headless `claude -p`?** The hooks run the same way. Nothing holds a session back by default, so a scripted run
   ends normally. Sending a run to the background makes little sense when nobody waits for the notice;
   `SWITCHYARD_BACKGROUND=never` keeps every run in the foreground (it still waits its turn). This has not been tested
@@ -597,6 +625,31 @@ switchyard は hook を 3 つ入れる。作業を止めうるのは `PreToolUse
   許可の設定にかかわらず承認を求める。`--profile` は何の前にも付けられるので数えない。わざと包む形
   (例: `switchyard run --lock db -- docker compose up -d`)は、`switchyard.json` の profile に当たるまで毎回承認を求められる。
   観察だけのモードでもこの確認は働く。`SWITCHYARD_RUN_GUARD=0` で止める。
+- **サブエージェント(Task ツール)にも効くか。** 効く。サブエージェントの Bash も同じ hook と同じ shim を通り、親のセッションの
+  走行として数える(実物で確認: サブエージェントが走らせた `npm test` が順番待ちに乗り、ジョブの id が渡った)。`switchyard top`・
+  `switchyard ack` でもそのセッションとして扱い、`switchyard replay` はサブエージェントの記録も読む。
+- **鍵を持った走行が落ちたらどうなるか。** `switchyard run` の包みや shim が居なくなると接続が切れ、デーモンが取り分と鍵を返す。
+  走行のプロセスがまだ生きていれば、それが終わるまで持たせる(確認待ちの孤児として挙がる)。半分死んだ走行の横で、同じポートを
+  使う次の走行が始まることはない。
+- **学んだ値はどこにあり、repo 同士で混ざらないか。** repo と profile の組ごとに持つ。ある repo の `npm test` が、別の repo の
+  `npm test` の取り分を決めることはない。`~/.switchyard/events.jsonl` の走行の記録から読み、`switchyard uninstall` で消える
+  (`--keep-logs` で残す)。
+- **共有のデータベース・docker compose・Testcontainers は。** `docker` には shim が無いので、重ねてはいけないものに名前を付ける。
+  それを使うテストのコマンドに、`switchyard.json` で鍵を付ける:
+  `"integration": { "match": ["go test ./integration/*"], "class": "batch", "locks": ["db"] }`。compose のコマンド自体は、
+  `"compose": { "match": ["docker compose up*", "docker compose down*"], "class": "quick", "locks": ["db"] }` のような profile を
+  足し、`switchyard run -- docker compose up -d` で走らせる(profile に当たるので承認は求められない)。
+  ランダムなポートの Testcontainers にはポートの鍵は要らない。固定のポート(`port:5432`)なら要る。
+- **dev container や WSL2 の中では。** デーモン・shim・測定は、Claude Code が動いている側にある。メモリはコンテナの上限に従う。
+  CPU の数と忙しさはその環境が見せる値で、コンテナではたいてい Docker の VM 全体、WSL2 では WSL の VM(`.wslconfig` の大きさ。
+  Windows 側のプログラムは見えない)。CPU の上限があるコンテナでは、`SWITCHYARD_CAPACITY` をその上限にする。
+- **共有の機械では、どれだけ渡せばよいか。** switchyard が並べるのは自分を通った走行だけで、他の人のジョブは負荷として数えるだけ。
+  共有のサーバでは上限を決める: 32 コアの機械なら `SWITCHYARD_CAPACITY=8`、または `~/.switchyard/config.json` に `"reserve": 24`。
+  その後 `switchyard restart`。
+- **入れると設定の何が変わるか。** `settings.json` には何も書かない。3 つの hook は plugin 自身の `hooks/hooks.json` から来て、
+  plugin を外せば止まる。`~/.switchyard` の外に書くのは、Claude Code が渡すセッションの環境ファイル(`CLAUDE_ENV_FILE`)の
+  `PATH` の 1 行だけで、`switchyard uninstall` が取り除く。
+- **GPU は。** 測りも並べもしない。鍵の名前で、同じカードを 2 つの走行が使わないようにはできる(profile に `"locks": ["gpu:0"]`)。
 - **headless の `claude -p` では。** hook は同じように動く。既定では何もセッションを差し戻さないので、スクリプトの走行は普通に
   終わる。知らせを待つ人がいないので背景に回す意味は薄く、`SWITCHYARD_BACKGROUND=never` で前景のまま走らせられる(順番は
   普段どおり待つ)。大規模にはまだ試していない。
