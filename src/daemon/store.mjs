@@ -4,15 +4,16 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renam
 import { basename, dirname, join } from 'node:path';
 import { EstimateBook } from '../core/estimate.mjs';
 import { UsageBook } from '../core/usage.mjs';
+import { ensurePrivateDir, PRIVATE_FILE_MODE } from './paths.mjs';
 
 /** @typedef {import('../core/types.mjs').State} State */
 /** @typedef {{ at: number, session: string, repo: string, profile: string, cmd: string, code: number | null, durationMs: number }} UnmanagedRun */
 
 /** 一時ファイルに書いて rename で置き換える(書きかけの state.json を残さない) @param {string} file @param {unknown} value @param {string} [text] 既に作ってある JSON */
 export function writeJsonAtomic(file, value, text = JSON.stringify(value)) {
-  mkdirSync(dirname(file), { recursive: true });
+  ensurePrivateDir(dirname(file));
   const tmp = `${file}.${process.pid}.tmp`;
-  writeFileSync(tmp, text);
+  writeFileSync(tmp, text, { mode: PRIVATE_FILE_MODE });
   renameSync(tmp, file);
 }
 
@@ -63,8 +64,8 @@ export function parseState(v) {
 
 /** @param {string} file @param {Record<string, unknown>} record */
 export function appendRecord(file, record) {
-  mkdirSync(dirname(file), { recursive: true });
-  appendFileSync(file, `${JSON.stringify(record)}\n`);
+  ensurePrivateDir(dirname(file));
+  appendFileSync(file, `${JSON.stringify(record)}\n`, { mode: PRIVATE_FILE_MODE });
 }
 
 /** @param {string} file @returns {{ records: Record<string, unknown>[], bad: number }} */

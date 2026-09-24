@@ -5,7 +5,7 @@ import { closeSync, linkSync, mkdirSync, openSync, readFileSync, unlinkSync, wri
 import { availableParallelism } from 'node:os';
 import { join } from 'node:path';
 import { commandLooksLikeSwitchyardd } from './control.mjs';
-import { switchyardHome, pathsOf } from './paths.mjs';
+import { ensurePrivateDir, PRIVATE_FILE_MODE, switchyardHome, pathsOf } from './paths.mjs';
 import { startDaemon } from './server.mjs';
 import { readJson } from './store.mjs';
 import { t } from '../i18n.mjs';
@@ -80,7 +80,7 @@ export function acquireLock(file, pid = process.pid, isAlive = pidAlive, isSwitc
     // openSync(file, 'wx') で作ってから書くと、書き終える前の空のロックを、同時に起動したもう 1 本が
     // 「持ち主が読めない古いロック」とみなして消し、2 本が互いに自分が持ち主だと思って走る(CI の macOS で実測)
     const tmp = `${file}.${pid}.${process.hrtime.bigint()}.tmp`;
-    const fd = openSync(tmp, 'wx');
+    const fd = openSync(tmp, 'wx', PRIVATE_FILE_MODE);
     try {
       writeSync(fd, String(pid));
     } finally {
@@ -118,7 +118,7 @@ export function acquireLock(file, pid = process.pid, isAlive = pidAlive, isSwitc
 export async function main(env = process.env) {
   const home = switchyardHome(env);
   const p = pathsOf(home);
-  mkdirSync(home, { recursive: true });
+  ensurePrivateDir(home);
   if (!acquireLock(p.lock)) {
     let holder = '?';
     try {

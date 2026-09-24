@@ -4,7 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeF
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ask, connectDaemon, DaemonUnavailableError } from '../client/connect.mjs';
-import { switchyardHome, pathsOf } from '../daemon/paths.mjs';
+import { ensurePrivateDir, switchyardHome, pathsOf } from '../daemon/paths.mjs';
 import { VERSION } from '../version.mjs';
 import { t } from '../i18n.mjs';
 
@@ -100,7 +100,7 @@ export async function updateNotice({ env, version, fetchLatest = defaultFetchLat
     latest = await fetchLatest().catch(() => null);
     if (latest === null) return null;
     try {
-      mkdirSync(switchyardHome(env), { recursive: true });
+      ensurePrivateDir(switchyardHome(env));
       writeFileAtomic(cache, JSON.stringify({ latest, checkedAt: now() }));
     } catch {
       // 控えられなくても知らせる
