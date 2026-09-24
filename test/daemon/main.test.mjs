@@ -1,7 +1,7 @@
 // @ts-check
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync } from 'node:fs';
+import { readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { acquireLock, capacityFrom, commandLooksLikeSwitchyardd, defaultReserve, lockCapsFrom } from '../../src/daemon/main.mjs';
 import { tempHome } from '../../testkit/tmp.mjs';
@@ -31,6 +31,15 @@ describe('daemon main', () => {
     assert.equal(acquireLock(file, 333, () => false, () => true), true);
     writeFileSync(file, 'garbage');
     assert.equal(acquireLock(file, 444, () => true, () => true), true);
+  });
+
+  it('ロックは pid を書き終えた形でだけ現れ、一時ファイルを残さない(空のロックを古いとみなされて奪われない)', () => {
+    const dir = tempHome();
+    const file = join(dir, 'daemon.lock');
+    assert.equal(acquireLock(file, 555, () => true, () => true), true);
+    assert.equal(readFileSync(file, 'utf8'), '555');
+    assert.equal(acquireLock(file, 666, () => true, () => true), false);
+    assert.deepEqual(readdirSync(dir).sort(), ['daemon.lock']);
   });
 
   it('command の語のどれかの basename が switchyardd/switchyardd.mjs なら switchyardd とみなす(R3)', () => {

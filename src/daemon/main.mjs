@@ -1,7 +1,7 @@
 // @ts-check
 // デーモンの起動: ロックファイル・容量の決定・シグナルでの停止。
 import { execFileSync } from 'node:child_process';
-import { closeSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from 'node:fs';
+import { closeSync, linkSync, mkdirSync, openSync, readFileSync, unlinkSync, writeSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { join } from 'node:path';
 import { commandLooksLikeSwitchyardd } from './control.mjs';
@@ -75,10 +75,18 @@ function isSwitchyarddProcess(pid) {
  */
 export function acquireLock(file, pid = process.pid, isAlive = pidAlive, isSwitchyardd = isSwitchyarddProcess) {
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    // pid を書き終えた一時ファイルを link でロックの名前に付ける(link は名前が既にあれば EEXIST で失敗する)。
+    // openSync(file, 'wx') で作ってから書くと、書き終える前の空のロックを、同時に起動したもう 1 本が
+    // 「持ち主が読めない古いロック」とみなして消し、2 本が互いに自分が持ち主だと思って走る(CI の macOS で実測)
+    const tmp = `${file}.${pid}.${process.hrtime.bigint()}.tmp`;
+    const fd = openSync(tmp, 'wx');
     try {
-      const fd = openSync(file, 'wx');
       writeSync(fd, String(pid));
+    } finally {
       closeSync(fd);
+    }
+    try {
+      linkSync(tmp, file);
       return true;
     } catch (e) {
       if (/** @type {NodeJS.ErrnoException} */ (e).code !== 'EEXIST') throw e;
@@ -93,6 +101,12 @@ export function acquireLock(file, pid = process.pid, isAlive = pidAlive, isSwitc
         unlinkSync(file);
       } catch {
         // 他のプロセスが先に消した
+      }
+    } finally {
+      try {
+        unlinkSync(tmp);
+      } catch {
+        // 既に無い
       }
     }
   }
