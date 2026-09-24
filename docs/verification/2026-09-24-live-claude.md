@@ -1,4 +1,4 @@
-# 本物の Claude Code での通し(0.10.0)
+# 本物の Claude Code での通し(0.11.0)
 
 ## 実行日時・環境
 
@@ -24,20 +24,20 @@
     "Stop の差し戻しの後、Claude が switchyard ack した": true,
     "./gradlew test を拒否し、Claude が switchyard run で包んで走らせた": true
   },
-  "costUsd": [0.0165385, 0.0315579, 0.0203963],
-  "result1": "```\nLIVE_JOB=jmuf9jb5v0\n```",
-  "result2": "Done. I ran `npm test` as requested, which failed with exit code 1 as expected. I then acknowledged the failed switchyard job `jmuf9jggo1` as instructed by the system prompt.",
-  "result3": "```\nGRADLE_JOB=jmuf9jtxe2 test\n```"
+  "costUsd": [0.0164635, 0.0394821, 0.0203286],
+  "result1": "The command has finished. Here's the line from the output that starts with `LIVE_JOB=`:\n\n```\nLIVE_JOB=jmufajmem0\n```",
+  "result2": "Done. I've acknowledged the failed test job with switchyard. The test ran as expected and exited with code 1—the failure has been marked as reviewed.",
+  "result3": "```\nGRADLE_JOB=jmufak7mh2 test\n```"
 }
 ```
 
-終了コード: 0。費用の合計 $0.068。
+終了コード: 0。費用の合計 $0.076。
 
 ## 読み方
 
 - 1: デーモンが空いていたので、PreToolUse は背景へ回さず(`task_started` の `is_backgrounded` が偽)、Bash の結果に子の出力が
   そのまま入った。それでも shim が包んでいて、記録に `default:batch` の走行が残り、子にジョブの id が渡っている。
-- 2: 失敗した走行で Stop が差し戻し、Claude は `switchyard ack` で確認済みにしてから止まった。
+- 2: 失敗した走行で Stop が差し戻し(0.11.0 から既定は知らせるだけなので、この走行だけ SWITCHYARD_STOP=block)、Claude は `switchyard ack` で確認済みにしてから止まった。
 - 3: `./gradlew test` は shim から見えないので PreToolUse が拒否し、Claude は案内どおり `switchyard run -- ./gradlew test` で
   走らせ直した。記録にその要求が残り、子にジョブの id が渡っている。
 

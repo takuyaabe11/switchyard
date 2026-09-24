@@ -109,13 +109,14 @@ export function compareVersions(a, b) {
 }
 
 /**
- * 新しい版が出ていれば、知らせる 1 行。1 日に 1 回だけ外へ問う。SWITCHYARD_UPDATE_CHECK=0 で問わない。
+ * 新しい版が出ていれば、知らせる 1 行。SWITCHYARD_UPDATE_CHECK=1 のときだけ、1 日に 1 回まで外へ問う(既定は問わない。
+ * 会社の機械で、断りなく外へ通信するものを嫌う声が多かった)。
  * 問えなければ何も言わない(セッションの始まりを止めない)。
  * @param {{ env: NodeJS.ProcessEnv, version: string, fetchLatest?: () => Promise<string | null>, now?: () => number }} opts
  * @returns {Promise<string | null>}
  */
 export async function updateNotice({ env, version, fetchLatest = defaultFetchLatest, now = Date.now }) {
-  if (env.SWITCHYARD_UPDATE_CHECK === '0') return null;
+  if (env.SWITCHYARD_UPDATE_CHECK !== '1') return null;
   const cache = join(switchyardHome(env), 'update-check.json');
   /** @type {string | null} */
   let latest = null;

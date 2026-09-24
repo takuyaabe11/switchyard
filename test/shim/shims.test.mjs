@@ -117,13 +117,21 @@ describe('shims(設計 §9.1)', () => {
     assert.match(r.stdout, /job=none/);
   });
 
-  it('既定(SWITCHYARD_GIT が 1 でない)では、git commit もデーモンに繋がずにそのまま本物を走らせる', async () => {
+  it('既定(SWITCHYARD_GIT が 1 でない)では、git commit も node を起動せずに、そのまま本物を走らせる', async () => {
     const { home } = await daemon();
     const repo = plainDir();
     execFileSync(REAL_GIT, ['init', '-q'], { cwd: repo });
-    const r = await sh('git commit -m x', { cwd: repo, home, env: { SWITCHYARD_GIT: '0' } });
+    // 壊れた node を先に置く: shim の sh 部分が素通しすれば node は呼ばれない
+    // (shim は node の失敗も標準エラーも飲み込んで本物へ戻るので、呼ばれたことを印のファイルで確かめる)
+    const broken = mkdtempSync(join(tmpdir(), 'cnode-'));
+    const mark = join(broken, 'called');
+    writeFileSync(join(broken, 'node'), `#!/bin/sh\ntouch '${mark}'\nexit 97\n`);
+    chmodSync(join(broken, 'node'), 0o755);
+    const fake = fakeBin();
+    const r = await sh('git commit -m x', { cwd: repo, home, path: `${SHIMS}:${broken}:${fake}:${BASE_PATH}`, env: { SWITCHYARD_GIT: '0' } });
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, /^fake-git commit -m x job=none /m);
+    assert.equal(existsSync(mark), false, 'node が呼ばれた');
   });
 
   it('git -C <repo> commit も鍵だけのジョブとして包み、鍵は -C の先の repo の git-dir', async () => {

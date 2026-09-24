@@ -4,8 +4,8 @@
 
 Run two or three Claude Code sessions on one laptop — one per worktree, or parallel agents — and sooner or later they
 all start `npm test`, `cargo build` or `./gradlew test` at once. Every run slows down, a benchmark taken in the middle
-means nothing, memory runs out, and two sessions trip over the same git index. switchyard puts those runs in a queue:
-it hands out CPU shares, watches memory, and gives out exclusive locks (a port, the git index, any name you pick), so
+means nothing, and memory runs out. switchyard puts those runs in a queue:
+it hands out CPU shares, watches memory, and gives out exclusive locks (a port, a database, any name you pick), so
 heavy runs take turns instead of colliding. You keep typing commands the way you do now.
 
 ## Is it for you?
@@ -41,12 +41,17 @@ overlapped, it says so, and you can take it out with `switchyard uninstall`.
 ## What changes once it is installed
 
 - **Nothing in how you or Claude type commands.** A `PATH` shim in front of `npm`, `npx`, `node`, `yarn`, `pnpm`, `bun`,
-  `cargo`, `pytest`, `python`, `python3`, `uv`, `poetry`, `go`, `mvn`, `gradle`, `dotnet`, `bundle`, `rspec`, `deno`,
-  `make` and `git` recognizes test and build runs and queues them. Everything else passes straight through.
+  `cargo`, `pytest`, `python`, `python3`, `uv`, `poetry`, `go`, `mvn`, `gradle`, `dotnet`, `bundle`, `rspec`, `deno`
+  and `make` recognizes test and build runs and queues them. Everything else passes straight through. (`git` has a shim
+  too, but does nothing unless you turn it on; see below.)
 - **Heavy runs take turns.** When a run has to wait, Claude runs it in the background and is told when it finishes,
   so the session is not stuck. `switchyard top` shows what runs, what waits and why.
-- **A failed run is not forgotten.** If a queued run fails and nobody looks at it, the session is asked to look before
-  it stops. Running the same command successfully later, or `switchyard ack <job>`, clears it.
+- **A failed run is not forgotten.** If a queued run fails and nobody looks at it, you get a notice when the session
+  stops (once per run; Claude is not made to do anything). Running the same command successfully later, or
+  `switchyard ack <job>`, clears it. `SWITCHYARD_STOP=block` has Claude look at it before it stops instead.
+- **Secrets stay out of the logs.** Values that look like secrets — `API_KEY=…`, `--password …`, `-Dx.password=…`,
+  `mysql -p…`, `user:pass@` in URLs, `Authorization:` headers, and token shapes such as `sk-…`, `ghp_…`, `AKIA…` —
+  are written as `***`. The command itself runs unchanged.
 - **A few forms are refused, with a fix.** Commands a shim cannot see (`./gradlew test`, `.venv/bin/pytest`, a tool
   called by its full path) would skip the queue, so they are refused with the exact `switchyard run -- …` to use
   instead. Claude follows it on its own.
@@ -111,7 +116,7 @@ Once installed, every new Claude Code session gets three hooks:
 |---|---|
 | `SessionStart` | Puts `shims/` at the front of `PATH` for the session |
 | `PreToolUse` (Bash) | Sends a CPU-holding run to the background when it would have to wait (a queue, a measurement, a held lock, not enough free CPU); rejects bypasses that call the real binary by path. `SWITCHYARD_BACKGROUND=always` sends every heavy run to the background, `never` sends none. A small `sh`/`awk` sieve answers commands that name no heavy tool (`ls`, `git status`, `node -e`) in about 4 ms without starting Node |
-| `Stop` | Holds the session back if one of its jobs ended in a way nobody has looked at |
+| `Stop` | Tells you when one of the session's runs ended in a way nobody has looked at (`SWITCHYARD_STOP=block` holds the session back instead) |
 
 ## Commands
 
@@ -198,10 +203,12 @@ Python virtualenv (`.venv/bin/pytest`), and `pytest` or `python -m pytest` after
 virtualenv comes before the shims on `PATH`). `PreToolUse` refuses these and asks for `switchyard run -- <command>`,
 which puts them in the queue. Scripts under `node_modules/.bin` go through the `node` shim and need nothing.
 
-`git` takes the repository's index lock for the subcommands that write the index: `commit`, `merge`,
+With `SWITCHYARD_GIT=1`, `git` takes the index lock for the subcommands that write the index: `commit`, `merge`,
 `rebase`, `cherry-pick`, `stash`, `am`, `add`, `rm`, `mv`, `reset`, `restore`, `checkout`, `switch`,
-`pull` and `revert`. Global options before the subcommand (`git -C <dir> commit`, `git -c k=v add`)
-are read past, and the lock is taken on the repository they point to.
+`pull` and `revert`, so two sessions in the same working tree do not collide on `index.lock`. Global options before
+the subcommand (`git -C <dir> commit`, `git -c k=v add`) are read past, and the lock is taken on the repository they
+point to. Each git worktree has its own index, so sessions in separate worktrees never wait for each other. By default
+(`SWITCHYARD_GIT` unset) the `git` shim hands every command straight to git.
 
 The daemon reads its capacity (`SWITCHYARD_CAPACITY`, `reserve` in `~/.switchyard/config.json`) when it
 starts. After changing either, run `switchyard restart`.
@@ -226,20 +233,21 @@ After an update the daemon that is already running keeps the old version; the ne
 and `switchyard restart` brings the new one up. `PATH` lines that point at the old install are
 removed by the next `SessionStart`.
 
-`SessionStart` compares this version with the one published on GitHub, at most once a day, and says when a newer one
-is out. Set `SWITCHYARD_UPDATE_CHECK=0` (for example in the `env` of your Claude Code settings) to turn that off. What
+With `SWITCHYARD_UPDATE_CHECK=1` (for example in the `env` of your Claude Code settings), `SessionStart` compares this
+version with the one published on GitHub, at most once a day, and says when a newer one is out. It is off by default,
+so switchyard makes no network requests unless you ask. What
 changed in each release is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Turning it off, and taking it out
 
-switchyard installs three hooks, and two of them can stop you: `PreToolUse` refuses a
-command that calls a shimmed binary by path or overrides the environment to get past the shim, and `Stop` holds the session back while a job
-of yours ended in a way nobody has looked at. The ways out:
+switchyard installs three hooks, and one of them can stop you: `PreToolUse` refuses a command that calls a shimmed
+binary by path or overrides the environment to get past the shim (`Stop` only tells you something, unless you set
+`SWITCHYARD_STOP=block`). The ways out:
 
 | Want | Do |
 |---|---|
-| Let a blocked session end | `switchyard ack <job>` for each job it names. From your own terminal this finds the session by job id; from a Claude session it only acks that session's jobs. An id that is not waiting to be acked is reported as an error |
-| Silence every hook for one session | `SWITCHYARD_THINKER=1` in the environment |
+| Clear a failed run you have looked at (or let a session held by `SWITCHYARD_STOP=block` end) | `switchyard ack <job>` for each job it names. From your own terminal this finds the session by job id; from a Claude session it only acks that session's jobs. An id that is not waiting to be acked is reported as an error |
+| Turn switchyard off for a session | `SWITCHYARD_OFF=1` in the environment: the hooks do nothing and the shims run the real tools directly (the old name `SWITCHYARD_THINKER=1` still works) |
 | Stop the daemon | `switchyard stop` (it starts again on the next request) |
 | Run one command outside the queue | `switchyard run --class quick -- <command>`. The hook refuses the other ways around the shim for a command it would queue: calling a shimmed binary by path (`/usr/local/bin/npm test`), replacing `PATH` without keeping `$PATH`, `env -i`, and setting `SWITCHYARD_IN_JOB` or `SWITCHYARD_HELD_LOCKS` |
 | Watch without acting | `SWITCHYARD_OBSERVE=1`: nothing is held back, queued or refused; `switchyard report` shows what would have happened |
@@ -256,17 +264,33 @@ Everything lives under `~/.switchyard` (or `SWITCHYARD_HOME`), readable by you o
 | File | Holds |
 |---|---|
 | `state.json` | What runs and waits right now |
-| `events.jsonl` | Every decision, every job: **the full command string**, the repo path, the session id, exit codes, durations |
+| `events.jsonl` | Every decision, every job: the command (secrets masked), the repo path, the session id, exit codes, durations |
 | `hooks.jsonl` | Every `PreToolUse` verdict, with the command string and the working directory |
 | `unmanaged.jsonl` | Runs that happened while the daemon was unreachable |
 | `observed.jsonl` | In observe-only mode, when each heavy run started and ended |
 
-Commands are stored verbatim, so anything you type on a command line — including a secret
-passed as an argument — ends up in `events.jsonl`. The journals are capped: past 8MB the
-current one is rolled to `<name>.1` and a new one starts, so at most two generations are
-kept. Nothing is sent anywhere; these files never leave the machine. The only network access is the update check,
-which fetches `plugin.json` from GitHub at most once a day and sends nothing else (`SWITCHYARD_UPDATE_CHECK=0` turns
-it off).
+Commands are stored with values that look like secrets replaced by `***` (see above). Masking works from patterns,
+so a secret with no telltale name or shape can still get through: `SWITCHYARD_LOG_COMMANDS=none` keeps only the
+first word of each command, and `SWITCHYARD_LOG_COMMANDS=full` keeps everything as typed. The journals are capped:
+past 8MB the current one is rolled to `<name>.1` and a new one starts, so at most two generations are kept. Nothing is
+sent anywhere; these files never leave the machine. switchyard makes no network requests unless you turn on the
+update check (`SWITCHYARD_UPDATE_CHECK=1`), which then fetches `plugin.json` from GitHub at most once a day and sends
+nothing else.
+
+## Questions people ask
+
+- **Does the daemon listen on the network?** No. It is one process per user, reachable only through a Unix socket in
+  `~/.switchyard` (owner-only). It starts on demand and needs no root.
+- **Does it see other things on the machine?** For memory and spare CPU, yes: it measures the whole machine, so Docker,
+  emulators, IDEs and other users' processes all count. For queueing, no: only runs that go through switchyard wait
+  for each other, and a run alone always starts. On a machine shared with other people, a run that has switchyard to
+  itself is still given every core; set `SWITCHYARD_CAPACITY` lower, or `SWITCHYARD_THREAD_ENV=0`, if that is too much.
+- **Git worktrees?** Each worktree has its own index, so the git lock (off by default) never makes them wait. Test and
+  build runs from different worktrees do share the CPU queue, which is the point.
+- **Headless `claude -p`?** The hooks run the same way. Nothing holds a session back by default, so a scripted run
+  ends normally. Sending a run to the background makes little sense when nobody waits for the notice;
+  `SWITCHYARD_BACKGROUND=never` keeps every run in the foreground (it still waits its turn). This has not been tested
+  at scale yet.
 
 ### Why the tests ship with it
 
@@ -295,8 +319,8 @@ MIT. See [LICENSE](LICENSE).
 
 1 台のノート PC で Claude Code のセッションを 2〜3 本動かしていると(worktree ごとに 1 本、あるいは並列のエージェント)、
 いつかは全部が同時に `npm test` や `cargo build`、`./gradlew test` を始める。どの走行も遅くなり、その最中に取ったベンチの
-数字は意味を失い、メモリが尽き、2 つのセッションが同じ git の index で衝突する。switchyard はそれらの走行を順番待ちに
-乗せる。CPU の取り分を割り振り、メモリを見て、排他の鍵(ポート・git の index・好きな名前)を渡すので、重い走行は
+数字は意味を失い、メモリが尽きる。switchyard はそれらの走行を順番待ちに
+乗せる。CPU の取り分を割り振り、メモリを見て、排他の鍵(ポート・データベース・好きな名前)を渡すので、重い走行は
 ぶつからずに順番に走る。コマンドの打ち方は今のまま。
 
 ## 向いている人・向いていない人
@@ -330,12 +354,16 @@ node bin/switchyard.mjs replay --since 14d
 ## 入れると何が変わるか
 
 - **自分も Claude も、コマンドの打ち方は変わらない。** `npm` / `npx` / `node` / `yarn` / `pnpm` / `bun` / `cargo` / `pytest` /
-  `python` / `python3` / `uv` / `poetry` / `go` / `mvn` / `gradle` / `dotnet` / `bundle` / `rspec` / `deno` / `make` / `git` の前に入る
-  `PATH` の shim が、テストやビルドの走行を見分けて順番待ちに乗せる。それ以外はそのまま通る。
+  `python` / `python3` / `uv` / `poetry` / `go` / `mvn` / `gradle` / `dotnet` / `bundle` / `rspec` / `deno` / `make` の前に入る
+  `PATH` の shim が、テストやビルドの走行を見分けて順番待ちに乗せる。それ以外はそのまま通る(`git` にも shim はあるが、
+  有効にしない限り何もしない。下を参照)。
 - **重い走行は順番に走る。** 待つことになる走行は、Claude が背景で走らせ、終わったら知らせを受けるので、セッションは
   止まらない。`switchyard top` で、何が走り、何が待ち、なぜかが見える。
-- **失敗した走行を見落とさない。** 順番待ちに乗った走行が失敗して誰も見ていなければ、セッションは止まる前にそれを見るよう
-  求められる。後で同じコマンドが成功するか、`switchyard ack <job>` で消える。
+- **失敗した走行を見落とさない。** 順番待ちに乗った走行が失敗して誰も見ていなければ、セッションが止まるときにあなたに
+  知らせる(1 本につき 1 回。Claude には何もさせない)。後で同じコマンドが成功するか、`switchyard ack <job>` で消える。
+  `SWITCHYARD_STOP=block` にすると、止まる前に Claude に確かめさせる。
+- **秘密を記録に残さない。** 秘密らしい値(`API_KEY=…`・`--password …`・`-Dx.password=…`・`mysql -p…`・URL の `user:pass@`・
+  `Authorization:` ヘッダ・`sk-…`・`ghp_…`・`AKIA…` などのトークンの形)は `***` として記録する。走らせるコマンドは変えない。
 - **いくつかの形は拒否し、直し方を示す。** shim から見えない形(`./gradlew test`・`.venv/bin/pytest`・フルパスで呼ぶ道具)は
   順番待ちを素通りするので拒否し、代わりに使う `switchyard run -- …` をそのまま示す。Claude は自分でそれに従う。
 - **走行は自分の取り分を守る。** 割り当てたコア数を、道具が読むスレッド数・ワーカー数として渡す(`CARGO_BUILD_JOBS`・
@@ -393,7 +421,7 @@ node bin/switchyard.mjs replay --since 14d
 |---|---|
 | `SessionStart` | そのセッションの `PATH` の先頭に `shims/` を足す |
 | `PreToolUse` (Bash) | CPU を持つ走行が待たされる見込み(待ち列・計測・使われている鍵・CPU の空き不足)のときだけ背景実行に回す。本物の実行ファイルをパスで直に呼ぶ抜け道を拒否する。`SWITCHYARD_BACKGROUND=always` で重い走行を必ず背景へ、`never` で回さない。重い道具の名前を含まないコマンド(`ls`・`git status`・`node -e`)は、`sh`/`awk` のふるいが Node を起動せずに約 4ms で通す |
-| `Stop` | そのセッションのジョブに、まだ誰も確かめていない終わり方があれば止まるのを差し戻す |
+| `Stop` | そのセッションの走行に、まだ誰も確かめていない終わり方があれば知らせる(`SWITCHYARD_STOP=block` なら止まるのを差し戻す) |
 
 ## コマンド
 
@@ -453,9 +481,11 @@ shim から見えない重い走行もある: パスで呼ぶスクリプト(`./
 来る)。`PreToolUse` はこれらを拒否し、`switchyard run -- <コマンド>` で包むよう案内する(包めば順番待ちに乗る)。
 `node_modules/.bin` の下のスクリプトは `node` の shim を通るので、何もしなくてよい。
 
-`git` は index を書き換えるサブコマンド(`commit`・`merge`・`rebase`・`cherry-pick`・`stash`・`am`・
-`add`・`rm`・`mv`・`reset`・`restore`・`checkout`・`switch`・`pull`・`revert`)のとき、その repo の index の鍵を取る。
-サブコマンドの前の大域オプション(`git -C <dir> commit`・`git -c k=v add`)は読み飛ばし、鍵はそれが指す repo のものを取る。
+`SWITCHYARD_GIT=1` にすると、`git` は index を書き換えるサブコマンド(`commit`・`merge`・`rebase`・`cherry-pick`・`stash`・`am`・
+`add`・`rm`・`mv`・`reset`・`restore`・`checkout`・`switch`・`pull`・`revert`)のとき、その repo の index の鍵を取る
+(同じ作業ツリーの 2 つのセッションが `index.lock` でぶつからない)。サブコマンドの前の大域オプション(`git -C <dir> commit`・
+`git -c k=v add`)は読み飛ばし、鍵はそれが指す repo のものを取る。git の worktree はそれぞれ別の index を持つので、別の worktree の
+セッション同士は待たない。既定(`SWITCHYARD_GIT` なし)では、`git` の shim はどのコマンドもそのまま git に渡す。
 
 デーモンは容量(`SWITCHYARD_CAPACITY`・`~/.switchyard/config.json` の `reserve`)を起動時に読む。変えたら `switchyard restart`。
 
@@ -477,17 +507,17 @@ VS Code の拡張でも同じで、`/plugins` で Manage plugins の画面が開
 更新しても、走っているデーモンは古い版のまま残る。次のセッションがそれを知らせるので、`switchyard restart` で入れ替える。
 古い置き場を指す `PATH` の行は、次の `SessionStart` が取り除く。
 
-`SessionStart` がいまの版と GitHub で公開されている版を 1 日に 1 回まで比べ、新しい版が出ていれば知らせる。
-止めるには `SWITCHYARD_UPDATE_CHECK=0` を設定する(Claude Code の設定の `env` など)。各版の変更は [CHANGELOG.md](CHANGELOG.md) にある。
+`SWITCHYARD_UPDATE_CHECK=1` を設定すると(Claude Code の設定の `env` など)、`SessionStart` がいまの版と GitHub で公開されている版を
+1 日に 1 回まで比べ、新しい版が出ていれば知らせる。既定では無効で、頼まない限り switchyard は外へ通信しない。各版の変更は [CHANGELOG.md](CHANGELOG.md) にある。
 
 ## 切る・外す
 
-switchyard は hook を 3 つ入れる。そのうち 2 つは作業を止めうる。`PreToolUse` は shim の語の実行ファイルをパスで直に呼ぶコマンドと、環境変数で shim を素通りさせるコマンドを拒否し、`Stop` は自分のジョブに誰も見ていない終わり方があるとセッションの終了を差し戻す。逃げ道:
+switchyard は hook を 3 つ入れる。作業を止めうるのは `PreToolUse` だけで、shim の語の実行ファイルをパスで直に呼ぶコマンドと、環境変数で shim を素通りさせるコマンドを拒否する(`Stop` は知らせるだけ。`SWITCHYARD_STOP=block` のときだけ差し戻す)。逃げ道:
 
 | したいこと | すること |
 |---|---|
-| 差し戻されたセッションを終わらせる | 挙がったジョブごとに `switchyard ack <job>`。人の端末からはジョブ id でセッションを探す。Claude のセッションからは自分のセッションのジョブだけ。確認待ちに無い id はエラーになる |
-| このセッションだけ hook を全部黙らせる | 環境変数 `SWITCHYARD_THINKER=1` |
+| 確かめた失敗を消す(`SWITCHYARD_STOP=block` で差し戻されたセッションを終わらせる) | 挙がったジョブごとに `switchyard ack <job>`。人の端末からはジョブ id でセッションを探す。Claude のセッションからは自分のセッションのジョブだけ。確認待ちに無い id はエラーになる |
+| このセッションで switchyard を止める | 環境変数 `SWITCHYARD_OFF=1`。hook は何もせず、shim は本物をそのまま走らせる(以前の名前 `SWITCHYARD_THINKER=1` も効く) |
 | デーモンを止める | `switchyard stop`(次の要求で起動し直す) |
 | 1 本だけ順番待ちの外で走らせる | `switchyard run --class quick -- <コマンド>` で包む |
 | 何もさせずに見るだけにする | `SWITCHYARD_OBSERVE=1`。止めも並べも拒否もしない。入れていれば何が起きたかは `switchyard report` で分かる |
@@ -504,12 +534,28 @@ switchyard は hook を 3 つ入れる。そのうち 2 つは作業を止めう
 | ファイル | 中身 |
 |---|---|
 | `state.json` | いま走っているもの・待っているもの |
-| `events.jsonl` | すべての決定とジョブ。**コマンドの全文**・repo のパス・セッション id・終了コード・所要時間 |
+| `events.jsonl` | すべての決定とジョブ。コマンド(秘密は伏せる)・repo のパス・セッション id・終了コード・所要時間 |
 | `hooks.jsonl` | `PreToolUse` の判断。コマンドの文字列と作業ディレクトリつき |
 | `unmanaged.jsonl` | デーモンに届かない間に走ったもの |
 | `observed.jsonl` | 観察だけのモードで、重い走行が始まった時刻と終わった時刻 |
 
-コマンドはそのままの文字列で残る。引数に渡した秘密も `events.jsonl` に入る。記録には上限があり、8MB を超えると `<名前>.1` へ回して新しく始めるので、残るのは 2 世代まで。どこにも送信しない。機械の外へは出ない。外へ問い合わせるのは更新の確認だけで、1 日に 1 回まで GitHub から `plugin.json` を取ってくる以外は何も送らない(`SWITCHYARD_UPDATE_CHECK=0` で止まる)。
+コマンドは、秘密らしい値を `***` に置き換えて残す(上を参照)。形と名前から見分けるので、手がかりの無い秘密はすり抜けうる。
+`SWITCHYARD_LOG_COMMANDS=none` にすると各コマンドの最初の語だけを、`full` にすると打ったとおりを残す。記録には上限があり、8MB を超えると
+`<名前>.1` へ回して新しく始めるので、残るのは 2 世代まで。どこにも送信しない。機械の外へは出ない。更新の確認(`SWITCHYARD_UPDATE_CHECK=1`)を
+有効にしない限り外へ通信しない。有効にしても、1 日に 1 回まで GitHub から `plugin.json` を取ってくる以外は何も送らない。
+
+## よく聞かれること
+
+- **デーモンはネットワークで待ち受けるか。** しない。ユーザーごとに 1 つのプロセスで、`~/.switchyard`(持ち主だけが読める)の
+  Unix ソケットからしか話せない。必要になったときに自分で起動し、root は要らない。
+- **機械のほかのものは見えるか。** メモリと空いている CPU は機械全体を測るので、Docker・エミュレータ・IDE・他のユーザーの
+  プロセスも数に入る。順番待ちは switchyard を通った走行同士だけで、単独の走行は必ず走る。他の人と共有する機械では、
+  switchyard の中で単独の走行にも全コアを渡すので、多すぎるなら `SWITCHYARD_CAPACITY` を下げるか `SWITCHYARD_THREAD_ENV=0` にする。
+- **git の worktree は。** worktree ごとに index は別なので、git の鍵(既定は無効)で待つことはない。別の worktree からのテストや
+  ビルドは CPU の順番待ちを分け合う。それが狙い。
+- **headless の `claude -p` では。** hook は同じように動く。既定では何もセッションを差し戻さないので、スクリプトの走行は普通に
+  終わる。知らせを待つ人がいないので背景に回す意味は薄く、`SWITCHYARD_BACKGROUND=never` で前景のまま走らせられる(順番は
+  普段どおり待つ)。大規模にはまだ試していない。
 
 ### テストを同梱している理由
 

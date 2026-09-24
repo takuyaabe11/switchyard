@@ -7,6 +7,6 @@
 
 - このマシンでは switchyard が重い走行(テスト全件・build・e2e・ベンチ)の順番と CPU を割り振る。コマンドはそのまま打てばよく、shim が自動で順番待ちに回し、待たされる見込みがあれば背景実行に回す。
 - 待ちの理由は `switchyard top` / `switchyard why <job>` で読む。待ちの間に同じコマンドを打ち直さない。
-- Stop で差し戻されたら、挙がったジョブの失敗を確かめてから `switchyard ack <job>` する。
+- Stop で差し戻されたら(`SWITCHYARD_STOP=block` のとき)、挙がったジョブの失敗を確かめてから `switchyard ack <job>` する。
 - `SWITCHYARD_IN_JOB` などを自分で立てたり、本物のコマンドをパスで直に呼んだりして順番を避けない。
 ```
