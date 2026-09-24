@@ -11,7 +11,12 @@ version goes up.
   read-only (`python`, `sed -i`, `> file`, `git checkout`, ...) as a possible edit; loose counting only looks at the
   edit tools. It also reports how many re-runs came right after a failure, the foreground time they took, and the
   commands re-run most. This is the work that merging identical runs or reusing their results could save, measured
-  on your own logs before any such feature is built. On the maintainer's logs (196 heavy runs) it was one re-run.
+  on your own logs before any such feature is built. On the maintainer's logs (196 heavy runs) it was one re-run; on a
+  heavy user's month (12,959 heavy runs) 8 strict and 53 loose re-runs, 33 minutes at most, so no such cache is planned.
+- `switchyard replay` also reports heavy-run time: for the runs whose result was waited for in the foreground, the
+  median and 90th-percentile duration, the share under 10 s and under 1 min, the total time Claude waited, and how
+  often runs from different sessions overlapped (runs that overlapped another, time with two or more running, most at
+  once). Background runs are counted but left out, since the log does not say when they ended.
 
 ## 0.14.0
 

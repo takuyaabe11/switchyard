@@ -162,3 +162,85 @@ export function countSession(steps, isHeavy, acc, byCommand) {
     pending.set(s.id, { key, at: s.at, background: s.background });
   }
 }
+
+/**
+ * 前景で結果を待った重い走行の時間の区間(始まり = Bash の呼び出し、終わり = その結果)。背景の走行は結果がすぐ返り終わりが分からないので数だけ。
+ * @typedef {{ start: number, end: number, session: number }} Interval
+ * @param {Step[]} steps @param {(call: { command: string, cwd: string }) => boolean} isHeavy @param {number} session 記録の番号
+ * @returns {{ intervals: Interval[], background: number }}
+ */
+export function intervalsOf(steps, isHeavy, session) {
+  /** @type {Map<string, number>} */
+  const open = new Map();
+  /** @type {Interval[]} */
+  const intervals = [];
+  let background = 0;
+  for (const s of steps) {
+    if (s.kind === 'bash') {
+      if (!isHeavy({ command: s.command, cwd: s.cwd })) continue;
+      if (s.background) background += 1;
+      else if (Number.isFinite(s.at)) open.set(s.id, s.at);
+    } else if (s.kind === 'result') {
+      const start = open.get(s.id);
+      if (start === undefined) continue;
+      open.delete(s.id);
+      if (Number.isFinite(s.at) && s.at >= start) intervals.push({ start, end: s.at, session });
+    }
+  }
+  return { intervals, background };
+}
+
+/**
+ * @typedef {{ runs: number, background: number, totalMs: number, medianMs: number, p90Ms: number, under10s: number, under60s: number,
+ *   overlappedRuns: number, overlapMs: number, maxConcurrent: number }} Timing
+ */
+
+/**
+ * 重い走行の所要の分布と、セッションをまたいだ重なり(2 本以上が同時に走っていた時間・他と重なった走行・同時に走った最大の本数)。
+ * 同じ記録(セッション)の前景の走行同士は重ならないので、重なりはセッションをまたいだものになる。
+ * @param {Interval[]} intervals @param {number} background @returns {Timing}
+ */
+export function timingOf(intervals, background) {
+  const durations = intervals.map((i) => i.end - i.start).sort((a, b) => a - b);
+  const at = (/** @type {number} */ q) => (durations.length === 0 ? 0 : durations[Math.min(durations.length - 1, Math.floor(q * (durations.length - 1)))]);
+  // 走査: 始まりと終わりを時刻順に並べ(同じ時刻なら終わりが先。つながっているだけの 2 本は重ならない)、同時に走っている本数を数える
+  /** @type {Array<{ t: number, d: 1 | -1, i: number }>} */
+  const edges = [];
+  intervals.forEach((iv, i) => {
+    if (iv.end > iv.start) edges.push({ t: iv.start, d: 1, i }, { t: iv.end, d: -1, i });
+  });
+  edges.sort((a, b) => a.t - b.t || a.d - b.d);
+  /** @type {Set<number>} */
+  const active = new Set();
+  /** @type {Set<number>} */
+  const overlapped = new Set();
+  let overlapMs = 0;
+  let maxConcurrent = 0;
+  let last = 0;
+  for (const e of edges) {
+    if (active.size >= 2) overlapMs += e.t - last;
+    last = e.t;
+    if (e.d === 1) {
+      if (active.size > 0) {
+        overlapped.add(e.i);
+        for (const j of active) overlapped.add(j);
+      }
+      active.add(e.i);
+      maxConcurrent = Math.max(maxConcurrent, active.size);
+    } else {
+      active.delete(e.i);
+    }
+  }
+  return {
+    runs: intervals.length,
+    background,
+    totalMs: durations.reduce((n, d) => n + d, 0),
+    medianMs: at(0.5),
+    p90Ms: at(0.9),
+    under10s: durations.filter((d) => d < 10_000).length,
+    under60s: durations.filter((d) => d < 60_000).length,
+    overlappedRuns: overlapped.size,
+    overlapMs,
+    maxConcurrent,
+  };
+}

@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_PROFILES } from '../../src/config/profiles.mjs';
 import { formatReport, replay } from '../../src/replay/replay.mjs';
-import { countSession, emptyReruns, isReadOnly, stepsOf } from '../../src/replay/reruns.mjs';
+import { countSession, emptyReruns, intervalsOf, isReadOnly, stepsOf, timingOf } from '../../src/replay/reruns.mjs';
 
 const T0 = Date.parse('2026-09-10T00:00:00.000Z');
 const iso = (/** @type {number} */ ms) => new Date(T0 + ms).toISOString();
@@ -88,5 +88,44 @@ describe('replay の走り直しの集計', () => {
     assert.match(text, /同じ状態での走り直し\(重い走行 3 件のうち/);
     assert.match(text, /厳しめ: 1 件\(33\.3%\)・前景の所要の合計 8秒/);
     assert.match(text, /1 回・8秒 {2}npm test/);
+  });
+});
+
+describe('intervalsOf・timingOf(重い走行の時間とセッションをまたいだ重なり)', () => {
+  const heavy = (/** @type {{ command: string }} */ c) => c.command.startsWith('npm test');
+
+  it('前景で結果を待った重い走行だけを区間にし、背景の走行は数だけ', () => {
+    const { intervals, background } = intervalsOf([bash('a', 'npm test', 0), result('a', 5000), bash('b', 'ls', 6000), result('b', 6100), bash('c', 'npm test', 7000, true), result('c', 7100)].flatMap(stepsOf), heavy, 3);
+    assert.deepEqual(intervals, [{ start: T0, end: T0 + 5000, session: 3 }]);
+    assert.equal(background, 1);
+  });
+
+  it('所要の分布と、2 本以上が同時に走っていた時間・重なった走行・最大同時を出す(つながっているだけなら重ならない)', () => {
+    const iv = (/** @type {number} */ s, /** @type {number} */ e, /** @type {number} */ session) => ({ start: s * 1000, end: e * 1000, session });
+    // 2 本以上が同時なのは 5〜12 秒(7 秒。8〜10 秒は 3 本同時)。20-30 は 5-20 につながるだけ。100-200 は単独
+    const tm = timingOf([iv(0, 10, 0), iv(5, 20, 1), iv(8, 12, 2), iv(20, 30, 0), iv(100, 200, 1)], 4);
+    assert.equal(tm.runs, 5);
+    assert.equal(tm.background, 4);
+    assert.equal(tm.totalMs, (10 + 15 + 4 + 10 + 100) * 1000);
+    assert.deepEqual([tm.medianMs, tm.p90Ms], [10_000, 15_000]);
+    assert.deepEqual([tm.under10s, tm.under60s], [1, 4]);
+    assert.deepEqual([tm.overlappedRuns, tm.overlapMs, tm.maxConcurrent], [3, 7000, 3]);
+  });
+
+  it('区間が無ければ 0', () => {
+    assert.deepEqual(timingOf([], 0), { runs: 0, background: 0, totalMs: 0, medianMs: 0, p90Ms: 0, under10s: 0, under60s: 0, overlappedRuns: 0, overlapMs: 0, maxConcurrent: 0 });
+  });
+
+  it('replay はセッション(記録)をまたいだ重なりを数え、文面に出す', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'crt-'));
+    mkdirSync(join(root, 'p'));
+    writeFileSync(join(root, 'p', 'a.jsonl'), [bash('a1', 'npm test', 0), result('a1', 20_000)].join('\n') + '\n');
+    writeFileSync(join(root, 'p', 'b.jsonl'), [bash('b1', 'npm test', 10_000), result('b1', 40_000), bash('b2', 'npm test', 50_000, true), result('b2', 50_100)].join('\n') + '\n');
+    const r = await replay({ dir: root, cwdPrefix: null, since: null, profilesFor: () => DEFAULT_PROFILES, examples: 5, git: false });
+    assert.deepEqual([r.timing.runs, r.timing.background, r.timing.overlappedRuns, r.timing.overlapMs, r.timing.maxConcurrent], [2, 1, 2, 10_000, 2]);
+    const text = formatReport(r, { cwdPrefix: null, sinceDays: null, examples: 5 });
+    assert.match(text, /重い走行の時間\(前景で結果を待った 2 本。背景の 1 本は/);
+    assert.match(text, /Claude が結果を待った時間の合計: 50秒/);
+    assert.match(text, /他と重なった走行 2 本\(100\.0%\)・2 本以上が同時に走っていた時間 10秒\(待った時間の合計の 20\.0%\)・最大同時 2 本/);
   });
 });

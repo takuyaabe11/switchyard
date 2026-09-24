@@ -317,6 +317,36 @@ const SUITES = {
         to: 'const ms = !Number.isFinite',
       },
       {
+        name: 'R21 背景の走行も区間に入れる',
+        file: 'src/replay/reruns.mjs',
+        from: '      if (s.background) background += 1;\n      else if',
+        to: '      if',
+      },
+      {
+        name: 'R22 同じ時刻の終わりと始まりを重なりと数える',
+        file: 'src/replay/reruns.mjs',
+        from: 'a.t - b.t || a.d - b.d',
+        to: 'a.t - b.t || b.d - a.d',
+      },
+      {
+        name: 'R23 3 本以上の同時を最大に数えない',
+        file: 'src/replay/reruns.mjs',
+        from: 'maxConcurrent = Math.max(maxConcurrent, active.size);',
+        to: 'maxConcurrent = Math.max(maxConcurrent, Math.min(active.size, 2));',
+      },
+      {
+        name: 'R24 重なった走行に先に走っていた側を数えない',
+        file: 'src/replay/reruns.mjs',
+        from: '        for (const j of active) overlapped.add(j);\n',
+        to: '',
+      },
+      {
+        name: 'R25 1 本だけ走っている時間も重なりに足す',
+        file: 'src/replay/reruns.mjs',
+        from: 'if (active.size >= 2) overlapMs += e.t - last;',
+        to: 'if (active.size >= 1) overlapMs += e.t - last;',
+      },
+      {
         name: 'R20 再開したセッションが持ち越した行を 2 度数える',
         file: 'src/replay/replay.mjs',
         from: "          if (st.id !== '' && stepSeen.has(st.id)) {",

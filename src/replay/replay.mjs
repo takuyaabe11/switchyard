@@ -12,7 +12,7 @@ import { decideShim } from '../shim/decide.mjs';
 import { maskSecrets } from '../redact.mjs';
 import { t } from '../i18n.mjs';
 import { duration } from '../cli/render.mjs';
-import { countSession, emptyReruns, stepsOf } from './reruns.mjs';
+import { countSession, emptyReruns, intervalsOf, stepsOf, timingOf } from './reruns.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
 /** @typedef {{ id: string, command: string, runInBackground: boolean, cwd: string, timestamp: string }} BashCall */
@@ -29,7 +29,8 @@ import { countSession, emptyReruns, stepsOf } from './reruns.mjs';
  *   hook: { deny: number, ask: number, wrap: number, background: number, alreadyBackground: number, none: number },
  *   shim: { run: Record<string, number>, lock: number, pass: number },
  *   examples: { deny: Example[], wrap: Example[], background: Example[] },
- *   reruns: import('./reruns.mjs').Reruns
+ *   reruns: import('./reruns.mjs').Reruns,
+ *   timing: import('./reruns.mjs').Timing
  * }} Report
  */
 
@@ -141,7 +142,11 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
     shim: { run: {}, lock: 0, pass: 0 },
     examples: { deny: [], wrap: [], background: [] },
     reruns: emptyReruns(),
+    timing: timingOf([], 0),
   };
+  /** @type {import('./reruns.mjs').Interval[]} */
+  const intervals = [];
+  let backgroundRuns = 0;
   /** @type {Map<string, boolean>} 重い走行かの判定(同じコマンドを何度も判定しない) */
   const heavyCache = new Map();
   /** @param {{ command: string, cwd: string }} call */
@@ -235,7 +240,11 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
       }
     }
     countSession(steps, isHeavy, report.reruns, rerunByCommand);
+    const got = intervalsOf(steps, isHeavy, files.indexOf(file));
+    for (const iv of got.intervals) intervals.push(iv);
+    backgroundRuns += got.background;
   }
+  report.timing = timingOf(intervals, backgroundRuns);
   report.reruns.top = [...rerunByCommand]
     .map(([key, v]) => ({ command: key.slice(key.indexOf('\u0000') + 1), count: v.count, ms: v.ms }))
     .sort((a, b) => b.count - a.count || b.ms - a.ms)
@@ -312,6 +321,15 @@ export function formatReport(r, { cwdPrefix, sinceDays, examples }) {
       lines.push(t(`  緩め(Bash での書き換えは見ない): ${rr.loose.count} 件(${rp(rr.loose.count)}%)・${duration(rr.loose.ms)}`, `  loose (ignoring edits made through Bash): ${rr.loose.count} (${rp(rr.loose.count)}%), ${duration(rr.loose.ms)}`));
       lines.push(t(`  うち失敗の直後の走り直し: ${rr.afterFailure} 件`, `  of which right after a failure: ${rr.afterFailure}`));
       for (const x of rr.top) lines.push(t(`    ${x.count} 回・${duration(x.ms)}  ${oneLine(maskSecrets(x.command))}`, `    ${x.count}x, ${duration(x.ms)}  ${oneLine(maskSecrets(x.command))}`));
+    }
+    const tm = r.timing;
+    if (tm.runs > 0) {
+      const tp = (/** @type {number} */ n) => ((n / tm.runs) * 100).toFixed(1);
+      const mp = (/** @type {number} */ n) => (tm.totalMs === 0 ? '0.0' : ((n / tm.totalMs) * 100).toFixed(1));
+      lines.push(t(`重い走行の時間(前景で結果を待った ${tm.runs} 本。背景の ${tm.background} 本は終わりが分からないので除く)`, `Heavy-run time (${tm.runs} runs whose result was waited for in the foreground; ${tm.background} background runs left out, their end is unknown)`));
+      lines.push(t(`  1 本の所要: 中央 ${duration(tm.medianMs)}・90% は ${duration(tm.p90Ms)} 以下・10 秒未満 ${tp(tm.under10s)}%・1 分未満 ${tp(tm.under60s)}%`, `  per run: median ${duration(tm.medianMs)}, 90% within ${duration(tm.p90Ms)}, under 10 s ${tp(tm.under10s)}%, under 1 min ${tp(tm.under60s)}%`));
+      lines.push(t(`  Claude が結果を待った時間の合計: ${duration(tm.totalMs)}`, `  total time Claude waited for results: ${duration(tm.totalMs)}`));
+      lines.push(t(`  セッションをまたいだ重なり: 他と重なった走行 ${tm.overlappedRuns} 本(${tp(tm.overlappedRuns)}%)・2 本以上が同時に走っていた時間 ${duration(tm.overlapMs)}(待った時間の合計の ${mp(tm.overlapMs)}%)・最大同時 ${tm.maxConcurrent} 本`, `  overlap across sessions: ${tm.overlappedRuns} runs overlapped another (${tp(tm.overlappedRuns)}%); 2 or more ran at once for ${duration(tm.overlapMs)} (${mp(tm.overlapMs)}% of the total wait); at most ${tm.maxConcurrent} at once`));
     }
 
     for (const [label, xs] of /** @type {Array<[string, Example[]]>} */ ([
