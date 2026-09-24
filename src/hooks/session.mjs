@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { ask, connectDaemon, DaemonUnavailableError } from '../client/connect.mjs';
 import { switchyardHome, pathsOf } from '../daemon/paths.mjs';
 import { VERSION } from '../version.mjs';
+import { t } from '../i18n.mjs';
 
 /** @typedef {import('../protocol/messages.mjs').Snapshot} Snapshot */
 /** @typedef {import('../core/types.mjs').Unacked} Unacked */
@@ -74,7 +75,12 @@ export async function sessionStart(_input, { env = process.env, connect = connec
   const lines = [];
   const envFile = env.CLAUDE_ENV_FILE;
   if (envFile === undefined || envFile === '') {
-    lines.push('[switchyard] shim を PATH に足せない(CLAUDE_ENV_FILE が無い)ので、このセッションの重い走行は switchyard に管理されない');
+    lines.push(
+      t(
+        '[switchyard] shim を PATH に足せない(CLAUDE_ENV_FILE が無い)ので、このセッションの重い走行は switchyard に管理されない',
+        '[switchyard] cannot put the shims on PATH (no CLAUDE_ENV_FILE), so heavy runs in this session are not managed by switchyard',
+      ),
+    );
   } else {
     const line = pathExportLine(root);
     let text = existsSync(envFile) ? readFileSync(envFile, 'utf8') : '';
@@ -84,7 +90,12 @@ export async function sessionStart(_input, { env = process.env, connect = connec
     if (dead.length > 0) {
       text = pruneShimLines(text, dead);
       writeFileAtomic(envFile, text);
-      lines.push(`[switchyard] PATH から、もう無い shims を指す行を外した: ${dead.join(' / ')}(plugin の更新か置き場の移動で残ったもの)`);
+      lines.push(
+        t(
+          `[switchyard] PATH から、もう無い shims を指す行を外した: ${dead.join(' / ')}(plugin の更新か置き場の移動で残ったもの)`,
+          `[switchyard] removed PATH lines pointing at shims that no longer exist: ${dead.join(' / ')} (left over from a plugin update or move)`,
+        ),
+      );
     }
     // resume / clear / compact でも呼ばれるので、同じ行を 2 度足さない
     if (!text.split('\n').includes(line)) appendFileSync(envFile, `${line}\n`);
@@ -95,19 +106,37 @@ export async function sessionStart(_input, { env = process.env, connect = connec
     const m = await ask(conn, { t: 'status' }, (x) => x.t === 'status');
     const snap = /** @type {Snapshot} */ (m.snapshot);
     const measure = snap.leases.find((l) => l.class === 'measure');
-    if (measure !== undefined) lines.push(`[switchyard] 計測 ${measure.id}(${measure.cmd})が走っている。重い走行は計測が終わるまで待ちになる`);
+    if (measure !== undefined) {
+      lines.push(
+        t(
+          `[switchyard] 計測 ${measure.id}(${measure.cmd})が走っている。重い走行は計測が終わるまで待ちになる`,
+          `[switchyard] measurement ${measure.id} (${measure.cmd}) is running; heavy runs wait until it ends`,
+        ),
+      );
+    }
     if (snap.version !== version) {
       // 版を snapshot に載せ始めたのは 0.2.0 なので、名乗らないデーモンは 0.1.0 以前
-      lines.push(`[switchyard] 走っているデーモンの版 ${snap.version ?? '0.1.0 以前'} と plugin の版 ${version} が違う。switchyard restart で入れ替わる`);
+      lines.push(
+        t(
+          `[switchyard] 走っているデーモンの版 ${snap.version ?? '0.1.0 以前'} と plugin の版 ${version} が違う。switchyard restart で入れ替わる`,
+          `[switchyard] the running daemon is ${snap.version ?? '0.1.0 or older'} but the plugin is ${version}; switchyard restart replaces it`,
+        ),
+      );
     }
   } catch (e) {
-    lines.push(`[switchyard] デーモンに届かない(${e instanceof Error ? e.message : String(e)})。このセッションの重い走行は管理なしで走る`);
+    const why = e instanceof Error ? e.message : String(e);
+    lines.push(t(`[switchyard] デーモンに届かない(${why})。このセッションの重い走行は管理なしで走る`, `[switchyard] cannot reach the daemon (${why}); heavy runs in this session run unmanaged`));
   }
   return lines;
 }
 
-/** @type {Record<UnackedKind, string>} */
-const KIND = { failed: '失敗', killed: '呼び出し元の信号で終了', orphan: '包みを失った(子は走行中)', lost: '包みを見失った' };
+/** @type {() => Record<UnackedKind, string>} */
+const KIND = () => ({
+  failed: t('失敗', 'failed'),
+  killed: t('呼び出し元の信号で終了', 'ended by the caller\'s signal'),
+  orphan: t('包みを失った(子は走行中)', 'lost its wrapper (child still running)'),
+  lost: t('包みを見失った', 'wrapper lost'),
+});
 
 /**
  * Stop: 自分のセッションに ack されていないジョブがあれば、停止を差し戻す(設計 §9.2・§9.4)。
@@ -131,11 +160,20 @@ export async function stop(input, { env = process.env, connect = connectDaemon }
     throw e;
   }
   if (jobs.length === 0) return null;
-  const list = jobs.map((j) => `- ${j.jobId} ${KIND[j.kind]}(終了コード ${j.code ?? 'なし'}): ${j.cmd}`).join('\n');
+  const kind = KIND();
+  const list = jobs
+    .map((j) => t(`- ${j.jobId} ${kind[j.kind]}(終了コード ${j.code ?? 'なし'}): ${j.cmd}`, `- ${j.jobId} ${kind[j.kind]} (exit code ${j.code ?? 'none'}): ${j.cmd}`))
+    .join('\n');
   return {
     decision: 'block',
     reason:
-      `[switchyard] このセッションのジョブに、まだ確認されていない終わり方がある:\n${list}\n` +
-      `記録: ${pathsOf(home).events}(switchyard why <job> でも読める)。中身を確かめて直すか、直さないと決めたら switchyard ack <job> で確認済みにする。`,
+      t(
+        `[switchyard] このセッションのジョブに、まだ確認されていない終わり方がある:\n${list}\n` +
+          `記録: ${pathsOf(home).events}(switchyard why <job> でも読める)。中身を確かめて直すか、直さないと決めたら switchyard ack <job> で確認済みにする。` +
+          '同じコマンドを直して走らせ直し、成功すれば自動で確認済みになる。',
+        `[switchyard] jobs in this session ended in a way nobody has looked at yet:\n${list}\n` +
+          `Log: ${pathsOf(home).events} (also readable with switchyard why <job>). Look at it and fix it, or decide not to and mark it with switchyard ack <job>. ` +
+          'Re-running the same command successfully after a fix clears it automatically.',
+      ),
   };
 }

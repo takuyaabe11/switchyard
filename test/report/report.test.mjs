@@ -92,6 +92,24 @@ describe('summarize(改善のための集計)', () => {
   });
 });
 
+describe('効果の集計', () => {
+  it('他と取り合って待たされた走行の本数・その待ち時間の合計・単独で走らせた計測の本数を数える', () => {
+    const events = [
+      req('a', T0), grant('a', T0),
+      req('b', T0), queued('b', T0, 'CPU 不足(空き 0 / 必要 2)'), grant('b', T0 + 2 * MIN),
+      req('c', T0), queued('c', T0, 'lock k held by a'), grant('c', T0 + 3 * MIN),
+      req('d', T0), queued('d', T0, '判断待ち'), grant('d', T0 + 1 * MIN),
+      history(T0, MIN), history(T0, MIN), { ...history(T0, MIN), class: 'measure' },
+    ];
+    const s = summarize({ events });
+    assert.equal(s.avoided, 2, '理由の分からない待ちは数えない');
+    assert.equal(s.totalWaitMs, 6 * MIN);
+    assert.equal(s.measureRuns, 1);
+    assert.equal(s.runs, 3);
+    assert.match(formatReport(s, { repoPrefix: null, sinceDays: null }), /効果: 走り終えた走行 3 本のうち、他と重ならないよう待たせた 2 本\(待ち時間の合計 6分\)・単独で走らせた計測 1 本/);
+  });
+});
+
 describe('formatReport', () => {
   it('記録が空でも、何も無いと読める形を出す', () => {
     const text = formatReport(summarize({ events: [], hooks: [] }), { repoPrefix: null, sinceDays: null });

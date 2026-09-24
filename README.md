@@ -20,9 +20,10 @@ switchyard automatically.
 /plugin install switchyard@switchyard
 ```
 
-Requires Node.js >= 20, macOS or Linux. Messages that switchyard prints while you work —
-the queue notes, the hook verdicts, the reason a session is held back — are in Japanese.
-Everything you type (commands, flags, `switchyard.json`) is in English. The daemon starts on demand; there is nothing
+Requires Node.js >= 20, macOS or Linux (Windows is not supported; use WSL). Messages that switchyard prints
+while you work — the queue notes, the hook verdicts, the reason a session is held back — are in English,
+or in Japanese when your locale (`LANG`, `LC_ALL`, `LC_MESSAGES`) starts with `ja`. `SWITCHYARD_LANG=en` or
+`SWITCHYARD_LANG=ja` picks one explicitly. The daemon starts on demand; there is nothing
 to run by hand. A daemon that never handed out a single slot shuts itself down after a
 couple of quiet minutes, so a throwaway `SWITCHYARD_HOME` does not leave one behind.
 Set `SWITCHYARD_IDLE_EXIT_MS=0` to keep it resident.
@@ -208,7 +209,9 @@ switchyard は操車場のこと。重い走行を 1 本ずつ、正しい線路
 /plugin install switchyard@switchyard
 ```
 
-必要なのは Node.js 20 以上、macOS か Linux。デーモンは必要になった時に自分で起動する。
+必要なのは Node.js 20 以上、macOS か Linux(Windows は非対応。WSL なら動く)。作業中に switchyard が出す文言(待ちの知らせ・hook の判断・
+差し戻しの理由)は英語で、ロケール(`LANG`・`LC_ALL`・`LC_MESSAGES`)が `ja` で始まれば日本語になる。
+`SWITCHYARD_LANG=ja` / `SWITCHYARD_LANG=en` で明示的に選べる。デーモンは必要になった時に自分で起動する。
 手で立ち上げるものはない。一度も割り振りを出していないデーモンは、静かなまま数分たつと自分で終わる
 (使い捨ての `SWITCHYARD_HOME` でデーモンが残らないようにするため)。常駐させたいときは
 `SWITCHYARD_IDLE_EXIT_MS=0`。

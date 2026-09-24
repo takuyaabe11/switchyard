@@ -1,6 +1,7 @@
 // @ts-check
 // 入場の判断(設計 §6.2〜§6.5 の第 1 段)。純関数で、入出力も時計も使わない。
 import { sortWaiting } from './score.mjs';
+import { t } from '../i18n.mjs';
 
 /** @typedef {import('./types.mjs').State} State */
 /** @typedef {import('./types.mjs').Waiting} Waiting */
@@ -125,8 +126,11 @@ export function estimateStart(s, job, now) {
 /** @param {State} s @param {JobSpec} job @returns {string} */
 function blockReason(s, job) {
   const held = job.locks.find((k) => holders(s, k).length >= capOf(s, k));
-  if (held !== undefined) return `鍵 ${held} を ${holders(s, held).map((l) => l.job.id).join(', ')} が保持`;
-  return `CPU 不足(空き ${s.capacity - usedCpus(s)} / 必要 ${job.cpus.min})`;
+  if (held !== undefined) {
+    const by = holders(s, held).map((l) => l.job.id).join(', ');
+    return t(`鍵 ${held} を ${by} が保持`, `lock ${held} held by ${by}`);
+  }
+  return t(`CPU 不足(空き ${s.capacity - usedCpus(s)} / 必要 ${job.cpus.min})`, `not enough CPU (free ${s.capacity - usedCpus(s)} / needs ${job.cpus.min})`);
 }
 
 /**
@@ -210,7 +214,7 @@ export function schedule(input, now) {
   }
 
   /** @type {string | null} 入場を止めている理由 */
-  let gate = runningMeasure ? `計測 ${runningMeasure.job.id} の走行中は入場しない` : null;
+  let gate = runningMeasure ? t(`計測 ${runningMeasure.job.id} の走行中は入場しない`, `no admission while measurement ${runningMeasure.job.id} runs`) : null;
   /** @type {{ id: string, etaAt: number | null } | null} 入場できなかった最初のジョブ */
   let head = null;
   /** @type {Set<string>} 前に居て入場できなかったジョブが要る鍵(鍵だけのジョブはこれを追い越さない) */
@@ -232,7 +236,7 @@ export function schedule(input, now) {
       if (ahead === undefined && locksFree(s, job.locks)) {
         admit(w, 0);
       } else {
-        note(ahead !== undefined ? `鍵 ${ahead} を先に待つジョブがいる` : blockReason(s, job), null);
+        note(ahead !== undefined ? t(`鍵 ${ahead} を先に待つジョブがいる`, `another job is already waiting for lock ${ahead}`) : blockReason(s, job), null);
         block(job);
       }
       continue;
@@ -245,7 +249,7 @@ export function schedule(input, now) {
       if (measuring === undefined && locksFree(s, job.locks)) {
         admit(w, job.cpus.min, true);
       } else {
-        note(measuring !== undefined ? `計測 ${measuring.job.id} の走行中は入場しない` : blockReason(s, job), null);
+        note(measuring !== undefined ? t(`計測 ${measuring.job.id} の走行中は入場しない`, `no admission while measurement ${measuring.job.id} runs`) : blockReason(s, job), null);
         block(job);
       }
       continue;
@@ -259,12 +263,12 @@ export function schedule(input, now) {
     if (job.class === 'measure') {
       if (head === null && cpuLeases(s).length === 0 && locksFree(s, job.locks)) {
         admit(w, Math.min(job.cpus.max, free));
-        gate = `計測 ${job.id} の走行中は入場しない`;
+        gate = t(`計測 ${job.id} の走行中は入場しない`, `no admission while measurement ${job.id} runs`);
       } else {
-        if (head !== null) note(`先頭 ${head.id} の後ろ(計測は後ろ詰めしない)`, null);
-        else if (cpuLeases(s).length > 0) note(`走行中 ${cpuLeases(s).length} 本の終了を待つ(計測は単独で走る)`, allEnd(s));
+        if (head !== null) note(t(`先頭 ${head.id} の後ろ(計測は後ろ詰めしない)`, `behind head ${head.id} (a measurement is never backfilled)`), null);
+        else if (cpuLeases(s).length > 0) note(t(`走行中 ${cpuLeases(s).length} 本の終了を待つ(計測は単独で走る)`, `waiting for ${cpuLeases(s).length} running job(s) to end (a measurement runs alone)`), allEnd(s));
         else note(blockReason(s, job), null);
-        gate = `計測 ${job.id} の入場待ちのため入場しない`;
+        gate = t(`計測 ${job.id} の入場待ちのため入場しない`, `no admission while measurement ${job.id} waits to start`);
         block(job);
       }
       continue;
@@ -286,7 +290,12 @@ export function schedule(input, now) {
       admit(w, job.cpus.min);
       continue;
     }
-    note(endsBeforeHead ? `先頭 ${head.id} の後ろ(${blockReason(s, job)})` : `先頭 ${head.id} の後ろ(後ろ詰めの見込みなし)`, null);
+    note(
+      endsBeforeHead
+        ? t(`先頭 ${head.id} の後ろ(${blockReason(s, job)})`, `behind head ${head.id} (${blockReason(s, job)})`)
+        : t(`先頭 ${head.id} の後ろ(後ろ詰めの見込みなし)`, `behind head ${head.id} (not expected to finish before it)`),
+      null,
+    );
     block(job);
   }
 

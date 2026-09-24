@@ -7,6 +7,7 @@ import { appendRecord } from '../daemon/store.mjs';
 import { ask, connectDaemon } from '../client/connect.mjs';
 import { preToolUse, waitExpected } from './pretooluse.mjs';
 import { sessionStart, stop } from './session.mjs';
+import { t } from '../i18n.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
 
@@ -95,6 +96,6 @@ export async function runHook(event, raw, { write = (s) => process.stdout.write(
       return;
     }
     default:
-      throw new Error(`知らない hook: ${event}`);
+      throw new Error(t(`知らない hook: ${event}`, `unknown hook: ${event}`));
   }
 }

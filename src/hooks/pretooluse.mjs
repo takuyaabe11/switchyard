@@ -11,6 +11,7 @@ import { repoRoot } from '../config/context.mjs';
 import { classifiableCommand, classify, globMatch, loadProfiles } from '../config/profiles.mjs';
 import { GIT_LOCK_SUBCOMMANDS, gitSubcommand } from '../shim/decide.mjs';
 import { simpleCommands } from './shell.mjs';
+import { t } from '../i18n.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
 /** @typedef {import('../core/types.mjs').JobClass} JobClass */
@@ -278,9 +279,12 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         permissionDecision: 'deny',
-        permissionDecisionReason:
+        permissionDecisionReason: t(
           `[switchyard] shim の語(${SHIM_WORDS.join(' / ')})の実行ファイルをパスで直に呼ぶと、shim を迂回して順番待ちを通らない: ${unshimmed.join(' / ')}。` +
-          'パスを付けずに名前で呼ぶ(例: npm test)か、`switchyard run -- <その部分>` で包んでから実行する(包んだコマンドには普段どおり権限の確認が出る)。',
+            'パスを付けずに名前で呼ぶ(例: npm test)か、`switchyard run -- <その部分>` で包んでから実行する(包んだコマンドには普段どおり権限の確認が出る)。',
+          `[switchyard] calling a shimmed binary (${SHIM_WORDS.join(' / ')}) by path skips the shim and the queue: ${unshimmed.join(' / ')}. ` +
+            'Call it by name (e.g. npm test), or wrap it as `switchyard run -- <that part>` (the wrapped command still goes through the usual permission check).',
+        ),
       },
     };
   }
@@ -289,9 +293,12 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         permissionDecision: 'deny',
-        permissionDecisionReason:
+        permissionDecisionReason: t(
           `[switchyard] 環境変数(${BYPASS_VARS.join(' / ')}・env -i)を差し替えて呼ぶと、shim が順番待ちを通さない: ${overridden.join(' / ')}。` +
-          '差し替えを外すか(PATH を足すなら PATH=/足す場所:$PATH の形)、`switchyard run -- <その部分>` で包んでから実行する。',
+            '差し替えを外すか(PATH を足すなら PATH=/足す場所:$PATH の形)、`switchyard run -- <その部分>` で包んでから実行する。',
+          `[switchyard] overriding the environment (${BYPASS_VARS.join(' / ')}, env -i) keeps the shim from queueing: ${overridden.join(' / ')}. ` +
+            'Drop the override (to add to PATH, use PATH=/extra:$PATH), or wrap it as `switchyard run -- <that part>`.',
+        ),
       },
     };
   }

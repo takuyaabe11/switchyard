@@ -8,6 +8,7 @@ import { commandLooksLikeSwitchyardd } from './control.mjs';
 import { switchyardHome, pathsOf } from './paths.mjs';
 import { startDaemon } from './server.mjs';
 import { readJson } from './store.mjs';
+import { t } from '../i18n.mjs';
 
 /** 予約コアの初期値(設計 §5.1) @param {number} cores @returns {number} */
 export function defaultReserve(cores) {
@@ -125,7 +126,7 @@ export async function main(env = process.env) {
     } catch {
       // 読めなければ pid 不明のまま出す
     }
-    process.stderr.write(`[switchyardd] 別の switchyardd(pid ${holder})が動いているので終わる\n`);
+    process.stderr.write(t(`[switchyardd] 別の switchyardd(pid ${holder})が動いているので終わる\n`, `[switchyardd] another switchyardd (pid ${holder}) is running; exiting\n`));
     return;
   }
   // 起動が終わるまでに SIGTERM / SIGINT を受けても、ロックを残さずに終わる

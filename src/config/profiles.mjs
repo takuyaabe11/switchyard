@@ -2,6 +2,7 @@
 // コマンドの分類。プロジェクト設定 switchyard.json と組み込みの既定表(設計 §4.5 / §9.2)。
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
+import { t } from '../i18n.mjs';
 
 /** @typedef {import('../core/types.mjs').JobClass} JobClass */
 /** @typedef {import('../core/types.mjs').CpuRange} CpuRange */
@@ -222,34 +223,34 @@ export function classify(command, profiles) {
  */
 export function validateProfile(name, raw) {
   const fail = (/** @type {string} */ msg) => new Error(`profile ${name}: ${msg}`);
-  if (typeof raw !== 'object' || raw === null) throw fail('オブジェクトではない');
+  if (typeof raw !== 'object' || raw === null) throw fail(t('オブジェクトではない', 'is not an object'));
   const p = /** @type {Record<string, unknown>} */ (raw);
   const isStrings = (/** @type {unknown} */ v) => Array.isArray(v) && v.every((x) => typeof x === 'string');
-  if (!isStrings(p.match) || /** @type {string[]} */ (p.match).length === 0) throw fail('match は 1 つ以上の文字列の配列');
-  if (typeof p.class !== 'string' || !CLASSES.includes(p.class)) throw fail('class は quick / batch / measure');
+  if (!isStrings(p.match) || /** @type {string[]} */ (p.match).length === 0) throw fail(t('match は 1 つ以上の文字列の配列', 'match must be an array of one or more strings'));
+  if (typeof p.class !== 'string' || !CLASSES.includes(p.class)) throw fail(t('class は quick / batch / measure', 'class must be quick / batch / measure'));
   /** @type {Profile} */
   const out = { match: /** @type {string[]} */ (p.match), class: /** @type {JobClass} */ (p.class) };
   if (p.cpus !== undefined) {
     const c = /** @type {Record<string, unknown>} */ (p.cpus);
     const ok = typeof c === 'object' && c !== null && Number.isInteger(c.min) && Number.isInteger(c.max) && Number(c.min) >= 1 && Number(c.max) >= Number(c.min);
-    if (!ok) throw fail('cpus は { min: 1 以上の整数, max: min 以上の整数 }');
+    if (!ok) throw fail(t('cpus は { min: 1 以上の整数, max: min 以上の整数 }', 'cpus must be { min: integer >= 1, max: integer >= min }'));
     out.cpus = { min: Number(c.min), max: Number(c.max) };
   }
   if (p.locks !== undefined) {
-    if (!isStrings(p.locks)) throw fail('locks は文字列の配列');
+    if (!isStrings(p.locks)) throw fail(t('locks は文字列の配列', 'locks must be an array of strings'));
     out.locks = /** @type {string[]} */ (p.locks);
   }
   if (p.env !== undefined) {
     const e = p.env;
-    if (typeof e !== 'object' || e === null || Array.isArray(e) || !Object.values(e).every((v) => typeof v === 'string')) throw fail('env は文字列の値を持つオブジェクト');
+    if (typeof e !== 'object' || e === null || Array.isArray(e) || !Object.values(e).every((v) => typeof v === 'string')) throw fail(t('env は文字列の値を持つオブジェクト', 'env must be an object with string values'));
     out.env = /** @type {Record<string, string>} */ (e);
   }
   if (p.args !== undefined) {
-    if (!isStrings(p.args)) throw fail('args は文字列の配列');
+    if (!isStrings(p.args)) throw fail(t('args は文字列の配列', 'args must be an array of strings'));
     out.args = /** @type {string[]} */ (p.args);
   }
   if (p.preempt !== undefined) {
-    if (typeof p.preempt !== 'string' || !PREEMPTS.includes(p.preempt)) throw fail('preempt は pause / throttle / never');
+    if (typeof p.preempt !== 'string' || !PREEMPTS.includes(p.preempt)) throw fail(t('preempt は pause / throttle / never', 'preempt must be pause / throttle / never'));
     out.preempt = /** @type {Preempt} */ (p.preempt);
   }
   return out;
@@ -272,7 +273,11 @@ export function loadProfiles(repoRoot) {
   if (existsSync(file)) return loadProfilesFile(file);
   const legacy = join(repoRoot, LEGACY_CONFIG);
   if (!existsSync(legacy)) return { profiles: DEFAULT_PROFILES, error: null };
-  return { ...loadProfilesFile(legacy), notice: `${legacy} を読んだ(switchyard は conductor から改名した)。switchyard.json へ改名すると、この知らせは消える` };
+  return { ...loadProfilesFile(legacy), notice: t(
+      `${legacy} を読んだ(switchyard は conductor から改名した)。switchyard.json へ改名すると、この知らせは消える`,
+      `read ${legacy} (switchyard was renamed from conductor); rename it to switchyard.json to silence this notice`,
+    ),
+  };
 }
 
 /**
@@ -287,7 +292,7 @@ export function loadProfilesFile(file) {
     const own = Object.entries(table).map(([name, p]) => ({ name, profile: validateProfile(name, p) }));
     return { profiles: [...own, ...DEFAULT_PROFILES], error: null };
   } catch (e) {
-    return { profiles: DEFAULT_PROFILES, error: `switchyard.json を読めない: ${e instanceof Error ? e.message : String(e)}` };
+    return { profiles: DEFAULT_PROFILES, error: t(`switchyard.json を読めない: ${e instanceof Error ? e.message : String(e)}`, `cannot read switchyard.json: ${e instanceof Error ? e.message : String(e)}`) };
   }
 }
 
