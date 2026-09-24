@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { heldLocks, repoRoot } from '../../src/config/context.mjs';
+import { heldLocks, repoFamily, repoRoot } from '../../src/config/context.mjs';
 import { fileURLToPath } from 'node:url';
 
 /** @returns {string} */
@@ -64,5 +64,29 @@ describe('heldLocks', () => {
   it('カンマ区切りを集合にし、空は落とす', () => {
     assert.deepEqual([...heldLocks({ SWITCHYARD_HELD_LOCKS: 'a,,b' })], ['a', 'b']);
     assert.deepEqual([...heldLocks({})], []);
+  });
+});
+
+describe('repoFamily(同じ git の本体を共有する worktree の一族)', () => {
+  const git = (/** @type {string} */ cwd, /** @type {string[]} */ args) => execFileSync('git', args, { cwd, stdio: 'ignore', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+
+  it('本物の git worktree は本体の作業ツリーの根を返し、本体・git の外・commondir の無い .git ファイルはその根のまま', () => {
+    const base = tmp();
+    const main = join(base, 'app');
+    mkdirSync(main);
+    git(main, ['init', '-q']);
+    writeFileSync(join(main, 'a.txt'), 'a');
+    git(main, ['add', '.']);
+    git(main, ['commit', '-q', '-m', 'x']);
+    git(main, ['worktree', 'add', '-q', join(base, 'app-wt'), '-b', 'wt']);
+    assert.equal(repoFamily(repoRoot(join(base, 'app-wt'))), main);
+    assert.equal(repoFamily(main), main);
+    const plain = tmp();
+    assert.equal(repoFamily(plain), plain);
+    // submodule のように commondir を持たない gitdir を指すファイル
+    const sub = tmp();
+    mkdirSync(join(sub, 'mod'));
+    writeFileSync(join(sub, '.git'), `gitdir: ${join(sub, 'mod')}\n`);
+    assert.equal(repoFamily(sub), sub);
   });
 });

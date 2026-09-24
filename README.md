@@ -70,7 +70,8 @@ overlapped, it says so, and you can take it out with `switchyard uninstall`.
   you set yourself always wins. A run that has the machine to itself gets every core, so a lone run is never slowed.
   `SWITCHYARD_THREAD_ENV=0` turns this off.
 - **It learns.** After two runs of the same command it knows how much CPU and memory that run really needs and sizes
-  its share to that.
+  its share to that. Git worktrees of the same repository share what was learned, so a new worktree
+  does not start from scratch.
 
 ## What it does, measured
 
@@ -459,7 +460,8 @@ node bin/switchyard.mjs replay --since 14d
   `RUST_TEST_THREADS`・`RAYON_NUM_THREADS`・`GOMAXPROCS`・`OMP_NUM_THREADS`・`pytest -n auto` の `PYTEST_XDIST_AUTO_NUM_WORKERS`・
   Vitest の `VITEST_MAX_THREADS`/`FORKS`/`WORKERS`)。自分で決めた値がいつも勝つ。機械を独り占めしている走行には全コアを
   渡すので、単独の走行が遅くなることはない。`SWITCHYARD_THREAD_ENV=0` で止める。
-- **学ぶ。** 同じコマンドを 2 回走らせると、その走行が実際に使う CPU とメモリが分かり、取り分をそれに合わせる。
+- **学ぶ。** 同じコマンドを 2 回走らせると、その走行が実際に使う CPU とメモリが分かり、取り分をそれに合わせる。同じ repo の
+  git worktree は学んだことを分け合うので、新しい worktree が学び直すことはない。
 
 ## 実測で何をするか
 

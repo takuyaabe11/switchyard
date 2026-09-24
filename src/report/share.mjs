@@ -90,7 +90,7 @@ export function formatShare({ summary: s, observed, meta }) {
     `- period: ${s.spanDays} day(s), ${s.sessions} session(s), ${s.jobs} jobs`,
     `- finished runs: ${s.runs}; held back so they would not overlap: ${s.avoided} (total wait ${duration(s.totalWaitMs)}); measurements run alone: ${s.measureRuns}`,
     `- waited: ${s.waited} (median ${duration(s.waitMs.median)}, max ${duration(s.waitMs.max)})${reasons.length > 0 ? `; why: ${reasons.join(', ')}` : ''}`,
-    `- packed into measured spare CPU: ${s.packed}; borrowed beyond capacity: ${s.borrows}`,
+    `- packed into measured spare CPU: ${s.packed}; borrowed beyond capacity: ${s.borrows}; sized down to learned use: ${s.sized}`,
     `- runs by profile: ${profileText.length > 0 ? profileText.join('; ') : 'none'}`,
     `- failed runs: ${s.failures} (${s.environmental} flagged as possibly not the code); unmanaged runs: ${s.unmanaged}; escaping children: ${s.escapes}`,
     `- PreToolUse: background ${s.hook.background}, wrapped ${s.hook.wrap}, refused ${s.hook.deny}, asked ${s.hook.ask}`,

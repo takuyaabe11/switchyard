@@ -59,7 +59,7 @@ describe('formatShare(switchyard report --share)', () => {
     assert.match(text, /period: 3 day\(s\), 2 session\(s\), 2 jobs/);
     assert.match(text, /finished runs: 4; held back so they would not overlap: 1 \(total wait 2m/);
     assert.match(text, /why: lock 1/);
-    assert.match(text, /packed into measured spare CPU: 1/);
+    assert.match(text, /packed into measured spare CPU: 1; borrowed beyond capacity: 0; sized down to learned use: 0/);
     assert.match(text, /default:batch 2 runs \(typical run 4m/);
     assert.match(text, /project profiles 1 runs in 1 profile\/repo pairs; wrapped without a profile 1 runs/);
     assert.match(text, /failed runs: 1 \(1 flagged as possibly not the code\)/);

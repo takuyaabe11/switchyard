@@ -3,7 +3,7 @@ import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile, execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { UsageError } from '../../src/cli/args.mjs';
@@ -69,6 +69,21 @@ describe('buildRequest', () => {
     const cwd = project({ x: { match: ['never'], class: 'measure', cpus: { min: 2, max: 3 }, locks: ['a'], preempt: 'never' } });
     const r = buildRequest({ argv: ['echo', 'hi'], flags: { profile: 'x', locks: ['b', 'a'], why: '目的' }, env: { CLAUDE_CODE_SESSION_ID: 'abcdefghij' }, cwd });
     assert.deepEqual(r.job, { session: 'abcdefgh', repo: cwd, profile: 'x', cmd: 'echo hi', class: 'measure', cpus: { min: 2, max: 3 }, locks: ['a', 'b'], preempt: 'never', why: '目的' });
+  });
+
+  it('git の worktree では、学習の鍵として本体の根を family に載せる(本体では載せない)', () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'cfam-')));
+    const main = join(base, 'app');
+    const git = (/** @type {string[]} */ args) => execFileSync('git', args, { cwd: main, stdio: 'ignore', env: { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' } });
+    execFileSync('mkdir', ['-p', main]);
+    git(['init', '-q']);
+    writeFileSync(join(main, 'a'), 'a');
+    git(['add', '.']);
+    git(['commit', '-q', '-m', 'x']);
+    git(['worktree', 'add', '-q', join(base, 'app-wt'), '-b', 'wt']);
+    const wt = buildRequest({ argv: ['npm', 'test'], flags: {}, env: {}, cwd: join(base, 'app-wt') });
+    assert.deepEqual([wt.job.repo, wt.job.family], [join(base, 'app-wt'), main]);
+    assert.equal(buildRequest({ argv: ['npm', 'test'], flags: {}, env: {}, cwd: main }).job.family, undefined);
   });
 
   it('どれにも当たらなければ batch・CPU 1・profile 名はコマンドの頭 2 語', () => {
