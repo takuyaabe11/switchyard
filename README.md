@@ -183,7 +183,7 @@ so do those two by hand.
 
 ## What it writes down
 
-Everything lives under `~/.switchyard` (or `SWITCHYARD_HOME`).
+Everything lives under `~/.switchyard` (or `SWITCHYARD_HOME`), readable by you only (the directory is 0700, the files 0600).
 
 | File | Holds |
 |---|---|
@@ -367,7 +367,7 @@ plugin を外しても、走っているデーモンは止まらず、`PATH` の
 
 ## 何が記録されるか
 
-置き場は `~/.switchyard`(`SWITCHYARD_HOME` で変えられる)。
+置き場は `~/.switchyard`(`SWITCHYARD_HOME` で変えられる)。持ち主だけが読める(ディレクトリは 0700、ファイルは 0600)。
 
 | ファイル | 中身 |
 |---|---|

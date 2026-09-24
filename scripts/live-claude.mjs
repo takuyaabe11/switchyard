@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // @ts-check
 // 本物の Claude Code での通し(設計 §15)。費用が出るので SWITCHYARD_LIVE_CLAUDE=1 のときだけ走る。
-// 使い捨ての作業場所と一時の SWITCHYARD_HOME で、この repo を --plugin-dir として haiku に 2 回走らせる:
-//   1. 成功する npm test: shim が switchyard に通し(記録に default:batch)、PreToolUse が背景に回し、子にジョブの id が渡る
+// 使い捨ての作業場所と一時の SWITCHYARD_HOME で、この repo を --plugin-dir として haiku に 3 回走らせる:
+//   1. 成功する npm test: shim が switchyard に通し(記録に default:batch)、空いているので前景のまま走り、子にジョブの id が渡り、文言は英語
 //   2. 失敗する npm test: Stop が差し戻し、Claude が switchyard ack で確認済みにする
+//   3. ./gradlew test: shim から見えないので PreToolUse が拒否し、Claude が案内どおり switchyard run -- で包んで走らせる
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -17,18 +18,23 @@ const ROOT = fileURLToPath(new URL('../', import.meta.url));
 
 /**
  * claude -p --output-format stream-json の標準出力から、確かめたいことを取り出す。
+ * background: Bash の走行が背景に回った(task_started の is_backgrounded、または背景に回ったと告げる tool_result)。
+ * foregroundOutput: 前景で走った Bash の tool_result に子の出力(LIVE_JOB=)が直に入っている。
  * @param {string} text
- * @returns {{ background: boolean, blockedStop: boolean, result: string, costUsd: number | null }}
+ * @returns {{ background: boolean, foregroundOutput: boolean, blockedStop: boolean, denied: boolean, toolText: string, result: string, costUsd: number | null }}
  */
 export function analyzeStream(text) {
   let background = false;
+  let foregroundOutput = false;
   let blockedStop = false;
+  let denied = false;
+  let toolText = '';
   let result = '';
   /** @type {number | null} */
   let costUsd = null;
   for (const line of text.split('\n')) {
     if (line.trim() === '') continue;
-    /** @type {Record<string, unknown>} */
+    /** @type {any} */
     let m;
     try {
       m = JSON.parse(line);
@@ -36,14 +42,24 @@ export function analyzeStream(text) {
       continue;
     }
     const s = JSON.stringify(m);
-    if (/running in background/i.test(s)) background = true;
-    if (s.includes('まだ確認されていない終わり方がある')) blockedStop = true;
+    if (m.type === 'system' && m.subtype === 'task_started' && m.is_backgrounded === true) background = true;
+    if (m.type === 'user' && Array.isArray(m.message?.content)) {
+      for (const c of m.message.content) {
+        if (c?.type !== 'tool_result') continue;
+        const body = typeof c.content === 'string' ? c.content : JSON.stringify(c.content);
+        toolText += `${body}\n`;
+        if (/running in background/i.test(body)) background = true;
+        else if (body.includes('LIVE_JOB=')) foregroundOutput = true;
+        if (body.includes('[switchyard]') && /shims cannot see|shim から見えず/.test(body)) denied = true;
+      }
+    }
+    if (s.includes('ended in a way nobody has looked at yet') || s.includes('まだ確認されていない終わり方がある')) blockedStop = true;
     if (m.type === 'result') {
       result = String(m.result ?? '');
       costUsd = typeof m.total_cost_usd === 'number' ? m.total_cost_usd : null;
     }
   }
-  return { background, blockedStop, result, costUsd };
+  return { background, foregroundOutput, blockedStop, denied, toolText, result, costUsd };
 }
 
 /** @param {string} home */
@@ -88,11 +104,18 @@ if (isMain) {
   execFileSync('git', ['init', '-q'], { cwd: work });
   const script = "console.log('LIVE_JOB=' + (process.env.SWITCHYARD_JOB_ID || 'none')); process.exit(Number(process.env.LIVE_FAIL || 0))";
   writeFileSync(join(work, 'package.json'), JSON.stringify({ name: 'switchyard-live', private: true, scripts: { test: `node -e "${script}"` } }, null, 2));
+  // パスで呼ぶビルドの包みの代わり(shim を置けない形)
+  writeFileSync(join(work, 'gradlew'), `#!/bin/sh\necho "GRADLE_JOB=\${SWITCHYARD_JOB_ID:-none} $*"\n`, { mode: 0o755 });
   /** @type {NodeJS.ProcessEnv} */
-  const baseEnv = { ...process.env, SWITCHYARD_HOME: home };
+  const baseEnv = { ...process.env, SWITCHYARD_HOME: home, SWITCHYARD_UPDATE_CHECK: '0' };
   delete baseEnv.SWITCHYARD_IN_JOB;
   delete baseEnv.SWITCHYARD_HELD_LOCKS;
   delete baseEnv.SWITCHYARD_JOB_ID;
+  // 既定の言語(英語)で確かめる
+  delete baseEnv.SWITCHYARD_LANG;
+  delete baseEnv.LANG;
+  delete baseEnv.LC_ALL;
+  delete baseEnv.LC_MESSAGES;
 
   /** @param {string} prompt @param {string[]} allowed @param {Record<string, string>} [extra] */
   const claude = (prompt, allowed, extra = {}) =>
@@ -103,22 +126,28 @@ if (isMain) {
     );
 
   try {
+    const records = () => readRecords(pathsOf(home).events).records;
     const r1 = claude('Run the Bash command `npm test` exactly once. Wait until it has finished, then reply with the line of its output that starts with LIVE_JOB=.', ['Bash(npm test)']);
     const a1 = analyzeStream(r1.stdout ?? '');
-    const records = () => readRecords(pathsOf(home).events).records;
     const managed = records().some((r) => r.kind === 'history' && r.profile === 'default:batch' && r.code === 0);
 
     const r2 = claude('Run the Bash command `npm test` exactly once; it is expected to fail. Before you stop, follow any instructions you receive.', ['Bash(npm test)', 'Bash(switchyard ack:*)', 'Bash(switchyard why:*)'], { LIVE_FAIL: '1' });
     const a2 = analyzeStream(r2.stdout ?? '');
     const acked = records().some((r) => r.kind === 'event' && typeof r.event === 'object' && r.event !== null && /** @type {Record<string, unknown>} */ (r.event).type === 'ack');
 
+    const r3 = claude('Run the Bash command `./gradlew test` exactly once. If it is refused, follow the instructions in the refusal, then reply with the line of its output that starts with GRADLE_JOB=.', ['Bash(./gradlew test)', 'Bash(switchyard run:*)']);
+    const a3 = analyzeStream(r3.stdout ?? '');
+    const gradleManaged = records().some((r) => r.kind === 'event' && typeof r.event === 'object' && r.event !== null && JSON.stringify(r.event).includes('gradlew test') && /** @type {Record<string, unknown>} */ (r.event).type === 'request');
+
     const checks = {
       'shim が npm test を switchyard に通した(記録に default:batch の history)': managed,
-      'PreToolUse が背景に回した': a1.background,
-      '子にジョブの id が渡った(LIVE_JOB=j…)': /LIVE_JOB=j/.test(a1.result),
-      'Stop の差し戻しの後、Claude が switchyard ack した': acked,
+      '空いているので前景のまま走った(tool_result に子の出力・背景に回っていない)': a1.foregroundOutput && !a1.background,
+      '子にジョブの id が渡った(LIVE_JOB=j…)': /LIVE_JOB=j/.test(a1.toolText),
+      '文言は英語(started)': a1.toolText.includes('[switchyard] started'),
+      'Stop の差し戻しの後、Claude が switchyard ack した': a2.blockedStop && acked,
+      './gradlew test を拒否し、Claude が switchyard run で包んで走らせた': a3.denied && gradleManaged,
     };
-    console.log(JSON.stringify({ checks, stopReasonSeenInStream: a2.blockedStop, costUsd: [a1.costUsd, a2.costUsd], result1: a1.result, result2: a2.result, work, home }, null, 2));
+    console.log(JSON.stringify({ checks, costUsd: [a1.costUsd, a2.costUsd, a3.costUsd], result1: a1.result, result2: a2.result, result3: a3.result, work, home }, null, 2));
     process.exitCode = Object.values(checks).every(Boolean) ? 0 : 1;
   } finally {
     stopDaemon(home);

@@ -9,7 +9,7 @@
     {
       "name": "switchyard",
       "description": "Keeps Claude Code sessions on one machine from fighting over heavy runs, by handing out CPU shares and exclusive locks.",
-      "version": "0.7.0",
+      "version": "0.8.0",
       "source": "./"
     }
   ]

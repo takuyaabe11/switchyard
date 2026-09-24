@@ -13,14 +13,22 @@ describe('UsageBook(CPU の使い方の実測)', () => {
     assert.equal(b.cores('/r', 'other'), null);
   });
 
-  it('回数が足りない・失敗・短い走行・CPU 時間の無い走行は数えない', () => {
+  it('回数が足りない・短い走行・すぐ落ちた失敗・CPU 時間の無い走行は数えない', () => {
     const b = new UsageBook();
     b.record('/r', 'p', run(1_000, 2));
     b.record('/r', 'p', run(1_000, 2));
-    b.record('/r', 'p', run(1_000, 2, { code: 1 }));
+    b.record('/r', 'p', run(400, 2, { code: 1, durationMs: 4_000 }));
     b.record('/r', 'p', run(100, 2, { durationMs: 1_000 }));
     b.record('/r', 'p', run(0, 2, { cpuMs: null }));
     assert.equal(b.cores('/r', 'p'), null);
+  });
+
+  it('5 秒以上走ってから失敗した走行は数える(テストが赤い間も学ぶ)', () => {
+    const b = new UsageBook();
+    b.record('/r', 'p', run(8_000, 2, { code: 1 }));
+    b.record('/r', 'p', run(8_000, 2, { code: 1 }));
+    b.record('/r', 'p', run(8_000, 2));
+    assert.equal(b.cores('/r', 'p'), 0.8);
   });
 
   it('割り振りを使い切る走行が多ければ縮めない(割り振りが少なかったせいで少なく測れただけかもしれない)', () => {

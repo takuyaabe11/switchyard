@@ -48,10 +48,16 @@ const SUITES = {
         to: 'if (cores === null || job.cpus.max === 0) return job;',
       },
       {
-        name: 'M43 失敗した走行も使い方に数える',
+        name: 'M43 すぐ落ちた失敗も使い方に数える',
         file: 'src/core/usage.mjs',
-        from: 'if (code !== 0 || cpuMs === null || cpus <= 0 || durationMs < USAGE_MIN_DURATION_MS) return;',
-        to: 'if (cpuMs === null || cpus <= 0 || durationMs < USAGE_MIN_DURATION_MS) return;',
+        from: 'durationMs < (code === 0 ? USAGE_MIN_DURATION_MS : USAGE_MIN_FAILED_DURATION_MS)',
+        to: 'durationMs < USAGE_MIN_DURATION_MS',
+      },
+      {
+        name: 'M44 長く走った失敗を使い方に数えない',
+        file: 'src/core/usage.mjs',
+        from: 'durationMs < (code === 0 ? USAGE_MIN_DURATION_MS : USAGE_MIN_FAILED_DURATION_MS)',
+        to: 'code !== 0 || durationMs < USAGE_MIN_DURATION_MS',
       },
       {
         name: 'M30 後の成功で前の失敗を片付けない',
