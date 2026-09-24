@@ -33,6 +33,7 @@ import { t } from '../i18n.mjs';
  *   capacity: number, used: number, leases: LeaseView[], waiting: WaitingView[],
  *   unacked: Record<string, Unacked[]>, badRecords: number, version: string,
  *   sized?: Record<string, number>,
+ *   longest?: Record<string, number>,
  *   spare?: number | null,
  *   memory?: { availableMb: number, floorMb: number } | null
  * }} Snapshot

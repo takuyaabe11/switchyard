@@ -71,5 +71,8 @@ export function pathsOf(home) {
     // PreToolUse が背景へ回した・拒否した判断の記録(デーモンを通らないので events.jsonl とは別)
     hooks: join(home, 'hooks.jsonl'),
     log: join(home, 'switchyardd.log'),
+    // Bash の時間切れで切られたコマンド(次に同じ場所で走るとき時間切れを延ばす)と、PreToolUse の sh のふるいが読む一覧
+    timeouts: join(home, 'timeouts.json'),
+    timeoutsSieve: join(home, 'timeouts.txt'),
   };
 }

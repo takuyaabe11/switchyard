@@ -9,7 +9,7 @@
     {
       "name": "switchyard",
       "description": "For running several Claude Code sessions or agents on one machine: queues heavy test and build runs so they take turns instead of colliding (CPU shares, memory, exclusive locks, clean benchmarks).",
-      "version": "0.17.0",
+      "version": "0.18.0",
       "source": "./"
     }
   ]

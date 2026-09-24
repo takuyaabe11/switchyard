@@ -7,6 +7,9 @@ import { appendRecord } from '../daemon/store.mjs';
 import { ask, connectDaemon } from '../client/connect.mjs';
 import { repoFamily, repoRoot } from '../config/context.mjs';
 import { preToolUse, waitExpected } from './pretooluse.mjs';
+import { postToolUseFailure } from './failure.mjs';
+import { guardTimeout, neededTime, normalized, readTimedOut } from './timeouts.mjs';
+import { usageKey } from '../core/usage.mjs';
 import { sessionStart, stop } from './session.mjs';
 import { t } from '../i18n.mjs';
 import { loggedCommand } from '../redact.mjs';
@@ -72,7 +75,54 @@ async function snapshot(env) {
 }
 
 /**
- * @param {string} event pre-tool-use / session-start / stop
+ * hook の判断を hooks.jsonl へ残す(書けなくても黙って進む)。
+ * @param {Record<string, unknown>} input @param {NodeJS.ProcessEnv} env @param {Record<string, unknown>} fields
+ */
+function recordHook(input, env, fields) {
+  const ti = /** @type {Record<string, unknown>} */ (typeof input.tool_input === 'object' && input.tool_input !== null ? input.tool_input : {});
+  try {
+    appendRecord(pathsOf(switchyardHome(env)).hooks, {
+      at: Date.now(),
+      kind: 'hook',
+      session: typeof input.session_id === 'string' ? input.session_id : '',
+      cwd: typeof input.cwd === 'string' ? input.cwd : '',
+      cmd: typeof ti.command === 'string' ? loggedCommand(ti.command, env) : '',
+      ...fields,
+    });
+  } catch {
+    /* 記録できないときは黙って進む */
+  }
+}
+
+/**
+ * Bash の時間切れで切られないよう、時間切れを延ばす / 背景へ回す(SWITCHYARD_TIMEOUT_GUARD=0 で止める)。
+ * 前に同じ場所で同じコマンドが切られていれば、その倍。デーモンが学んだ、自分で終わった走行の最長の所要があれば、その 1.5 倍。
+ * @param {Record<string, unknown>} input @param {Record<string, unknown> | null} out @param {NodeJS.ProcessEnv} env
+ * @param {{ heavy: import('./pretooluse.mjs').Heavy[], snap: import('../protocol/messages.mjs').Snapshot | null, learn: string | null }} ctx
+ * @returns {Record<string, unknown> | null}
+ */
+function withTimeoutGuard(input, out, env, { heavy, snap, learn }) {
+  if (env.SWITCHYARD_TIMEOUT_GUARD === '0') return out;
+  const ti = /** @type {Record<string, unknown>} */ (typeof input.tool_input === 'object' && input.tool_input !== null ? input.tool_input : {});
+  const command = typeof ti.command === 'string' ? ti.command : '';
+  if (command === '' || ti.run_in_background === true) return out;
+  const root = repoRoot(typeof input.cwd === 'string' ? input.cwd : process.cwd());
+  const key = normalized(command);
+  const remembered = readTimedOut(env).find((e) => e.root === root && e.command === key) ?? null;
+  // 重い部分が並んで走る(&& で続く)なら、所要は足し合わせる。学んでいない部分が 1 つでもあれば、学んだ所要からは出さない
+  let longestMs = /** @type {number | null} */ (null);
+  if (snap !== null && learn !== null && heavy.length > 0 && heavy.every((h) => h.profile !== undefined && snap.longest?.[usageKey(learn, h.profile)] !== undefined)) {
+    longestMs = heavy.reduce((n, h) => n + Number(snap.longest?.[usageKey(learn, String(h.profile))]), 0);
+  }
+  const need = neededTime({ remembered, longestMs });
+  if (need === null) return out;
+  const g = guardTimeout(ti, out, need, env);
+  if (g.action !== null) recordHook(input, env, { decision: g.action === 'extend' ? 'extend' : 'background', timeoutMs: g.timeoutMs, reason: remembered !== null ? 'timed-out-before' : 'learned' });
+  return g.out;
+}
+
+/**
+ * @param {string} event pre-tool-use / post-tool-use-failure / session-start / stop
  * @param {string} raw 標準入力
  * @param {{ write?: (s: string) => void, env?: NodeJS.ProcessEnv, profilesFor?: (cwd: string) => NamedProfile[] }} [opts]
  * @returns {Promise<void>}
@@ -93,20 +143,40 @@ export async function runHook(event, raw, { write = (s) => process.stdout.write(
         }
         return;
       }
-      let out = preToolUse(input, base);
-      // 背景へ回す判定が出たときだけ、デーモンの盤面を見て、待ちが見込まれなければ前景のまま走らせる。
-      // 普段の Bash の呼び出しにはデーモンへの問い合わせを足さない
+      /** @type {import('./pretooluse.mjs').Heavy[]} 重い部分(背景へ回すかを決める関数に渡るもの) */
+      let heavy = [];
+      let out = preToolUse(input, {
+        ...base,
+        shouldBackground: (h) => {
+          heavy = h;
+          return true;
+        },
+      });
+      /** @type {import('../protocol/messages.mjs').Snapshot | null} */
+      let snap = null;
+      // 盤面の縮めた取り分(sized)と学んだ所要(longest)は、学習の鍵(worktree の一族)で引く
+      const learn = heavy.length > 0 ? repoFamily(repoRoot(typeof input.cwd === 'string' ? input.cwd : process.cwd())) : null;
+      // 重い部分があるときだけ、デーモンの盤面を見る。普段の Bash の呼び出しにはデーモンへの問い合わせを足さない
+      if (heavy.length > 0 && (backgroundMode(env) === 'auto' || env.SWITCHYARD_TIMEOUT_GUARD !== '0')) snap = await snapshot(env);
       if (isBackground(out) && backgroundMode(env) === 'auto') {
-        const snap = await snapshot(env);
-        // 盤面の縮めた取り分(sized)は、学習の鍵(worktree の一族)で引く
-        const repo = repoFamily(repoRoot(typeof input.cwd === 'string' ? input.cwd : process.cwd()));
-        out = preToolUse(input, { ...base, shouldBackground: (heavy) => snap !== null && waitExpected(snap, heavy, repo) });
+        // 待ちが見込まれなければ前景のまま走らせる
+        const s = snap;
+        out = preToolUse(input, { ...base, shouldBackground: (h) => s !== null && waitExpected(s, h, learn ?? undefined) });
       } else if (isBackground(out) && backgroundMode(env) === 'never') {
         // 背景へは回さない。switchyard run で包む書き換えだけは残す
         out = preToolUse(input, { ...base, shouldBackground: () => false });
       }
       recordPreToolUse(input, out, env);
+      out = withTimeoutGuard(input, out, env, { heavy, snap, learn });
       if (out !== null) write(JSON.stringify(out));
+      return;
+    }
+    case 'post-tool-use-failure': {
+      // 観察だけのモードでは、起きたことを記録するだけ(Claude には何も伝えず、時間切れも覚えない)
+      const observe = env.SWITCHYARD_OBSERVE === '1';
+      const r = postToolUseFailure(input, env, observe ? { remember: () => {}, holders: () => [] } : {});
+      for (const rec of r.records) recordHook(input, env, { ...rec, ...(observe ? { observe: true } : {}) });
+      if (r.out !== null && !observe) write(JSON.stringify(r.out));
       return;
     }
     case 'session-start': {

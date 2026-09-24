@@ -9,6 +9,7 @@
 // 間に挟まった重い走行(別のテスト・ビルド)はソースを書き換えないとみなす。
 import { basename } from 'node:path';
 import { simpleCommands } from '../hooks/shell.mjs';
+import { PORT_IN_USE } from '../hooks/ports.mjs';
 
 /** ファイルを書き換えるツール */
 export const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -58,8 +59,8 @@ export function isReadOnly(command) {
 /** Bash ツールの時間切れの結果(Claude Code の実物: `Exit code 143\nCommand timed out after 2s`・is_error) */
 export const TIMED_OUT = /(^|\n)Command timed out after /;
 
-/** ポートが既に使われていて起動できなかった(Node の EADDRINUSE・各言語の bind の失敗・docker のポートの割り当て) */
-export const PORT_IN_USE = /EADDRINUSE|address already in use|port \d+ is (?:already )?in use|port is already (?:in use|allocated)/i;
+/** ポートが既に使われていて起動できなかった(PostToolUseFailure の知らせと同じ文言) */
+export { PORT_IN_USE } from '../hooks/ports.mjs';
 
 /** tool_result の中身の文字列(文字列か、text の塊の並び) @param {unknown} content @returns {string} */
 function resultText(content) {

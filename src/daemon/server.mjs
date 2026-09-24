@@ -376,6 +376,8 @@ export async function startDaemon(opts) {
       version: VERSION,
       // 実測で要求を縮める repo × profile と使用コア数。PreToolUse が「待たされるか」の見込みに使う
       sized: adaptive ? usage.sizedAll() : {},
+      // 自分で終わった走行の最長の所要。PreToolUse が Bash の時間切れを延ばすかを決めるのに使う
+      longest: estimates.longestAll(),
       // 空きメモリの見積もりと下限(メモリを見ないなら null)
       memory: memoryView(),
       // 実測の空き(詰め込みに使う)。測れていなければ null

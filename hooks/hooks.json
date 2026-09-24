@@ -11,6 +11,12 @@
         "hooks": [{ "type": "command", "shell": "bash", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/bin/switchyard-pretooluse.sh\"" }]
       }
     ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "shell": "bash", "command": "sh \"${CLAUDE_PLUGIN_ROOT}/bin/switchyard-posttoolusefailure.sh\"" }]
+      }
+    ],
     "Stop": [
       {
         "hooks": [{ "type": "command", "shell": "bash", "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/switchyard-hook.mjs\" stop" }]

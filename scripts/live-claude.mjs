@@ -7,7 +7,9 @@
 //   3. ./gradlew test: shim から見えないので PreToolUse が switchyard run -- で包む形に書き換え、拒否せずにそのまま走る
 //      (許すのは包んだ形 1 つだけ: Bash(switchyard run -- ./gradlew test))
 //   4. Bash(switchyard run:*) と広く許していても、中身が重い走行の形でない switchyard run は承認を求められ、-p では走らない
-import { execFileSync, spawnSync } from 'node:child_process';
+//   5. 1 本のセッションでも起きる事故: ポートが使用中で落ちたら握っているプロセスを Claude に伝え(PostToolUseFailure)、
+//      Bash の時間切れで切られたコマンドは覚えて、次に同じコマンドが走るとき時間切れを延ばす(PreToolUse)
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -153,6 +155,25 @@ if (isMain) {
     const a4 = analyzeStream(r4.stdout ?? '');
     const unvettedRan = existsSync(marker);
 
+    // ポートを握るサーバーを先に立てておく(この作業で前に起動したものの残りの代わり)
+    const holder = spawn(process.execPath, ['-e', "const s=require('http').createServer().listen(0,()=>console.log(s.address().port)); setTimeout(()=>{}, 300000)"], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const port = await new Promise((resolve) => holder.stdout?.once('data', (d) => resolve(Number(String(d).trim()))));
+    /** @type {ReturnType<typeof analyzeStream>} */
+    let a5;
+    try {
+      const r5 = claude(
+        `Run exactly these Bash commands one at a time, each as its own Bash tool call. Do not retry, fix or investigate anything. (1) node -e "require('http').createServer().listen(${port})"  (2) sleep 5 -- with the Bash tool timeout parameter set to 3000  (3) sleep 5 -- again with the timeout parameter set to 3000. After all three, quote verbatim every line starting with [switchyard] that you saw, then write DONE.`,
+        ['Bash(node:*)', 'Bash(sleep 5)'],
+      );
+      a5 = analyzeStream(r5.stdout ?? '');
+    } finally {
+      holder.kill('SIGKILL');
+    }
+    const hooks = existsSync(pathsOf(home).hooks) ? readRecords(pathsOf(home).hooks).records : [];
+    const portTraced = hooks.some((r) => r.decision === 'port' && r.port === port && Number(r.holders) >= 1) && a5.result.includes(`pid ${holder.pid}`);
+    const extended = hooks.some((r) => r.decision === 'timeout') && hooks.some((r) => r.decision === 'extend' && r.timeoutMs === 6000);
+    const lastFinished = (a5.toolText.match(/Command timed out after/g) ?? []).length === 1;
+
     const checks = {
       'shim が npm test を switchyard に通した(記録に default:batch の history)': managed,
       '空いているので前景のまま走った(tool_result に子の出力・背景に回っていない)': a1.foregroundOutput && !a1.background,
@@ -161,8 +182,10 @@ if (isMain) {
       'Stop の差し戻しの後、Claude が switchyard ack した': a2.blockedStop && acked,
       './gradlew test を拒否せずに switchyard run で包んで走らせた(子にジョブの id)': !a3.denied && gradleManaged && /GRADLE_JOB=j/.test(a3.toolText),
       'switchyard run:* を許していても、中身が重い走行でない包みは走らなかった(Claude は実際に試した)': a4.commands.some((c) => c.includes('switchyard run -- touch unvetted.txt')) && !unvettedRan,
+      'ポートが使用中で落ちたら、握っているプロセス(pid)が Claude に届いた': portTraced,
+      '時間切れで切られたコマンドを覚え、次は時間切れを倍に延ばして走り切った': extended && lastFinished,
     };
-    console.log(JSON.stringify({ checks, costUsd: [a1.costUsd, a2.costUsd, a3.costUsd, a4.costUsd], result1: a1.result, result2: a2.result, result3: a3.result, result4: a4.result, work, home }, null, 2));
+    console.log(JSON.stringify({ checks, costUsd: [a1.costUsd, a2.costUsd, a3.costUsd, a4.costUsd, a5.costUsd], result1: a1.result, result2: a2.result, result3: a3.result, result4: a4.result, result5: a5.result, work, home }, null, 2));
     process.exitCode = Object.values(checks).every(Boolean) ? 0 : 1;
   } finally {
     stopDaemon(home);

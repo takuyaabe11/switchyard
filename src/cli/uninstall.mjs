@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { t } from '../i18n.mjs';
 
 /** switchyard が記録の置き場に作るファイル(回した 1 世代前・書きかけの一時ファイル・取り込み中の別名を含む) */
-const OWN_FILE = /^(state\.json|events\.jsonl|hooks\.jsonl|unmanaged\.jsonl|observed\.jsonl|update-check\.json|stop-notified\.json|config\.json|switchyardd\.log|switchyardd\.sock|daemon\.lock)(\.1|\.[0-9][^/]*\.(tmp|taking))?$/;
+const OWN_FILE = /^(state\.json|events\.jsonl|hooks\.jsonl|unmanaged\.jsonl|observed\.jsonl|update-check\.json|stop-notified\.json|config\.json|switchyardd\.log|switchyardd\.sock|daemon\.lock|timeouts\.json|timeouts\.txt)(\.1|\.[0-9][^/]*\.(tmp|taking))?$/;
 
 /** 環境ファイルの、shims を PATH に足す行(src/hooks/session.mjs の pathExportLine が書く形) */
 const SHIMS_LINE = /^export PATH='(.*\/shims)':"\$PATH"$/;

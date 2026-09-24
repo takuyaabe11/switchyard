@@ -62,3 +62,4 @@ jobs:
       - run: node scripts/mutate.mjs trust
       - run: node scripts/mutate.mjs diagnose
       - run: node scripts/mutate.mjs report
+      - run: node scripts/mutate.mjs single

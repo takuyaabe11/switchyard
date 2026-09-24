@@ -26,6 +26,7 @@ export const SHARED_SETTINGS = [
   'SWITCHYARD_THREAD_ENV',
   'SWITCHYARD_WRAP',
   'SWITCHYARD_RUN_GUARD',
+  'SWITCHYARD_TIMEOUT_GUARD',
   'SWITCHYARD_OVERCOMMIT',
   'SWITCHYARD_MEMORY',
   'SWITCHYARD_CAPACITY',
@@ -94,6 +95,7 @@ export function formatShare({ summary: s, observed, meta }) {
     `- runs by profile: ${profileText.length > 0 ? profileText.join('; ') : 'none'}`,
     `- failed runs: ${s.failures} (${s.environmental} flagged as possibly not the code); unmanaged runs: ${s.unmanaged}; escaping children: ${s.escapes}`,
     `- PreToolUse: background ${s.hook.background}, wrapped ${s.hook.wrap}, refused ${s.hook.deny}, asked ${s.hook.ask}`,
+    `- Bash time limit: cut off ${s.hook.timeout}, given more time ${s.hook.extend}, sent to background as too long ${s.hook.timeoutBackground}; failed on a port in use ${s.hook.port} (holder found ${s.hook.portFound})`,
   ];
   if (observed !== null) {
     lines.push(

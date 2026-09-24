@@ -22,7 +22,7 @@ const queued = (id, at, reason) => ({ at, kind: 'decision', decision: { type: 'q
 /** history の記録 @param {number} at @param {number} durationMs @param {{ profile?: string, code?: number, repo?: string }} [over] */
 const history = (at, durationMs, over = {}) => ({ at, kind: 'history', repo: over.repo ?? '/repo', profile: over.profile ?? 'unit', class: 'batch', cpus: 2, durationMs, code: over.code ?? 0 });
 
-/** hooks.jsonl の 1 行 @param {'background' | 'deny'} decision @param {number} at @param {string} [cwd] */
+/** hooks.jsonl の 1 行 @param {string} decision @param {number} at @param {string} [cwd] */
 const hook = (decision, at, cwd = '/repo') => ({ at, kind: 'hook', decision, session: 's1', cwd, cmd: 'npm test' });
 
 describe('summarize(改善のための集計)', () => {
@@ -93,7 +93,23 @@ describe('summarize(改善のための集計)', () => {
 
   it('hooks.jsonl の背景化と拒否を数える', () => {
     const s = summarize({ events: [], hooks: [hook('background', T0), hook('background', T0), hook('deny', T0)] });
-    assert.deepEqual(s.hook, { background: 2, deny: 1, wrap: 0, ask: 0 });
+    assert.deepEqual(s.hook, { background: 2, deny: 1, wrap: 0, ask: 0, extend: 0, timeoutBackground: 0, timeout: 0, port: 0, portFound: 0 });
+  });
+
+  it('Bash の時間切れ(切られた・延ばした・背景へ回した)と、ポートが使用中で落ちた数(握っているプロセスを突き止めた数)を数え、文面に出す', () => {
+    const hooks = [
+      { ...hook('timeout', T0), limitMs: 120_000 },
+      { ...hook('extend', T0), timeoutMs: 240_000, reason: 'timed-out-before' },
+      { ...hook('background', T0), timeoutMs: null, reason: 'learned' },
+      hook('background', T0),
+      { ...hook('port', T0), port: 3000, holders: 1 },
+      { ...hook('port', T0), port: null, holders: 0 },
+    ];
+    const s = summarize({ events: [], hooks });
+    assert.deepEqual(s.hook, { background: 1, deny: 0, wrap: 0, ask: 0, extend: 1, timeoutBackground: 1, timeout: 1, port: 2, portFound: 1 });
+    const text = formatReport(s, { repoPrefix: null, sinceDays: null });
+    assert.match(text, /Bash の時間切れ: 切られた 1 件・切られないよう延ばした 1 件・上限を超えるので背景へ回した 1 件/);
+    assert.match(text, /ポートが使用中で落ちた: 2 件\(握っているプロセスを突き止めた 1 件\)/);
   });
 
   it('repo の前方一致と期間で絞る(決定は、その要求の repo で絞る)', () => {
@@ -107,7 +123,7 @@ describe('summarize(改善のための集計)', () => {
     assert.equal(s.jobs, 1);
     assert.equal(s.waitMs.max, MIN);
     assert.deepEqual(s.byProfile, []);
-    assert.deepEqual(s.hook, { background: 0, deny: 1, wrap: 0, ask: 0 });
+    assert.deepEqual(s.hook, { background: 0, deny: 1, wrap: 0, ask: 0, extend: 0, timeoutBackground: 0, timeout: 0, port: 0, portFound: 0 });
   });
 });
 

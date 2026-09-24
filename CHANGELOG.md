@@ -3,9 +3,22 @@
 All notable changes to switchyard. Versions follow `plugin.json`; Claude Code only offers an update when that
 version goes up.
 
-## Unreleased
+## 0.18.0
 
 ### Added
+- A Bash call cut off by Claude Code's time limit is remembered. The next time the same command runs in the same
+  repository, the PreToolUse hook gives it twice the time, up to the ceiling (`BASH_MAX_TIMEOUT_MS`, 10 minutes by
+  default). A heavy run switchyard has seen finish on its own gets 1.5 times its longest time, and runs in the
+  background if even the ceiling is too short. A command never seen to finish (watch mode, a dev server) is not sent to
+  the background this way. When a call is cut off, Claude is told it was the time limit and not the code.
+  `SWITCHYARD_TIMEOUT_GUARD=0` turns it off.
+- A Bash call that fails on a port already in use (`EADDRINUSE`, `address already in use`, Docker's `port is already
+  allocated`) is traced to the process holding the port: Claude is told its pid, command line, working directory and
+  how long it has run, or that a Docker container publishes the port, and that the failure is not the code's. It
+  uses `lsof`, then `ss`, then `/proc` on Linux, and `netstat` on Windows.
+- Both come from a new `PostToolUseFailure` hook, which starts node only when a failed call's output mentions a time
+  limit or a port in use. `switchyard report` (and `--share`) counts calls cut off, given more time, sent to the
+  background as too long, and failed on a port in use.
 - `switchyard replay` counts two things that happen with a single session too: Bash calls cut off by the tool's time
   limit (how many were heavy runs, how many hit the default limit, the time spent before the cut, and whether the same
   command was run again afterwards, in the foreground or the background), and calls that failed because a port was
