@@ -16,6 +16,9 @@ import { openClient } from '../../testkit/client.mjs';
 import { jobRequest } from '../../testkit/requests.mjs';
 import { tempHome } from '../../testkit/tmp.mjs';
 
+/** 更新の確認で外へ問わない(既定で有効なので、テストでは差し替える) */
+const noUpdate = async () => null;
+
 const HOOK_BIN = fileURLToPath(new URL('../../bin/switchyard-hook.mjs', import.meta.url));
 
 /** @type {Array<() => Promise<unknown>>} */
@@ -58,23 +61,23 @@ async function failedJob(sock) {
   return String(acc.jobId);
 }
 
-describe('新しい版の知らせ(SWITCHYARD_UPDATE_CHECK=1 のときだけ)', () => {
+describe('新しい版の知らせ(既定で有効。SWITCHYARD_UPDATE_CHECK=0 で問わない)', () => {
   it('compareVersions は数の並びで比べる', () => {
     assert.ok(compareVersions('0.10.0', '0.9.9') > 0);
     assert.ok(compareVersions('1.0.0', '1.0.0') === 0);
     assert.ok(compareVersions('0.5.0', '0.6.0') < 0);
   });
 
-  it('既定では外へ問わない。有効なら新しいときだけ知らせ、1 日は控えを使う。問えなければ黙る', async () => {
+  it('0 なら外へ問わない。既定では新しいときだけ知らせ、1 日は控えを使う。問えなければ黙る', async () => {
     const home = tempHome();
     let asked = 0;
     const fetchLatest = async () => {
       asked += 1;
       return '9.0.0';
     };
-    assert.equal(await updateNotice({ env: { SWITCHYARD_HOME: home }, version: '0.6.0', fetchLatest }), null);
-    assert.equal(asked, 0, '既定では外へ出ない');
-    const env = { SWITCHYARD_HOME: home, SWITCHYARD_UPDATE_CHECK: '1' };
+    assert.equal(await updateNotice({ env: { SWITCHYARD_HOME: home, SWITCHYARD_UPDATE_CHECK: '0' }, version: '0.6.0', fetchLatest }), null);
+    assert.equal(asked, 0, '0 なら外へ出ない');
+    const env = { SWITCHYARD_HOME: home };
     assert.match(String(await updateNotice({ env, version: '0.6.0', fetchLatest, now: () => 1_000 })), /9\.0\.0/);
     assert.match(String(await updateNotice({ env, version: '0.6.0', fetchLatest, now: () => 2_000 })), /9\.0\.0/);
     assert.equal(asked, 1, '1 日の間は控えを使う');
@@ -84,7 +87,7 @@ describe('新しい版の知らせ(SWITCHYARD_UPDATE_CHECK=1 のときだけ)', 
     const failing = async () => {
       throw new Error('offline');
     };
-    assert.equal(await updateNotice({ env: { SWITCHYARD_HOME: tempHome(), SWITCHYARD_UPDATE_CHECK: '1' }, version: '0.6.0', fetchLatest: failing }), null);
+    assert.equal(await updateNotice({ env: { SWITCHYARD_HOME: tempHome() }, version: '0.6.0', fetchLatest: failing }), null);
   });
 });
 
@@ -119,7 +122,7 @@ describe('sessionStart の PATH の知らせ', () => {
     const envFile = join(dir, 'env.sh');
     const keep = 'export OTHER=1';
     writeFileSync(envFile, `export PATH='/nowhere/dev/conductor/shims':"$PATH"\n${keep}\n`);
-    const lines = await sessionStart({}, {
+    const lines = await sessionStart({}, { fetchLatest: noUpdate,
       env: { CLAUDE_ENV_FILE: envFile, SWITCHYARD_HOME: dir },
       connect: () => Promise.reject(new DaemonUnavailableError('居ない')),
     });
@@ -135,7 +138,7 @@ describe('sessionStart の PATH の知らせ', () => {
     const envFile = join(dir, 'env.sh');
     // 消えた古い版の置き場を 3 世代ぶん
     writeFileSync(envFile, ['0.1.0', '0.2.0', '0.3.0'].map((v) => `export PATH='/gone/cache/switchyard/${v}/shims':"$PATH"`).join('\n') + '\n');
-    await sessionStart({}, {
+    await sessionStart({}, { fetchLatest: noUpdate,
       env: { CLAUDE_ENV_FILE: envFile, SWITCHYARD_HOME: dir },
       connect: () => Promise.reject(new DaemonUnavailableError('居ない')),
     });
@@ -147,7 +150,7 @@ describe('sessionStart の PATH の知らせ', () => {
     const dir = mkdtempSync(join(tmpdir(), 'switchyard-env-'));
     const envFile = join(dir, 'env.sh');
     writeFileSync(envFile, `${pathExportLine(fileURLToPath(new URL('../../', import.meta.url)))}\n`);
-    const lines = await sessionStart({}, {
+    const lines = await sessionStart({}, { fetchLatest: noUpdate,
       env: { CLAUDE_ENV_FILE: envFile, SWITCHYARD_HOME: dir },
       connect: () => Promise.reject(new DaemonUnavailableError('居ない')),
     });
@@ -160,8 +163,8 @@ describe('SessionStart(設計 §9.2)', () => {
     const { home } = await daemon();
     const file = envFileIn();
     const env = { SWITCHYARD_HOME: home, CLAUDE_ENV_FILE: file };
-    assert.deepEqual(await sessionStart({ source: 'startup' }, { env, connect: noAutoStart, root: '/p/r' }), []);
-    assert.deepEqual(await sessionStart({ source: 'compact' }, { env, connect: noAutoStart, root: '/p/r' }), []);
+    assert.deepEqual(await sessionStart({ source: 'startup' }, { fetchLatest: noUpdate, env, connect: noAutoStart, root: '/p/r' }), []);
+    assert.deepEqual(await sessionStart({ source: 'compact' }, { fetchLatest: noUpdate, env, connect: noAutoStart, root: '/p/r' }), []);
     assert.equal(readFileSync(file, 'utf8'), `export PATH='/p/r/shims':"$PATH"\n`);
     assert.equal(pathAfterSourcing(file), '/p/r/shims:/usr/bin:/bin');
   });
@@ -174,7 +177,7 @@ describe('SessionStart(設計 §9.2)', () => {
 
   it('CLAUDE_ENV_FILE が無ければ、管理されないことを 1 行で知らせる', async () => {
     const { home } = await daemon();
-    const lines = await sessionStart({}, { env: { SWITCHYARD_HOME: home }, connect: noAutoStart });
+    const lines = await sessionStart({}, { fetchLatest: noUpdate, env: { SWITCHYARD_HOME: home }, connect: noAutoStart });
     assert.ok(lines.some((l) => l.includes('CLAUDE_ENV_FILE が無い')), lines.join('\n'));
   });
 
@@ -184,13 +187,13 @@ describe('SessionStart(設計 §9.2)', () => {
     cleanups.push(() => c.close());
     c.send({ t: 'request', job: jobRequest({ class: 'measure', cmd: 'npm run bench' }) });
     await c.next((m) => m.t === 'grant');
-    const lines = await sessionStart({}, { env: { SWITCHYARD_HOME: home, CLAUDE_ENV_FILE: envFileIn() }, connect: noAutoStart });
+    const lines = await sessionStart({}, { fetchLatest: noUpdate, env: { SWITCHYARD_HOME: home, CLAUDE_ENV_FILE: envFileIn() }, connect: noAutoStart });
     assert.ok(lines.some((l) => l.includes('計測') && l.includes('npm run bench')), lines.join('\n'));
   });
 
   it('デーモンの版が plugin の版と違えば知らせる', async () => {
     const { home } = await daemon();
-    const lines = await sessionStart({}, { env: { SWITCHYARD_HOME: home, CLAUDE_ENV_FILE: envFileIn() }, connect: noAutoStart, version: '0.0.0-other' });
+    const lines = await sessionStart({}, { fetchLatest: noUpdate, env: { SWITCHYARD_HOME: home, CLAUDE_ENV_FILE: envFileIn() }, connect: noAutoStart, version: '0.0.0-other' });
     assert.ok(lines.some((l) => l.includes('plugin の版 0.0.0-other')), lines.join('\n'));
   });
 
@@ -212,19 +215,19 @@ describe('SessionStart(設計 §9.2)', () => {
           old.close(() => resolve(undefined));
         }),
     );
-    const lines = await sessionStart({}, { env: { SWITCHYARD_HOME: home, CLAUDE_ENV_FILE: envFileIn() }, connect: noAutoStart, version: '0.2.0' });
+    const lines = await sessionStart({}, { fetchLatest: noUpdate, env: { SWITCHYARD_HOME: home, CLAUDE_ENV_FILE: envFileIn() }, connect: noAutoStart, version: '0.2.0' });
     assert.ok(lines.some((l) => l.includes('版 0.1.0 以前') && l.includes('plugin の版 0.2.0')), lines.join('\n'));
     assert.ok(!lines.some((l) => l.includes('undefined')), lines.join('\n'));
   });
 
   it('デーモンに届かなければ、管理なしで走ることを知らせる', async () => {
-    const lines = await sessionStart({}, { env: { SWITCHYARD_HOME: tempHome(), CLAUDE_ENV_FILE: envFileIn() }, connect: unavailable });
+    const lines = await sessionStart({}, { fetchLatest: noUpdate, env: { SWITCHYARD_HOME: tempHome(), CLAUDE_ENV_FILE: envFileIn() }, connect: unavailable });
     assert.ok(lines.some((l) => l.includes('デーモンに届かない')), lines.join('\n'));
   });
 
   it('SWITCHYARD_THINKER=1 なら何もしない(ファイルにも書かない)', async () => {
     const file = envFileIn();
-    assert.deepEqual(await sessionStart({}, { env: { SWITCHYARD_THINKER: '1', CLAUDE_ENV_FILE: file }, connect: unavailable }), []);
+    assert.deepEqual(await sessionStart({}, { fetchLatest: noUpdate, env: { SWITCHYARD_THINKER: '1', CLAUDE_ENV_FILE: file }, connect: unavailable }), []);
     assert.equal(existsSync(file), false);
   });
 });

@@ -651,7 +651,7 @@ function runTests(dir, tests) {
   return new Promise((resolve) => {
     // SWITCHYARD_HOME は写しの中へ向ける(env を渡さないと、テストの試算が実際の ~/.switchyard/ を汚す)
     // テストは日本語の文言で照合する(package.json の npm test と同じ)
-    const env = { ...process.env, SWITCHYARD_HOME: join(dir, '.switchyard-home'), SWITCHYARD_LANG: 'ja' };
+    const env = { ...process.env, SWITCHYARD_HOME: join(dir, '.switchyard-home'), SWITCHYARD_LANG: 'ja', SWITCHYARD_UPDATE_CHECK: '0' };
     // 入れ子の印を落とす(package.json の `env -u` と同じ)。この script 自身が switchyard に包まれて走ると
     // SWITCHYARD_IN_JOB=1 が立ち、それが test へ漏れると、その印を読む側の振る舞いを試す試験が別物になる
     delete env.SWITCHYARD_IN_JOB;
