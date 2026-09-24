@@ -8,6 +8,10 @@ import { t } from '../i18n.mjs';
 /** @typedef {import('./types.mjs').Lease} Lease */
 /** @typedef {import('./types.mjs').JobSpec} JobSpec */
 /** @typedef {import('./types.mjs').Action} Action */
+/**
+ * 空きメモリの見積もり(MB)と、残しておく下限(MB)。デーモンが測って渡す。
+ * @typedef {{ availableMb: number, floorMb: number }} MemoryView
+ */
 
 /** 止めた / 降格したリース(設計 §6.7)。計測に CPU を譲っているので、容量にも単独判定にも数えない @param {Lease} l */
 const isHeld = (l) => l.held !== undefined;
@@ -142,9 +146,14 @@ function blockReason(s, job) {
  * 先頭のジョブ(計測を除く)が宣言の空きに入らなくても、実測の空きに cpus.min が収まれば、1 回に 1 本だけ容量を超えて入れる(詰め込み)。
  * 予約はしたが使わない走行(待ちと入出力が中心のテスト)の横で、使われないコアを遊ばせないため。
  * CPU を使い切る走行の横では空きが出ないので入れない。計測の走行中・入場待ちの間(gate)と、鍵が空いていないときも入れない。
- * @param {State} input @param {number} now @param {{ spare?: number | null }} [opts] @returns {{ state: State, actions: Action[] }}
+ *
+ * memory は、空きメモリの見積もりと残しておく下限。CPU を持つ走行が 1 本でもあるとき、見込みのピーク(job.memMb)を
+ * 足すと下限を割るジョブは、入場も詰め込みも後ろ詰めもさせない(重ねてスワップや OOM を起こさない)。
+ * 何も走っていなければ必ず入れる(メモリの少ない機械で永久に待たせない。switchyard が無いときより悪くしない)。
+ * @param {State} input @param {number} now @param {{ spare?: number | null, memory?: MemoryView | null }} [opts]
+ * @returns {{ state: State, actions: Action[] }}
  */
-export function schedule(input, now, { spare = null } = {}) {
+export function schedule(input, now, { spare = null, memory = null } = {}) {
   /** @type {State} */
   const s = { ...input, waiting: [...input.waiting], leases: [...input.leases], notes: {} };
   /** @type {Lease[]} */
@@ -192,6 +201,7 @@ export function schedule(input, now, { spare = null } = {}) {
     };
     s.leases = [...s.leases, lease];
     granted.push(lease);
+    memLeft -= w.job.memMb ?? 0;
   };
 
   const runningMeasure = s.leases.find((l) => l.job.class === 'measure');
@@ -232,6 +242,16 @@ export function schedule(input, now, { spare = null } = {}) {
   let head = null;
   /** この回にまだ詰め込めるか(1 回に 1 本まで。入れた走行が立ち上がる前に、次を測った空きで入れない) */
   let spareLeft = spare;
+  /** この回に入れたジョブの見込みのピークを引いた空きメモリ */
+  let memLeft = memory === null ? 0 : memory.availableMb;
+  /** メモリの下限を割らずに入れられるか @param {JobSpec} job */
+  const memOk = (job) => memory === null || cpuLeases(s).length === 0 || memLeft - (job.memMb ?? 0) >= memory.floorMb;
+  /** @param {JobSpec} job */
+  const memReason = (job) =>
+    t(
+      `メモリ不足(空き ${Math.round(memLeft)}MB・見込み ${Math.round(job.memMb ?? 0)}MB・残す ${Math.round(memory?.floorMb ?? 0)}MB)`,
+      `not enough memory (free ${Math.round(memLeft)}MB, expects ${Math.round(job.memMb ?? 0)}MB, keeps ${Math.round(memory?.floorMb ?? 0)}MB)`,
+    );
   /** @type {Set<string>} 前に居て入場できなかったジョブが要る鍵(鍵だけのジョブはこれを追い越さない) */
   const blocked = new Set();
   /** @param {JobSpec} job */
@@ -288,13 +308,21 @@ export function schedule(input, now, { spare = null } = {}) {
       }
       continue;
     }
-    const fits = free >= job.cpus.min && locksFree(s, job.locks);
+    const cpuFits = free >= job.cpus.min && locksFree(s, job.locks);
+    const fits = cpuFits && memOk(job);
     if (head === null) {
       if (fits) {
         admit(w, job.cpus.min);
         continue;
       }
-      if (spareLeft !== null && spareLeft >= job.cpus.min && locksFree(s, job.locks)) {
+      if (cpuFits) {
+        // CPU と鍵は空いているが、重ねるとメモリの下限を割る。先頭として待つ(見込み時刻は分からない)
+        head = { id: job.id, etaAt: null };
+        note(memReason(job), null);
+        block(job);
+        continue;
+      }
+      if (spareLeft !== null && spareLeft >= job.cpus.min && locksFree(s, job.locks) && memOk(job)) {
         admit(w, job.cpus.min, false, true);
         spareLeft = null;
         continue;

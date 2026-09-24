@@ -4,6 +4,7 @@ import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renam
 import { basename, dirname, join } from 'node:path';
 import { EstimateBook } from '../core/estimate.mjs';
 import { UsageBook } from '../core/usage.mjs';
+import { MemoryBook } from '../core/memory.mjs';
 import { ensurePrivateDir, PRIVATE_FILE_MODE } from './paths.mjs';
 
 /** @typedef {import('../core/types.mjs').State} State */
@@ -192,6 +193,16 @@ export function loadUsage(records) {
     if (r.kind !== 'history' || typeof r.repo !== 'string' || typeof r.profile !== 'string') continue;
     if (typeof r.durationMs !== 'number' || typeof r.cpus !== 'number') continue;
     book.record(r.repo, r.profile, { durationMs: r.durationMs, cpuMs: typeof r.cpuMs === 'number' ? r.cpuMs : null, cpus: r.cpus, code: typeof r.code === 'number' ? r.code : null });
+  }
+  return book;
+}
+
+/** 記録の history 行から、repo × profile ごとのピークの RSS を集める @param {Record<string, unknown>[]} records */
+export function loadMemory(records) {
+  const book = new MemoryBook();
+  for (const r of records) {
+    if (r.kind !== 'history' || typeof r.repo !== 'string' || typeof r.profile !== 'string') continue;
+    book.record(r.repo, r.profile, typeof r.peakMemMb === 'number' ? r.peakMemMb : null);
   }
   return book;
 }

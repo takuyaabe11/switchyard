@@ -50,6 +50,10 @@ export function renderTop(snap, nowWall) {
       `CPU ${snap.used} / ${snap.capacity} in use  running ${snap.leases.length}  waiting ${snap.waiting.length}`,
     ),
   ];
+  if (snap.memory !== undefined && snap.memory !== null) {
+    const m = snap.memory;
+    lines.push(t(`メモリ 空き ${Math.round(m.availableMb)}MB(残す ${Math.round(m.floorMb)}MB)`, `Memory free ${Math.round(m.availableMb)}MB (keeps ${Math.round(m.floorMb)}MB)`));
+  }
   if (snap.leases.length === 0 && snap.waiting.length === 0) lines.push(t('走行も待ちも無い', 'nothing running or waiting'));
   if (snap.leases.length > 0) {
     lines.push(t('走行:', 'Running:'));

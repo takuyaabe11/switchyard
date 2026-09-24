@@ -13,6 +13,8 @@ const scenario = fc
   .record({
     capacity: fc.integer({ min: 1, max: 8 }),
     spare: fc.option(fc.integer({ min: 0, max: 4 }), { nil: null }),
+    // 空きメモリは出来事によらず一定(走行が終わっても戻らない、いちばん厳しい形)
+    memory: fc.option(fc.record({ availableMb: fc.integer({ min: 0, max: 8000 }), floorMb: fc.integer({ min: 0, max: 4000 }) }), { nil: null }),
     qCap: fc.integer({ min: 1, max: 2 }),
     jobs: fc.array(
       fc.record({
@@ -24,6 +26,7 @@ const scenario = fc
         extra: fc.integer({ min: 0, max: 6 }),
         locks: fc.subarray(['p', 'q', 'p']),
         expectedMin: fc.option(fc.integer({ min: 1, max: 25 }), { nil: null }),
+        memMb: fc.option(fc.integer({ min: 100, max: 6000 }), { nil: null }),
         // 4 本に 1 本は鍵だけのジョブ(CPU 0..0・鍵 1 本以上。設計 §5.2)
         lockOnly: fc.constantFrom(false, false, false, true),
         // 鍵だけのジョブを指せば、その親の子(設計 §6.2)。到着の時刻しだいで、親が居るときも居ないときもある
@@ -35,6 +38,7 @@ const scenario = fc
   .map((raw) => ({
     capacity: raw.capacity,
     spare: raw.spare,
+    memory: raw.memory,
     lockCaps: { p: 1, q: raw.qCap },
     jobs: raw.jobs.map((j, i) => {
       const pick = j.parentPick;
@@ -58,6 +62,7 @@ const scenario = fc
               locks: j.locks,
               expectedMs: j.expectedMin === null ? null : j.expectedMin * MIN,
               cmd: `cmd ${i}`,
+              memMb: j.memMb,
               ...(parent !== null ? { parent } : {}),
             },
       };

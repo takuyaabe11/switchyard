@@ -28,8 +28,46 @@ const SUITES = {
       'test/core/score.test.mjs',
       'test/core/usage.test.mjs',
       'test/core/schedule.overcommit.test.mjs',
+      'test/core/schedule.memory.test.mjs',
+      'test/core/memory.test.mjs',
     ],
     mutations: [
+      {
+        name: 'M27 メモリの下限を見ずに重ねる',
+        file: 'src/core/schedule.mjs',
+        from: 'memLeft - (job.memMb ?? 0) >= memory.floorMb',
+        to: 'true',
+      },
+      {
+        name: 'M28 何も走っていなくてもメモリで待たせる(永久に待つ)',
+        file: 'src/core/schedule.mjs',
+        from: 'memory === null || cpuLeases(s).length === 0 || memLeft',
+        to: 'memory === null || memLeft',
+      },
+      {
+        name: 'M29 同じ回に入れたジョブの見込みを引かない',
+        file: 'src/core/schedule.mjs',
+        from: '    memLeft -= w.job.memMb ?? 0;\n',
+        to: '',
+      },
+      {
+        name: 'M30 詰め込みでメモリを見ない',
+        file: 'src/core/schedule.mjs',
+        from: 'locksFree(s, job.locks) && memOk(job)) {',
+        to: 'locksFree(s, job.locks)) {',
+      },
+      {
+        name: 'M31 ピークの見込みに直近の最大ではなく最後の値を使う',
+        file: 'src/core/memory.mjs',
+        from: 'Math.max(...list)',
+        to: 'list[list.length - 1]',
+      },
+      {
+        name: 'M32 まだ使っていない見込みを空きから引かない',
+        file: 'src/core/memory.mjs',
+        from: 'return availableMb - reserved;',
+        to: 'return availableMb;',
+      },
       {
         name: 'M24 実測の空きの大きさを見ずに詰め込む',
         file: 'src/core/schedule.mjs',
@@ -111,8 +149,8 @@ const SUITES = {
       {
         name: 'M3 CPU の空き判定を 1 つ緩める',
         file: 'src/core/schedule.mjs',
-        from: 'const fits = free >= job.cpus.min && locksFree(s, job.locks);',
-        to: 'const fits = free + 1 >= job.cpus.min && locksFree(s, job.locks);',
+        from: 'const cpuFits = free >= job.cpus.min && locksFree(s, job.locks);',
+        to: 'const cpuFits = free + 1 >= job.cpus.min && locksFree(s, job.locks);',
       },
       {
         name: 'M4 計測の直後の優先を外す',
@@ -698,8 +736,26 @@ const SUITES = {
     ],
   },
   pack: {
-    tests: ['test/daemon/overcommit.test.mjs', 'test/daemon/server.test.mjs'],
+    tests: ['test/daemon/overcommit.test.mjs', 'test/daemon/memory.test.mjs', 'test/daemon/server.test.mjs'],
     mutations: [
+      {
+        name: 'P5 ピークではなく最後の RSS を記録する',
+        file: 'src/daemon/server.mjs',
+        from: 'peakMb: Math.max(prev?.peakMb ?? 0, now)',
+        to: 'peakMb: now',
+      },
+      {
+        name: 'P6 RSS を測った後に割り振りを見直さない(空きが戻っても tick まで待つ)',
+        file: 'src/daemon/server.mjs',
+        from: 'if (!closing && state.waiting.length > 0) apply',
+        to: 'if (false) apply',
+      },
+      {
+        name: 'P7 要求に見込みのピークを載せない',
+        file: 'src/daemon/server.mjs',
+        from: 'const memMb = memory ? memBook.expected(req.repo, req.profile) : null;',
+        to: 'const memMb = null;',
+      },
       {
         name: 'P1 学んでいない走行の立ち上がりを待たない',
         file: 'src/daemon/server.mjs',

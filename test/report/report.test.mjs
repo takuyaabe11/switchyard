@@ -13,8 +13,8 @@ const req = (id, at, over = {}) => ({
   event: { type: 'request', now: at, job: { id, session: 's1', repo: '/repo', profile: 'unit', cmd: 'npm test', class: 'batch', cpus: { min: 2, max: 4 }, locks: [], preempt: 'throttle', why: null, expectedMs: null, ...over } },
 });
 
-/** grant の記録 @param {string} id @param {number} at @param {{ cpus?: number, lockChild?: boolean }} [over] */
-const grant = (id, at, over = {}) => ({ at, kind: 'decision', decision: { type: 'grant', jobId: id, cpus: over.cpus ?? 2, ...(over.lockChild === true ? { lockChild: true } : {}) } });
+/** grant の記録 @param {string} id @param {number} at @param {{ cpus?: number, lockChild?: boolean, overcommit?: boolean }} [over] */
+const grant = (id, at, over = {}) => ({ at, kind: 'decision', decision: { type: 'grant', jobId: id, cpus: over.cpus ?? 2, ...(over.lockChild === true ? { lockChild: true } : {}), ...(over.overcommit === true ? { overcommit: true } : {}) } });
 
 /** queued の記録 @param {string} id @param {number} at @param {string} reason */
 const queued = (id, at, reason) => ({ at, kind: 'decision', decision: { type: 'queued', jobId: id, position: 1, reason, etaAt: null } });
@@ -46,9 +46,16 @@ describe('summarize(改善のための集計)', () => {
       req('b', T0), queued('b', T0, 'CPU 不足(空き 1 / 必要 2)'), grant('b', T0 + MIN),
       req('c', T0), queued('c', T0, '鍵 port:4173 を先に待つジョブがいる'), grant('c', T0 + MIN),
       req('d', T0), queued('d', T0, '先頭 a の後ろ(後ろ詰めの見込みなし)'), grant('d', T0 + MIN),
+      req('e', T0), queued('e', T0, 'メモリ不足(空き 2500MB・見込み 2500MB・残す 1000MB)'), grant('e', T0 + MIN),
+      req('f', T0), queued('f', T0, 'not enough memory (free 2500MB, expects 2500MB, keeps 1000MB)'), grant('f', T0 + MIN),
     ];
     const s = summarize({ events, hooks: [] });
-    assert.deepEqual(s.reasons, { measure: 1, cpu: 1, lock: 1, behind: 1 });
+    assert.deepEqual(s.reasons, { measure: 1, cpu: 1, lock: 1, behind: 1, memory: 2 });
+  });
+
+  it('実測の空きに詰め込んだ入場を数える', () => {
+    const events = [req('a', T0), grant('a', T0, { cpus: 1, overcommit: true }), req('b', T0), grant('b', T0)];
+    assert.equal(summarize({ events, hooks: [] }).packed, 1);
   });
 
   it('容量を超えて借りた入場を数える', () => {

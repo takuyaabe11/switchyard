@@ -21,7 +21,8 @@
  *   expectedMs: number | null,
  *   parent?: string | null,
  *   sizedFrom?: CpuRange,
- *   measuredCores?: number
+ *   measuredCores?: number,
+ *   memMb?: number | null
  * }} JobSpec
  */
 
@@ -67,7 +68,7 @@
  * @typedef {(
  *   { type: 'request', now: number, job: JobSpec } |
  *   { type: 'started', now: number, jobId: string, pid: number, pgid: number | null } |
- *   { type: 'exit', now: number, jobId: string, code: number | null, killedByCaller: boolean, durationMs: number, cpuMs?: number | null } |
+ *   { type: 'exit', now: number, jobId: string, code: number | null, killedByCaller: boolean, durationMs: number, cpuMs?: number | null, peakMemMb?: number | null } |
  *   { type: 'cancel', now: number, jobId: string } |
  *   { type: 'heartbeatLost', now: number, jobId: string, alive: boolean } |
  *   { type: 'orphanGone', now: number, jobId: string } |
@@ -82,7 +83,7 @@
  * @typedef {(
  *   { type: 'grant', jobId: string, cpus: number, lockChild?: boolean, overcommit?: boolean } |
  *   { type: 'queued', jobId: string, position: number, reason: string, etaAt: number | null } |
- *   { type: 'history', repo: string, profile: string, class: JobClass, cpus: number, durationMs: number, code: number | null, cpuMs?: number | null } |
+ *   { type: 'history', repo: string, profile: string, class: JobClass, cpus: number, durationMs: number, code: number | null, cpuMs?: number | null, peakMemMb?: number | null } |
  *   { type: 'hold', jobId: string, mode: 'pause' | 'throttle' } |
  *   { type: 'unhold', jobId: string }
  * )} Action

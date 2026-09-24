@@ -18,7 +18,7 @@
     "switchyardd": "bin/switchyardd.mjs"
   },
   "scripts": {
-    "test": "env -u SWITCHYARD_IN_JOB -u SWITCHYARD_HELD_LOCKS -u SWITCHYARD_JOB_ID SWITCHYARD_LANG=ja SWITCHYARD_UPDATE_CHECK=0 SWITCHYARD_OVERCOMMIT=0 SWITCHYARD_HOME=$(mktemp -d) node --test --test-reporter=spec",
+    "test": "env -u SWITCHYARD_IN_JOB -u SWITCHYARD_HELD_LOCKS -u SWITCHYARD_JOB_ID SWITCHYARD_LANG=ja SWITCHYARD_UPDATE_CHECK=0 SWITCHYARD_OVERCOMMIT=0 SWITCHYARD_MEMORY=0 SWITCHYARD_HOME=$(mktemp -d) node --test --test-reporter=spec",
     "typecheck": "tsc -p .",
     "check": "npm run typecheck && npm test",
     "mutate:core": "node scripts/mutate.mjs core",
