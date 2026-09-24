@@ -178,7 +178,7 @@ export function loadEstimates(records) {
   for (const r of records) {
     if (r.kind !== 'history') continue;
     if (typeof r.repo !== 'string' || typeof r.profile !== 'string' || typeof r.durationMs !== 'number') continue;
-    book.record(r.repo, r.profile, r.durationMs, typeof r.code === 'number' ? r.code : null);
+    book.record(typeof r.family === 'string' ? r.family : r.repo, r.profile, r.durationMs, typeof r.code === 'number' ? r.code : null);
   }
   return book;
 }
@@ -192,7 +192,7 @@ export function loadUsage(records) {
   for (const r of records) {
     if (r.kind !== 'history' || typeof r.repo !== 'string' || typeof r.profile !== 'string') continue;
     if (typeof r.durationMs !== 'number' || typeof r.cpus !== 'number') continue;
-    book.record(r.repo, r.profile, { durationMs: r.durationMs, cpuMs: typeof r.cpuMs === 'number' ? r.cpuMs : null, cpus: r.cpus, code: typeof r.code === 'number' ? r.code : null });
+    book.record(typeof r.family === 'string' ? r.family : r.repo, r.profile, { durationMs: r.durationMs, cpuMs: typeof r.cpuMs === 'number' ? r.cpuMs : null, cpus: r.cpus, code: typeof r.code === 'number' ? r.code : null });
   }
   return book;
 }
@@ -202,7 +202,7 @@ export function loadMemory(records) {
   const book = new MemoryBook();
   for (const r of records) {
     if (r.kind !== 'history' || typeof r.repo !== 'string' || typeof r.profile !== 'string') continue;
-    book.record(r.repo, r.profile, typeof r.peakMemMb === 'number' ? r.peakMemMb : null);
+    book.record(typeof r.family === 'string' ? r.family : r.repo, r.profile, typeof r.peakMemMb === 'number' ? r.peakMemMb : null);
   }
   return book;
 }

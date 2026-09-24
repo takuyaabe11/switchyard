@@ -6,7 +6,7 @@ import { formatReport, summarize } from '../../src/report/report.mjs';
 const MIN = 60_000;
 const T0 = 1_700_000_000_000;
 
-/** request の記録 @param {string} id @param {number} at @param {Partial<{ repo: string, profile: string, class: string, cmd: string }>} [over] */
+/** request の記録 @param {string} id @param {number} at @param {Partial<{ repo: string, profile: string, class: string, cmd: string, sizedFrom: { min: number, max: number } }>} [over] */
 const req = (id, at, over = {}) => ({
   at,
   kind: 'event',
@@ -57,6 +57,12 @@ describe('summarize(改善のための集計)', () => {
     const history = (/** @type {Record<string, unknown>} */ over) => ({ at: T0, kind: 'history', repo: '/repo', profile: 'unit', class: 'batch', cpus: 2, durationMs: 1000, code: 1, ...over });
     const s = summarize({ events: [history({ environmental: ['x'] }), history({}), history({ code: 0 })], hooks: [] });
     assert.deepEqual([s.failures, s.environmental], [2, 1]);
+  });
+
+  it('学んだ使い方に合わせて要求を縮めた要求を数える', () => {
+    const events = [req('a', T0, { sizedFrom: { min: 2, max: 4 } }), req('b', T0)];
+    assert.equal(summarize({ events, hooks: [] }).sized, 1);
+    assert.match(formatReport(summarize({ events, hooks: [] }), { repoPrefix: null, sinceDays: null }), /学んだ使い方に合わせて要求を縮めた走行: 1 件/);
   });
 
   it('実測の空きに詰め込んだ入場を数える', () => {

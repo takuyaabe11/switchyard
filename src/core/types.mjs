@@ -11,6 +11,7 @@
  *   id: string,
  *   session: string,
  *   repo: string,
+ *   family?: string,
  *   profile: string,
  *   cmd: string,
  *   class: JobClass,
@@ -84,7 +85,7 @@
  * @typedef {(
  *   { type: 'grant', jobId: string, cpus: number, lockChild?: boolean, overcommit?: boolean } |
  *   { type: 'queued', jobId: string, position: number, reason: string, etaAt: number | null } |
- *   { type: 'history', repo: string, profile: string, class: JobClass, cpus: number, durationMs: number, code: number | null, cpuMs?: number | null, peakMemMb?: number | null, environmental?: string[] } |
+ *   { type: 'history', repo: string, family?: string, profile: string, class: JobClass, cpus: number, durationMs: number, code: number | null, cpuMs?: number | null, peakMemMb?: number | null, environmental?: string[] } |
  *   { type: 'hold', jobId: string, mode: 'pause' | 'throttle' } |
  *   { type: 'unhold', jobId: string }
  * )} Action

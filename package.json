@@ -1,6 +1,6 @@
 {
   "name": "switchyard",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "private": true,
   "description": "Keeps Claude Code sessions on one machine from fighting over heavy runs, by handing out CPU shares and exclusive locks.",
   "license": "MIT",

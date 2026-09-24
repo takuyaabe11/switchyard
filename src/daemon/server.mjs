@@ -112,20 +112,33 @@ export const RAMP_KNOWN_MS = 1_000;
 export const RAMP_UNKNOWN_MS = 3_000;
 
 /**
- * 実測の空き(schedule の詰め込みに渡す)。容量から、機械全体で実際に使われているコア数と、走行中のジョブが
- * 学んだ使い方で見込まれるコア数の大きい方を引く。どの走行も立ち上がった後の窓で測れていなければ null。
- * @param {{ capacity: number, samples: Array<{ at: number, busy: number }>, leases: Array<{ grantedAt: number, typical: number | null }> }} input
+ * 実測の空き(schedule の詰め込みに渡す)。直近の窓(SPARE_WINDOW_MS)で測った機械全体の使用コア数に、窓の間に立ち上がりの途中だった
+ * 走行の見込み(学んだ使い方。学んでいなければ割り当てたコア数)を足し、学んだ使い方の見込みの合計と比べて大きい方を容量から引く。
+ * 立ち上がりの途中の走行はまだ使い切っていないので、実測だけでは空いて見える。以前は全ての走行が立ち上がるまで測らなかったが、
+ * 短い走行が次々に入る混み合った時間には一度も測れず、詰め込みが働かなかった(利用者の 6 日間の記録で詰め込み 0 回・CPU 待ち 86 本)。
+ * 窓の長さの標本が無ければ null。
+ * @param {{ capacity: number, samples: Array<{ at: number, busy: number }>, leases: Array<{ grantedAt: number, typical: number | null, cpus: number }> }} input
  * @returns {number | null}
  */
 export function spareOf({ capacity, samples, leases }) {
-  const settled = leases.reduce((at, l) => Math.max(at, l.grantedAt + (l.typical === null ? RAMP_UNKNOWN_MS : RAMP_KNOWN_MS)), -Infinity);
   const last = samples[samples.length - 1];
   if (last === undefined) return null;
-  const first = samples.find((x) => x.at >= settled && last.at - x.at >= SPARE_WINDOW_MS);
+  // 窓の始まり: 最後の標本から窓の長さ以上さかのぼった、最も新しい標本
+  /** @type {{ at: number, busy: number } | undefined} */
+  let first;
+  for (let i = samples.length - 2; i >= 0; i -= 1) {
+    if (last.at - samples[i].at >= SPARE_WINDOW_MS) {
+      first = samples[i];
+      break;
+    }
+  }
   if (first === undefined) return null;
   const busyCores = Math.max(0, last.busy - first.busy) / (last.at - first.at);
+  const from = first.at;
+  const ramping = leases.filter((l) => l.grantedAt + (l.typical === null ? RAMP_UNKNOWN_MS : RAMP_KNOWN_MS) > from);
+  const rampingCores = ramping.reduce((n, l) => n + (l.typical ?? l.cpus), 0);
   const predicted = leases.reduce((n, l) => n + (l.typical ?? 0), 0);
-  return capacity - Math.max(busyCores, predicted);
+  return capacity - Math.max(busyCores + rampingCores, predicted);
 }
 
 /** 残っている socket ファイルに誰かが応答すれば投げ、応答しなければ消す @param {string} sock */
@@ -223,10 +236,12 @@ export async function startDaemon(opts) {
   /** @param {Action} a */
   const dispatch = (a) => {
     if (a.type === 'history') {
-      estimates.record(a.repo, a.profile, a.durationMs, a.code);
-      usage.record(a.repo, a.profile, { durationMs: a.durationMs, cpuMs: a.cpuMs ?? null, cpus: a.cpus, code: a.code });
-      memBook.record(a.repo, a.profile, a.peakMemMb);
-      appendRecord(p.events, { at: wallNow(), kind: 'history', repo: a.repo, profile: a.profile, class: a.class, cpus: a.cpus, durationMs: a.durationMs, code: a.code, cpuMs: a.cpuMs ?? null, peakMemMb: a.peakMemMb ?? null, ...(a.environmental === undefined ? {} : { environmental: a.environmental }) });
+      // 見込みの帳簿は、同じ git の本体を共有する worktree の一族(family)で引く。記録にも残し、次の起動で同じ鍵に読み戻す
+      const learn = a.family ?? a.repo;
+      estimates.record(learn, a.profile, a.durationMs, a.code);
+      usage.record(learn, a.profile, { durationMs: a.durationMs, cpuMs: a.cpuMs ?? null, cpus: a.cpus, code: a.code });
+      memBook.record(learn, a.profile, a.peakMemMb);
+      appendRecord(p.events, { at: wallNow(), kind: 'history', repo: a.repo, ...(a.family === undefined ? {} : { family: a.family }), profile: a.profile, class: a.class, cpus: a.cpus, durationMs: a.durationMs, code: a.code, cpuMs: a.cpuMs ?? null, peakMemMb: a.peakMemMb ?? null, ...(a.environmental === undefined ? {} : { environmental: a.environmental }) });
       return;
     }
     // 決定(入場と、待たせた順番・理由)も記録に残す。包みが繋がっていなくても残すので、
@@ -257,7 +272,7 @@ export async function startDaemon(opts) {
   const spare = () =>
     state.leases.length === 0
       ? null
-      : spareOf({ capacity: state.capacity, samples, leases: state.leases.map((l) => ({ grantedAt: l.grantedAt, typical: usage.typical(l.job.repo, l.job.profile) })) });
+      : spareOf({ capacity: state.capacity, samples, leases: state.leases.map((l) => ({ grantedAt: l.grantedAt, typical: usage.typical(l.job.family ?? l.job.repo, l.job.profile), cpus: l.cpus })) });
 
   /** @type {Map<string, { rssMb: number, peakMb: number }>} jobId → 今の RSS とピーク(MB)。メモリを見るときだけ測る */
   const rss = new Map();
@@ -414,8 +429,9 @@ export async function startDaemon(opts) {
           const id = newJobId();
           bind(id);
           send(conn, { t: 'accepted', jobId: id });
-          const memMb = memory ? memBook.expected(req.repo, req.profile) : null;
-          const job = rightSize({ ...req, id, expectedMs: estimates.expected(req.repo, req.profile), ...(memMb === null ? {} : { memMb }) }, adaptive ? usage.cores(req.repo, req.profile) : null);
+          const learn = req.family ?? req.repo;
+          const memMb = memory ? memBook.expected(learn, req.profile) : null;
+          const job = rightSize({ ...req, id, expectedMs: estimates.expected(learn, req.profile), ...(memMb === null ? {} : { memMb }) }, adaptive ? usage.cores(learn, req.profile) : null);
           apply({ type: 'request', now: monoNow(), job });
           return;
         }

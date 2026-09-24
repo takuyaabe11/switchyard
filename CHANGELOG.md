@@ -3,6 +3,24 @@
 All notable changes to switchyard. Versions follow `plugin.json`; Claude Code only offers an update when that
 version goes up.
 
+## 0.16.0
+
+### Changed
+- What switchyard learns about a run (duration, CPU use for sizing, peak memory) is shared by the git worktrees of
+  the same repository: the key is the repository's common git directory, not the worktree path. A field report showed
+  2,883 runs split over 251 profile/repo pairs, so new worktrees kept starting unlearned, took their full declared
+  share and queued others for CPU. Old records without the new `family` field are read by their path as before.
+- Packing into measured spare CPU now works while runs are still starting. The spare is measured over the latest
+  window, and runs that were starting during it are counted at their learned use (or their grant when nothing is
+  learned yet). Before, nothing was measured until every run had settled, so a steady stream of short runs never
+  let packing happen (the same field report: 0 packed admissions, 86 CPU waits).
+- Measured on 4 cores with 3 sessions of short runs (3 s, 0.3 cores, declared 2 cores): with a new worktree per run,
+  everything finished in 28.3 s instead of 56.2 s (17 held back → 3); reusing one worktree per session, 28.2 s instead
+  of 33.7 s. See docs/verification/2026-09-24-worktree-learning.md.
+
+### Added
+- `switchyard report` (and `--share`) counts runs whose request was sized down to their learned use.
+
 ## 0.15.0
 
 ### Added

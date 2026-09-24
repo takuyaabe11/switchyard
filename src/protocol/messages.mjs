@@ -83,6 +83,8 @@ export function parseJobRequest(v) {
     why: /** @type {string | null} */ (o.why),
     // 鍵だけの親のジョブの id(設計 §4.3 の 7)。親の子でなければ項目を載せない
     ...(typeof o.parent === 'string' ? { parent: o.parent } : {}),
+    // 学習の帳簿の鍵(同じ git の本体を共有する worktree の一族)。古い包みは送らないので、無ければ repo を使う
+    ...(typeof o.family === 'string' && o.family !== '' && o.family !== o.repo ? { family: o.family } : {}),
   };
 }
 

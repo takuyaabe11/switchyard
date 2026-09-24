@@ -456,6 +456,19 @@ describe('実測の CPU の使い方で要求を縮める(right-sizing)', () => 
     assert.deepEqual([g2.cpus, g2.threads], [2, 2], '縮めていない走行は割り当てたコア数');
   });
 
+  it('同じ git の本体を共有する worktree(family が同じ)は学んだ使い方を分け合い、再起動しても family で読み戻す', async () => {
+    const { d, home } = await daemon({ capacity: 4 });
+    // worktree A で 2 回学ぶ
+    for (let i = 0; i < 2; i += 1) await runOnce(d, 8_000, { repo: '/w/app-a', family: '/w/app' });
+    assert.equal(await runOnce(d, 8_000, { repo: '/w/app-b', family: '/w/app' }), 1, '新しい worktree B でも最初から縮める');
+    assert.equal(await runOnce(d, 8_000, { repo: '/w/other' }), 4, '別の repo は分け合わない');
+    const history = readFileSync(pathsOf(home).events, 'utf8').trim().split('\n').map((l) => JSON.parse(l)).filter((r) => r.kind === 'history');
+    assert.deepEqual(history.map((h) => [h.repo, h.family]), [['/w/app-a', '/w/app'], ['/w/app-a', '/w/app'], ['/w/app-b', '/w/app'], ['/w/other', undefined]]);
+    await d.close();
+    const again = await daemon({ capacity: 4, home });
+    assert.equal(await runOnce(again.d, 8_000, { repo: '/w/app-c', family: '/w/app' }), 1, '再起動後も family で学んだまま');
+  });
+
   it('adaptive: false なら宣言どおり。計測は縮めない。再起動しても記録から学び直す', async () => {
     const off = await daemon({ capacity: 4, adaptive: false });
     for (let i = 0; i < 4; i += 1) assert.equal(await runOnce(off.d, 8_000), 4);
