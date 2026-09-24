@@ -73,7 +73,7 @@ if [ "$name" != git ]; then
   # 既定表に無い語(node など)がふるいで素通しになり、その repo の profile が効かなくなる
   if [ ! -f "$sieve_root/switchyard.json" ] && [ ! -f "$sieve_root/conductor.json" ]; then
     case "$name" in
-      bun | cargo | go | make | npm | npx | pnpm | pytest | yarn) ;;
+      bun | bundle | cargo | deno | dotnet | go | gradle | make | mvn | npm | npx | pnpm | poetry | pytest | python | python3 | rspec | uv | yarn) ;;
       *)
         # node_modules/.bin のスクリプトを shebang(#!/usr/bin/env node)で起動した形は、npx と同じに分類する
         case "$name:${1:-}" in
@@ -81,6 +81,12 @@ if [ "$name" != git ]; then
           *) exec "$real" "$@" ;;
         esac
         ;;
+    esac
+    # 汎用の実行器は、既定表が見る形(python -m …・uv run …・poetry run …・bundle exec …)のときだけ分類器を呼ぶ。
+    # python を呼ぶたびに node を起動すると、素通しのスクリプトにもその時間がまるごと乗る
+    case "$name:${1:-}:${2:-}" in
+      python:-m:pytest | python3:-m:pytest | uv:run:* | poetry:run:* | bundle:exec:*) ;;
+      python:* | python3:* | uv:* | poetry:* | bundle:*) exec "$real" "$@" ;;
     esac
   fi
 fi

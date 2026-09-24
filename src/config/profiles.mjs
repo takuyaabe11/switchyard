@@ -45,6 +45,22 @@ export function isInspect(segment) {
 }
 
 /**
+ * 終わらずに見張り続ける旗(watch モード)。この旗を持つ部分は分類しない。
+ * 包むと、終わらない走行が CPU の取り分を握り続け、他のセッションの走行が永久に待つ。
+ */
+export const WATCH_FLAGS = ['--watch', '--watchAll'];
+
+/**
+ * その部分が見張り続ける(watch モードの)走行か。`tsc -w` は tsc のときだけ(`make -w` は別の意味)。
+ * @param {string} segment 空白で整えた単純コマンド @returns {boolean}
+ */
+export function isWatch(segment) {
+  const words = segment.split(' ');
+  if (words.some((w) => WATCH_FLAGS.includes(w) || w.startsWith('--watch='))) return true;
+  return words.includes('-w') && (words[0] === 'tsc' || (words[0] === 'npx' && words[1] === 'tsc'));
+}
+
+/**
  * 組み込みの既定表。プロジェクト設定の後ろに並ぶので、同じコマンドにはプロジェクト側が先に当たる。
  * measure(他の CPU ジョブを全部待たせる計測)は持たない。計測はプロジェクトの設定か --class measure だけが決める(改善 2・設計 §9.3)。
  * 以前の `*bench*` / `*measure*` はコマンドの全文に当たり、IRC の記録で measure の包み 1,383 件のうち本物の計測は約 160 件だった。
@@ -72,7 +88,14 @@ export const DEFAULT_PROFILES = [
         'bun test*', 'bun run test*', 'bun run build*',
         'cargo build*', 'cargo test*', 'cargo nextest*', 'cargo clippy*', 'cargo check*',
         'pytest', 'pytest *',
+        'python -m pytest*', 'python3 -m pytest*', 'uv run pytest*', 'uv run python -m pytest*', 'poetry run pytest*',
         'go test*', 'go build*',
+        'mvn test*', 'mvn verify*', 'mvn package*', 'mvn install*', 'mvn clean test*', 'mvn clean verify*', 'mvn clean package*', 'mvn clean install*',
+        'gradle test*', 'gradle build*', 'gradle check*',
+        'dotnet test*', 'dotnet build*',
+        'bundle exec rspec*', 'rspec', 'rspec *',
+        'deno test*',
+        'npx tsc', 'npx tsc *',
         'make', 'make *',
       ],
       class: 'batch',
@@ -211,6 +234,8 @@ export function classify(command, profiles) {
   for (const seg of segments(command)) {
     // 走らせずに調べるだけの部分は、どの profile にも当てない(`make --version` を順番待ちに乗せない)
     if (isInspect(seg)) continue;
+    // 見張り続ける走行も当てない(終わらないまま CPU の取り分を握り続ける)
+    if (isWatch(seg)) continue;
     const hit = profiles.find((np) => np.profile.match.some((g) => globMatch(g, seg)));
     if (hit === undefined) continue;
     if (best === null || WEIGHT[hit.profile.class] > WEIGHT[best.profile.class]) best = hit;

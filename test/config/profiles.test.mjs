@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { applyTemplate, classifiableCommand, classify, DEFAULT_PROFILES, defaultHeadWords, globMatch, isInspect, LEGACY_CONFIG, loadProfiles, segments, validateProfile } from '../../src/config/profiles.mjs';
+import { applyTemplate, classifiableCommand, classify, DEFAULT_PROFILES, defaultHeadWords, globMatch, isInspect, isWatch, LEGACY_CONFIG, loadProfiles, segments, validateProfile } from '../../src/config/profiles.mjs';
 
 describe('globMatch', () => {
   it('* は任意の文字列、? は 1 文字、全体一致', () => {
@@ -81,7 +81,7 @@ describe('既定表(設計 §9.3)', () => {
 
   it('どの glob も語で始まる(shim の sh のふるいが先頭の語だけで判断できる)', () => {
     for (const np of DEFAULT_PROFILES) for (const g of np.profile.match) assert.equal(g.startsWith('*'), false, g);
-    assert.deepEqual(defaultHeadWords(), ['bun', 'cargo', 'go', 'make', 'npm', 'npx', 'pnpm', 'pytest', 'yarn']);
+    assert.deepEqual(defaultHeadWords(), ['bun', 'bundle', 'cargo', 'deno', 'dotnet', 'go', 'gradle', 'make', 'mvn', 'npm', 'npx', 'pnpm', 'poetry', 'pytest', 'python', 'python3', 'rspec', 'uv', 'yarn']);
   });
 });
 
@@ -118,6 +118,22 @@ describe('classifiableCommand(分類に渡す文字列)', () => {
     assert.equal(classifiableCommand(['./node_modules/.bin/vitest', 'run']), 'npx vitest run');
     assert.equal(classifiableCommand(['node', '/r/node_modules/.bin/jest', '--ci']), 'npx jest --ci');
     assert.equal(classifiableCommand(['node', 'scripts/node_modules.bin/x']), 'node scripts/node_modules.bin/x');
+  });
+
+  it('既定表は Python・JVM・.NET・Ruby・Deno・tsc の重い走行も見て、汎用の実行器の他の使い方は見ない', () => {
+    for (const c of ['python -m pytest -x', 'python3 -m pytest', 'uv run pytest tests/', 'uv run python -m pytest', 'poetry run pytest', 'mvn clean install', 'mvn test', 'gradle build', 'dotnet test', 'bundle exec rspec', 'rspec spec/a_spec.rb', 'deno test', 'npx tsc -p .']) {
+      assert.equal(classify(c, DEFAULT_PROFILES)?.name, 'default:batch', c);
+    }
+    for (const c of ['python script.py', 'python -m http.server', 'uv pip install x', 'poetry install', 'bundle install', 'mvn --version', 'dotnet --info', 'deno run a.ts']) {
+      assert.equal(classify(c, DEFAULT_PROFILES), null, c);
+    }
+  });
+
+  it('見張り続ける走行(--watch・--watchAll・tsc -w)は分類しない。make -w は見張りではない', () => {
+    for (const c of ['npm test -- --watch', 'npx jest --watchAll', 'npx tsc -w', 'npx tsc --watch -p .', 'cargo test --watch=src']) assert.equal(isWatch(c), true, c);
+    for (const c of ['npm test -- --watch', 'npx jest --watchAll', 'npx tsc -w']) assert.equal(classify(c, DEFAULT_PROFILES), null, c);
+    assert.equal(isWatch('make -w all'), false);
+    assert.equal(classify('make -w all', DEFAULT_PROFILES)?.name, 'default:batch');
   });
 
   it('既定表は npm run test・npm t・yarn / pnpm / bun・cargo の重いサブコマンドも見る', () => {

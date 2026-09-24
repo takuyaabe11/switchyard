@@ -1,0 +1,3 @@
+#!/bin/sh
+name=python3
+. "${0%/*}/_shim.sh"

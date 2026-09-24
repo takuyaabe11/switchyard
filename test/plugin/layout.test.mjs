@@ -52,7 +52,7 @@ describe('plugin の形(設計 §9・§9.6)', () => {
     assert.equal(out, '');
   });
 
-  it('shims/ の実行ファイルは、PreToolUse が知っている 11 語とちょうど同じ', () => {
+  it('shims/ の実行ファイルは、PreToolUse が知っている 21 語とちょうど同じ', () => {
     const files = readdirSync(join(ROOT, 'shims')).filter((f) => !f.startsWith('_'));
     assert.deepEqual(files.sort(), [...SHIM_WORDS].sort());
     for (const f of files) assert.ok(executable(`shims/${f}`), f);

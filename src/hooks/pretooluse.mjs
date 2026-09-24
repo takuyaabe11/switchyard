@@ -17,8 +17,18 @@ import { t } from '../i18n.mjs';
 /** @typedef {import('../core/types.mjs').JobClass} JobClass */
 /** @typedef {import('../run/run.mjs').RunFlags} RunFlags */
 
-/** shim を置く語(設計 §9.1)。shims/ の実物と同じ 11 語 */
-export const SHIM_WORDS = ['npm', 'npx', 'node', 'cargo', 'pytest', 'go', 'make', 'git', 'yarn', 'pnpm', 'bun'];
+/** shim を置く語(設計 §9.1)。shims/ の実物と同じ 21 語 */
+export const SHIM_WORDS = [
+  'npm', 'npx', 'node', 'cargo', 'pytest', 'go', 'make', 'git', 'yarn', 'pnpm', 'bun',
+  'python', 'python3', 'uv', 'poetry', 'mvn', 'gradle', 'dotnet', 'bundle', 'rspec', 'deno',
+];
+
+/**
+ * プロジェクトの中の道具の置き場(仮想環境・node_modules/.bin)。ここの実行ファイルをパスで呼ぶのは shim の迂回ではなく、
+ * 別の(プロジェクトの)実行ファイルを選んでいる。名前で呼び直すと PATH の別物が走るので拒否しない(重ければ背景へ回すだけ)。
+ * @param {string} path @returns {boolean}
+ */
+const isProjectLocal = (path) => /(^|\/)(\.?venv[^/]*|\.tox|\.nox|node_modules\/\.bin)\//.test(path);
 
 /** `-c 文字列` の文字列をコマンドとして走らせるシェル */
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
@@ -248,7 +258,7 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
       // 拒否はこの形だけに絞る(改善 2。IRC の記録で、shim の語でないものをパスで呼ぶ形への拒否 320 件がすべて誤りだった)
       const hit = classify(classifiableCommand([base, ...rest]), profiles);
       if (hit === null) return;
-      if (!pathHead) {
+      if (!pathHead || isProjectLocal(head)) {
         if (hit.profile.class !== 'quick') heavy.push(needOf(hit.profile));
         if (!wrapped && bypass.length > 0) overridden.push(bypassText);
       } else if (!wrapped) {

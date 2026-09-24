@@ -1,0 +1,3 @@
+#!/bin/sh
+name=deno
+. "${0%/*}/_shim.sh"

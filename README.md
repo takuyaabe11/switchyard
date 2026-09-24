@@ -10,8 +10,8 @@ queue instead of collide. A switchyard is where trains are sorted onto the right
 one at a time — that is what this does for heavy runs.
 
 You do not change how you type commands. A `PATH` shim in front of `npm`, `npx`, `node`,
-`yarn`, `pnpm`, `bun`, `cargo`, `pytest`, `go`, `make` and `git` classifies each command and routes it through
-switchyard automatically.
+`yarn`, `pnpm`, `bun`, `cargo`, `pytest`, `python`, `python3`, `uv`, `poetry`, `go`, `mvn`, `gradle`, `dotnet`,
+`bundle`, `rspec`, `deno`, `make` and `git` classifies each command and routes it through switchyard automatically.
 
 ## Install
 
@@ -102,10 +102,15 @@ Drop a `switchyard.json` at the repo root to classify that project's commands:
 
 Without a `switchyard.json`, a built-in table covers the usual commands: `npm test` / `npm t` /
 `npm run test*` / `npm run build*`, the same for `yarn`, `pnpm` and `bun`, `npx vitest run`, `npx jest`,
-`npx playwright test`, `cargo build|test|nextest|clippy|check`, `pytest`, `go test|build` and `make`.
+`npx playwright test`, `npx tsc`, `cargo build|test|nextest|clippy|check`, `pytest`, `python -m pytest`,
+`uv run pytest`, `poetry run pytest`, `go test|build`, `mvn test|verify|package|install`, `gradle test|build|check`,
+`dotnet test|build`, `bundle exec rspec`, `rspec`, `deno test` and `make`.
 A script under `node_modules/.bin` (`./node_modules/.bin/vitest run`) is classified as its `npx` form.
-Anything else — `python -m pytest`, `uv run pytest`, `tsc` — is not classified unless your
-`switchyard.json` names it, and runs outside the queue.
+A run that keeps watching (`--watch`, `--watchAll`, `tsc -w`) is never classified: it would hold its CPU share forever.
+Anything else is not classified unless your `switchyard.json` names it, and runs outside the queue. Wrappers that
+run a script by path (`./gradlew`, `./mvnw`) and tools in a virtualenv you activated (`source .venv/bin/activate`
+puts them before the shims) are not seen by the shims; name them in `switchyard.json` and call them through
+`switchyard run -- …` if they should queue.
 
 `git` takes the repository's index lock for the subcommands that write the index: `commit`, `merge`,
 `rebase`, `cherry-pick`, `stash`, `am`, `add`, `rm`, `mv`, `reset`, `restore`, `checkout`, `switch`,
@@ -199,8 +204,9 @@ MIT. See [LICENSE](LICENSE).
 (ポート・git の index・任意の名前)を割り振り、それらの走行をぶつけずに順番へ流す。
 switchyard は操車場のこと。重い走行を 1 本ずつ、正しい線路へ振り分ける。
 
-コマンドの打ち方は変えない。`npm` / `npx` / `node` / `yarn` / `pnpm` / `bun` / `cargo` / `pytest` / `go` / `make` /
-`git` の前に入る `PATH` の shim が、打たれたコマンドを分類して自動で switchyard に通す。
+コマンドの打ち方は変えない。`npm` / `npx` / `node` / `yarn` / `pnpm` / `bun` / `cargo` / `pytest` / `python` / `python3` /
+`uv` / `poetry` / `go` / `mvn` / `gradle` / `dotnet` / `bundle` / `rspec` / `deno` / `make` / `git` の前に入る `PATH` の shim が、
+打たれたコマンドを分類して自動で switchyard に通す。
 
 ## 導入
 
@@ -264,9 +270,14 @@ repo の根に `switchyard.json` を置くと、その repo のコマンドの�
 
 `switchyard.json` が無ければ、組み込みの既定表がよくあるコマンドを見る: `npm test` / `npm t` /
 `npm run test*` / `npm run build*` と、`yarn` / `pnpm` / `bun` の同じ形、`npx vitest run`・`npx jest`・
-`npx playwright test`、`cargo build|test|nextest|clippy|check`、`pytest`、`go test|build`、`make`。
+`npx playwright test`・`npx tsc`、`cargo build|test|nextest|clippy|check`、`pytest`・`python -m pytest`・
+`uv run pytest`・`poetry run pytest`、`go test|build`、`mvn test|verify|package|install`、`gradle test|build|check`、
+`dotnet test|build`、`bundle exec rspec`・`rspec`、`deno test`、`make`。
 `node_modules/.bin` の下のスクリプト(`./node_modules/.bin/vitest run`)は `npx` の形として分類する。
-それ以外(`python -m pytest`・`uv run pytest`・`tsc` など)は、`switchyard.json` で名指ししない限り分類されず、順番待ちの外で走る。
+見張り続ける走行(`--watch`・`--watchAll`・`tsc -w`)は分類しない。包むと CPU の取り分を握ったまま終わらない。
+それ以外は、`switchyard.json` で名指ししない限り分類されず、順番待ちの外で走る。スクリプトをパスで呼ぶ包み
+(`./gradlew`・`./mvnw`)と、有効にした仮想環境の道具(`source .venv/bin/activate` は shim より前に置く)は shim から
+見えない。順番に乗せたいなら `switchyard.json` で名指しし、`switchyard run -- …` で呼ぶ。
 
 `git` は index を書き換えるサブコマンド(`commit`・`merge`・`rebase`・`cherry-pick`・`stash`・`am`・
 `add`・`rm`・`mv`・`reset`・`restore`・`checkout`・`switch`・`pull`・`revert`)のとき、その repo の index の鍵を取る。

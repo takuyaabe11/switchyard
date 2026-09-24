@@ -1,0 +1,3 @@
+#!/bin/sh
+name=uv
+. "${0%/*}/_shim.sh"
