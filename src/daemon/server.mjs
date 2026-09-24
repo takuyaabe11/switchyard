@@ -223,10 +223,12 @@ export async function startDaemon(opts) {
   /** @param {Action} a */
   const dispatch = (a) => {
     if (a.type === 'history') {
-      estimates.record(a.repo, a.profile, a.durationMs, a.code);
-      usage.record(a.repo, a.profile, { durationMs: a.durationMs, cpuMs: a.cpuMs ?? null, cpus: a.cpus, code: a.code });
-      memBook.record(a.repo, a.profile, a.peakMemMb);
-      appendRecord(p.events, { at: wallNow(), kind: 'history', repo: a.repo, profile: a.profile, class: a.class, cpus: a.cpus, durationMs: a.durationMs, code: a.code, cpuMs: a.cpuMs ?? null, peakMemMb: a.peakMemMb ?? null, ...(a.environmental === undefined ? {} : { environmental: a.environmental }) });
+      // 見込みの帳簿は、同じ git の本体を共有する worktree の一族(family)で引く。記録にも残し、次の起動で同じ鍵に読み戻す
+      const learn = a.family ?? a.repo;
+      estimates.record(learn, a.profile, a.durationMs, a.code);
+      usage.record(learn, a.profile, { durationMs: a.durationMs, cpuMs: a.cpuMs ?? null, cpus: a.cpus, code: a.code });
+      memBook.record(learn, a.profile, a.peakMemMb);
+      appendRecord(p.events, { at: wallNow(), kind: 'history', repo: a.repo, ...(a.family === undefined ? {} : { family: a.family }), profile: a.profile, class: a.class, cpus: a.cpus, durationMs: a.durationMs, code: a.code, cpuMs: a.cpuMs ?? null, peakMemMb: a.peakMemMb ?? null, ...(a.environmental === undefined ? {} : { environmental: a.environmental }) });
       return;
     }
     // 決定(入場と、待たせた順番・理由)も記録に残す。包みが繋がっていなくても残すので、
@@ -257,7 +259,7 @@ export async function startDaemon(opts) {
   const spare = () =>
     state.leases.length === 0
       ? null
-      : spareOf({ capacity: state.capacity, samples, leases: state.leases.map((l) => ({ grantedAt: l.grantedAt, typical: usage.typical(l.job.repo, l.job.profile) })) });
+      : spareOf({ capacity: state.capacity, samples, leases: state.leases.map((l) => ({ grantedAt: l.grantedAt, typical: usage.typical(l.job.family ?? l.job.repo, l.job.profile) })) });
 
   /** @type {Map<string, { rssMb: number, peakMb: number }>} jobId → 今の RSS とピーク(MB)。メモリを見るときだけ測る */
   const rss = new Map();
@@ -414,8 +416,9 @@ export async function startDaemon(opts) {
           const id = newJobId();
           bind(id);
           send(conn, { t: 'accepted', jobId: id });
-          const memMb = memory ? memBook.expected(req.repo, req.profile) : null;
-          const job = rightSize({ ...req, id, expectedMs: estimates.expected(req.repo, req.profile), ...(memMb === null ? {} : { memMb }) }, adaptive ? usage.cores(req.repo, req.profile) : null);
+          const learn = req.family ?? req.repo;
+          const memMb = memory ? memBook.expected(learn, req.profile) : null;
+          const job = rightSize({ ...req, id, expectedMs: estimates.expected(learn, req.profile), ...(memMb === null ? {} : { memMb }) }, adaptive ? usage.cores(learn, req.profile) : null);
           apply({ type: 'request', now: monoNow(), job });
           return;
         }

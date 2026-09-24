@@ -1,8 +1,8 @@
 // @ts-check
 // 実行の文脈: どの repo で走るか、祖先のジョブが何を持っているか。
 // shim の分類器(npm や node のたびに呼ばれる)からも読むので、重いモジュールを import せず、外部プロセスも起動しない。
-import { existsSync, realpathSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 
 /**
  * git の作業ツリーの根。git の外なら cwd。
@@ -34,4 +34,28 @@ export function repoRoot(cwd) {
 /** 祖先のジョブが持つ鍵(SWITCHYARD_HELD_LOCKS のカンマ区切り。設計 §4.3 の 7) @param {NodeJS.ProcessEnv} env @returns {Set<string>} */
 export function heldLocks(env) {
   return new Set((env.SWITCHYARD_HELD_LOCKS ?? '').split(',').filter((k) => k !== ''));
+}
+
+/**
+ * 同じ git の本体を共有する作業ツリーの一族の名前(学習の帳簿の鍵)。git の worktree は、作業ツリーごとにパスが違っても
+ * 同じテストを同じように走らせるので、所要・CPU の使い方・メモリの見込みを分け合う(新しい worktree が学び直さない)。
+ * worktree の `.git` はファイル(`gitdir: <本体>/.git/worktrees/<名前>`)で、その中の `commondir` が本体の `.git` を指す。
+ * 本体(`.git` がディレクトリ)と、commondir を持たないもの(submodule など)・読めないものは、作業ツリーの根そのもの。
+ * 外部プロセスは起動しない(repoRoot と同じ理由)。
+ * @param {string} root repoRoot の答え @returns {string}
+ */
+export function repoFamily(root) {
+  try {
+    const dotGit = join(root, '.git');
+    if (!statSync(dotGit).isFile()) return root;
+    const m = /^gitdir:\s*(.+?)\s*$/m.exec(readFileSync(dotGit, 'utf8'));
+    if (m === null) return root;
+    const gitdir = isAbsolute(m[1]) ? m[1] : resolve(root, m[1]);
+    const common = resolve(gitdir, readFileSync(join(gitdir, 'commondir'), 'utf8').trim());
+    const real = realpathSync(common);
+    // 本体の .git なら、その親(本体の作業ツリーの根)。裸の repo なら、その .git 自体
+    return basename(real) === '.git' ? dirname(real) : real;
+  } catch {
+    return root;
+  }
 }

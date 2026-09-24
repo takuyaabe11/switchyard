@@ -5,7 +5,7 @@ import { basename } from 'node:path';
 import { UsageError } from '../cli/args.mjs';
 import { channel, connectDaemon, DaemonUnavailableError } from '../client/connect.mjs';
 import { sessionId } from '../client/session.mjs';
-import { heldLocks, repoRoot } from '../config/context.mjs';
+import { heldLocks, repoFamily, repoRoot } from '../config/context.mjs';
 import { applyTemplate, classifiableCommand, classify, loadProfiles } from '../config/profiles.mjs';
 import { threadEnv } from '../config/threads.mjs';
 import { loggedCommand, maskSecrets } from '../redact.mjs';
@@ -65,6 +65,7 @@ function signalCode(sig) {
  */
 export function buildRequest({ argv, flags, env, cwd }) {
   const repo = repoRoot(cwd);
+  const family = repoFamily(repo);
   const { profiles, error, notice } = loadProfiles(repo);
   // 記録と表示に使う文字列。秘密は隠す(SWITCHYARD_LOG_COMMANDS)。走らせるのは argv そのまま
   const cmd = loggedCommand(argv.join(' '), env);
@@ -90,6 +91,8 @@ export function buildRequest({ argv, flags, env, cwd }) {
     job: {
       session: sessionId(env),
       repo,
+      // 同じ git の本体を共有する worktree は、見込みを分け合う
+      ...(family !== repo ? { family } : {}),
       // shim は本物のパスで起動するので、先頭の語は basename にする(パスごとに見込みが分かれないように。設計 §5.4)
       profile: named === null ? `cmd:${maskSecrets([basename(argv[0]), ...argv.slice(1, 2)].join(' '))}` : named.name,
       cmd,
