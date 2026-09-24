@@ -490,6 +490,8 @@ export function runJob(opts) {
           out(t('[switchyard] つなぎ直した', '[switchyard] reconnected'));
           return;
         } catch {
+          // つなぎ直しを試している間に子が終わった: 待ちのタイマーを新しく掛けない(掛けるとプロセスの終了がその分遅れる)
+          if (over()) return;
           if (phase === 'waiting' && Date.now() - lostAt > unmanagedAfterMs) {
             out(t(`[switchyard] ${unmanagedAfterMs}ms つなげないので、管理なしで実行する(二重貸し防止などの保証なし)`, `[switchyard] no connection for ${unmanagedAfterMs}ms; running unmanaged (no guarantee against double allocation)`));
             unmanaged = true;
