@@ -3,6 +3,19 @@
 All notable changes to switchyard. Versions follow `plugin.json`; Claude Code only offers an update when that
 version goes up.
 
+## 0.21.0
+
+### Added
+- A command that includes a heavy run and ends with a single `&` (`npm test > test.log 2>&1 &`) is rewritten by the
+  PreToolUse hook: the `&` is dropped and the call runs with `run_in_background`. With `&`, the Bash call returns at
+  once and Claude is never told when the run ends, so it tends to poll the log; as a background run, Claude Code tells
+  Claude when it ends. Redirects stay as they are. Forms with anything after the `&` (`& wait`, a later `$!`), more than
+  one `&`, an `&` only inside `( … )`, and commands without a heavy run are left alone. `SWITCHYARD_AMP_BACKGROUND=0`
+  turns it off. Checked with Claude Code 2.1.282: Claude's `npm test > live.log 2>&1 &` ran as a background run through
+  the queue, and Claude read the result from the log.
+- `switchyard replay` counts the calls that would be rewritten this way, and `switchyard report` (and `--share`) counts
+  the ones that were.
+
 ## 0.20.0
 
 ### Added

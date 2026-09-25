@@ -7,6 +7,7 @@ import { appendRecord } from '../daemon/store.mjs';
 import { ask, connectDaemon } from '../client/connect.mjs';
 import { repoFamily, repoRoot } from '../config/context.mjs';
 import { preToolUse, waitExpected } from './pretooluse.mjs';
+import { foregroundAmpersand } from './ampersand.mjs';
 import { postToolUseFailure } from './failure.mjs';
 import { guardTimeout, neededTime, normalized, readTimedOut } from './timeouts.mjs';
 import { backgroundWaitLoop } from './waitloop.mjs';
@@ -171,6 +172,10 @@ export async function runHook(event, raw, { write = (s) => process.stdout.write(
       out = withTimeoutGuard(input, out, env, { heavy, snap, learn });
       // 前景で待つループ(sleep を含む until / while / for)は背景へ回す。時間切れで切られず、終われば Claude に知らせが届く
       const ti = /** @type {Record<string, unknown>} */ (typeof input.tool_input === 'object' && input.tool_input !== null ? input.tool_input : {});
+      // 重い走行を最後の & で裏に回す呼び出しは、& を外して背景実行にする(終われば Claude に知らせが届く)
+      const amp = foregroundAmpersand(ti, out, env, heavy.length > 0);
+      if (amp.applied) recordHook(input, env, { decision: 'amp-background' });
+      out = amp.out;
       const w = backgroundWaitLoop(ti, out, env);
       if (w.applied) recordHook(input, env, { decision: 'wait-background', estimateMs: w.estimateMs });
       out = w.out;

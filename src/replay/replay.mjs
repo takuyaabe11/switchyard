@@ -13,6 +13,7 @@ import { maskSecrets } from '../redact.mjs';
 import { t } from '../i18n.mjs';
 import { duration } from '../cli/render.mjs';
 import { waitLoopOf } from '../hooks/waitloop.mjs';
+import { withoutTrailingAmpersand } from '../hooks/ampersand.mjs';
 import { countMishaps, countSession, emptyMishaps, emptyReruns, intervalsOf, stepsOf, timingOf } from './reruns.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
@@ -27,7 +28,7 @@ import { countMishaps, countSession, emptyMishaps, emptyReruns, intervalsOf, ste
  *   calls: number,
  *   first: string | null,
  *   last: string | null,
- *   hook: { deny: number, ask: number, wrap: number, background: number, alreadyBackground: number, none: number, waitLoops: number },
+ *   hook: { deny: number, ask: number, wrap: number, background: number, alreadyBackground: number, none: number, waitLoops: number, ampBackground: number },
  *   shim: { run: Record<string, number>, lock: number, pass: number },
  *   examples: { deny: Example[], wrap: Example[], background: Example[] },
  *   reruns: import('./reruns.mjs').Reruns,
@@ -140,7 +141,7 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
     calls: 0,
     first: null,
     last: null,
-    hook: { deny: 0, ask: 0, wrap: 0, background: 0, alreadyBackground: 0, none: 0, waitLoops: 0 },
+    hook: { deny: 0, ask: 0, wrap: 0, background: 0, alreadyBackground: 0, none: 0, waitLoops: 0, ampBackground: 0 },
     shim: { run: {}, lock: 0, pass: 0 },
     examples: { deny: [], wrap: [], background: [] },
     reruns: emptyReruns(),
@@ -231,6 +232,8 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
         } else {
           report.hook.none += 1;
         }
+        // 重い走行を最後の & で裏に回した呼び出しを、今の設定なら & を外して背景実行にしたか
+        if (j.hook === 'background' && withoutTrailingAmpersand(c.command) !== null) report.hook.ampBackground += 1;
         // 前景で待つループ(sleep を含む until / while / for)を、今の設定なら背景へ回したか
         if (j.hook !== 'deny' && !c.runInBackground && j.hook !== 'background') {
           const w = waitLoopOf(c.command);
@@ -327,6 +330,7 @@ export function formatReport(r, { cwdPrefix, sinceDays, examples }) {
     lines.push(t(`  既に背景の重い走行: ${share(r.hook.alreadyBackground)}`, `  heavy and already in background: ${share(r.hook.alreadyBackground)}`));
     lines.push(t(`  何もしない: ${share(r.hook.none)}`, `  nothing to do: ${share(r.hook.none)}`));
     lines.push(t(`  前景で待つループを背景へ回す(上と重なる): ${share(r.hook.waitLoops)}`, `  waiting loop sent to background (overlaps the above): ${share(r.hook.waitLoops)}`));
+    lines.push(t(`  & で裏に回した重い走行を背景実行にする(上と重なる): ${share(r.hook.ampBackground)}`, `  heavy run put behind & turned into a background run (overlaps the above): ${share(r.hook.ampBackground)}`));
 
     const runs = Object.entries(r.shim.run).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1));
     const runTotal = runs.reduce((n, [, k]) => n + k, 0);

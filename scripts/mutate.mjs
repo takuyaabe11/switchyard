@@ -1462,6 +1462,25 @@ const SUITES = {
       { name: 'C27 report が worktree の一族で学ばない', file: 'src/report/report.mjs', from: "const learn = str(r, 'family') || str(r, 'repo');", to: "const learn = str(r, 'repo');" },
     ],
   },
+  amp: {
+    // 重い走行を最後の & で裏に回す呼び出しを、& を外して背景実行にする
+    tests: ['test/hooks/ampersand.test.mjs', 'test/hooks/shell.test.mjs', 'test/hooks/pretooluse.test.mjs'],
+    mutations: [
+      { name: 'M2 & の後ろにコマンドがあっても書き換える', file: 'src/hooks/shell.mjs', from: "return rest.trim() === '' ? at : -1;", to: 'return at;' },
+      { name: 'M3 後ろのコメントを空白とみなさない', file: 'src/hooks/shell.mjs', from: ".replace(/#[^\\n]*/g, '')", to: '' },
+      { name: 'M4 && を 1 つの区切りとして読まない', file: 'src/hooks/shell.mjs', from: "(c === '&' || c === '|') && n === c ? c + c : c", to: 'c' },
+      { name: 'M5 入れ子の中の & も数える', file: 'src/hooks/shell.mjs', from: '      i = parse(src, i + 1, \')\', out);\n    } else if (c === \')\') {', to: '      i = parse(src, i + 1, \')\', out, ops);\n    } else if (c === \')\') {' },
+      { name: 'M6 重い走行でなくても書き換える', file: 'src/hooks/ampersand.mjs', from: 'if (!heavy || ', to: 'if (' },
+      { name: 'M7 承認を求める呼び出しも書き換える', file: 'src/hooks/ampersand.mjs', from: " || h.permissionDecision === 'ask'", to: '' },
+      { name: 'M8 timeout を残す', file: 'src/hooks/ampersand.mjs', from: 'updatedInput: { ...rest, command: stripped, run_in_background: true }', to: 'updatedInput: { ...input, command: stripped, run_in_background: true }' },
+      { name: 'M9 & を外さずに背景実行にする', file: 'src/hooks/ampersand.mjs', from: 'command: stripped, run_in_background: true', to: 'command, run_in_background: true' },
+      { name: 'M10 前の書き換えの上に重ねない', file: 'src/hooks/ampersand.mjs', from: "h !== null && typeof h.updatedInput === 'object' && h.updatedInput !== null ? h.updatedInput : ti", to: 'ti' },
+      { name: 'M11 & だけのコマンドも書き換える', file: 'src/hooks/ampersand.mjs', from: "return stripped === '' ? null : stripped;", to: 'return stripped;' },
+      { name: 'M12 hook の入口が記録しない', file: 'src/hooks/main.mjs', from: "      if (amp.applied) recordHook(input, env, { decision: 'amp-background' });\n", to: '' },
+      { name: 'M13 report が数えない', file: 'src/report/report.mjs', from: "    else if (r.decision === 'amp-background') hookCount.ampBackground += 1;\n", to: '' },
+      { name: 'M14 replay が & の無い重い走行も数える', file: 'src/replay/replay.mjs', from: " && withoutTrailingAmpersand(c.command) !== null) report.hook.ampBackground", to: ') report.hook.ampBackground' },
+    ],
+  },
   group: {
     tests: ['test/run/group.test.mjs'],
     mutations: [

@@ -28,6 +28,7 @@ export const SHARED_SETTINGS = [
   'SWITCHYARD_RUN_GUARD',
   'SWITCHYARD_TIMEOUT_GUARD',
   'SWITCHYARD_WAIT_LOOPS',
+  'SWITCHYARD_AMP_BACKGROUND',
   'SWITCHYARD_OVERCOMMIT',
   'SWITCHYARD_MEMORY',
   'SWITCHYARD_CAPACITY',
@@ -98,7 +99,7 @@ export function formatShare({ summary: s, observed, meta }) {
     `- runs by profile: ${profileText.length > 0 ? profileText.join('; ') : 'none'}`,
     `- slowdown when overlapped, learned for ${slowdowns.length} profile/repo pair(s)${slowdowns.length > 0 ? `: ${slowdowns.map((x) => `${x}x`).join(', ')}` : ''}; admitted without waiting as not slowed by overlap: ${s.tolerant}; slowdown avoided by holding back (estimate, not measured): ${duration(s.delay.avoidedMs)} over ${s.delay.runs} run(s)`,
     `- failed runs: ${s.failures} (${s.environmental} flagged as possibly not the code); unmanaged runs: ${s.unmanaged}; escaping children: ${s.escapes}`,
-    `- PreToolUse: background ${s.hook.background}, wrapped ${s.hook.wrap}, refused ${s.hook.deny}, asked ${s.hook.ask}`,
+    `- PreToolUse: background ${s.hook.background}, & turned into background runs ${s.hook.ampBackground}, wrapped ${s.hook.wrap}, refused ${s.hook.deny}, asked ${s.hook.ask}`,
     `- Bash time limit: cut off ${s.hook.timeout}, given more time ${s.hook.extend}, sent to background as too long ${s.hook.timeoutBackground}, waiting loops sent to background ${s.hook.waitBackground}; failed on a port in use ${s.hook.port} (holder found ${s.hook.portFound})`,
   ];
   if (observed !== null) {

@@ -70,6 +70,10 @@ overlapped, it says so, and you can take it out with `switchyard uninstall`.
   Claude is told when it ends. Short loops (a minute or less by rounds times sleep, or a check every few seconds) stay
   in the foreground, and a loop that can never end by itself (`while true` without `break`, `tail -f`, `watch`) is
   never sent there. `SWITCHYARD_WAIT_LOOPS=0` turns this off.
+- **A heavy run put behind `&` becomes a background run.** `npm test > test.log 2>&1 &` returns at once and Claude is
+  never told when the run ends, so it tends to poll the log. When a command that includes a heavy run ends with a
+  single `&`, switchyard drops the `&` and runs it with `run_in_background`: the redirect stays, and Claude is told when
+  it ends. Forms with more after the `&` (`& wait`, `$!`) are left alone. `SWITCHYARD_AMP_BACKGROUND=0` turns this off.
 - **A port already in use is traced to its holder.** When a Bash call fails with `EADDRINUSE`, `address already in use`
   or Docker's `port is already allocated`, Claude is told which process holds the port — its pid, command line, working
   directory and how long it has run (or that a Docker container publishes it) — and that the failure is not the code's,
@@ -492,6 +496,10 @@ node bin/switchyard.mjs replay --since 14d
   背景には時間切れが無く、終われば Claude に知らせが届く。短いループ(回数 × sleep の見積もりが 1 分以下・数秒おきに確かめる形)は
   前景のままにし、自分では終われないループ(`break` の無い `while true`・`tail -f`・`watch`)は背景へ回さない。
   `SWITCHYARD_WAIT_LOOPS=0` で止める。
+- **`&` で裏に回した重い走行は、背景実行にする。** `npm test > test.log 2>&1 &` はすぐ返り、走行が終わっても Claude に知らせが
+  届かないので、Claude はログを見に行って待ちがちになる。重い走行を含むコマンドの最後に `&` が 1 つだけあれば、switchyard は
+  `&` を外して `run_in_background` で走らせる。リダイレクトはそのまま残り、終われば Claude に知らせが届く。`&` の後ろに続きが
+  ある形(`& wait`・`$!`)は触らない。`SWITCHYARD_AMP_BACKGROUND=0` で止める。
 - **使用中のポートは、握っているプロセスを突き止める。** Bash の呼び出しが `EADDRINUSE`・`address already in use`・
   Docker の `port is already allocated` で落ちたら、そのポートを握っているプロセス(pid・コマンドライン・作業場所・
   走っている時間。Docker のコンテナが公開していればそう)と、コードのせいではないことを Claude に伝える。テストを直しに

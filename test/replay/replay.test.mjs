@@ -139,7 +139,7 @@ describe('replay(記録の根を読んで集計する)', () => {
     const r = await replay({ dir: fixture(), cwdPrefix: null, since: null, profilesFor: defaults, examples: 5, git: true });
     assert.equal(r.files, 3);
     assert.equal(r.calls, 6);
-    assert.deepEqual(r.hook, { deny: 1, ask: 0, wrap: 0, background: 2, alreadyBackground: 1, none: 2, waitLoops: 0 });
+    assert.deepEqual(r.hook, { deny: 1, ask: 0, wrap: 0, background: 2, alreadyBackground: 1, none: 2, waitLoops: 0, ampBackground: 0 });
     assert.deepEqual(r.shim, { run: { 'default:batch': 3 }, lock: 1, pass: 0 });
     assert.equal(r.first, '2026-09-10T01:00:00.000Z');
     assert.equal(r.last, '2026-09-15T01:00:00.000Z');
@@ -149,7 +149,7 @@ describe('replay(記録の根を読んで集計する)', () => {
     const dir = fixture();
     const irc = await replay({ dir, cwdPrefix: '/w/irc', since: null, profilesFor: defaults, examples: 5, git: true });
     assert.equal(irc.calls, 5);
-    assert.deepEqual(irc.hook, { deny: 1, ask: 0, wrap: 0, background: 1, alreadyBackground: 1, none: 2, waitLoops: 0 });
+    assert.deepEqual(irc.hook, { deny: 1, ask: 0, wrap: 0, background: 1, alreadyBackground: 1, none: 2, waitLoops: 0, ampBackground: 0 });
     const recent = await replay({ dir, cwdPrefix: null, since: Date.parse('2026-09-12T00:00:00.000Z'), profilesFor: defaults, examples: 5, git: true });
     assert.equal(recent.calls, 4);
     assert.equal(recent.first, '2026-09-12T01:00:00.000Z');

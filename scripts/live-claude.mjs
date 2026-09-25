@@ -128,11 +128,11 @@ if (isMain) {
   delete baseEnv.LC_ALL;
   delete baseEnv.LC_MESSAGES;
 
-  /** @param {string} prompt @param {string[]} allowed @param {Record<string, string>} [extra] */
-  const claude = (prompt, allowed, extra = {}) =>
+  /** @param {string} prompt @param {string[]} allowed @param {Record<string, string>} [extra] @param {string[]} [args] */
+  const claude = (prompt, allowed, extra = {}, args = []) =>
     spawnSync(
       'claude',
-      ['-p', prompt, '--plugin-dir', ROOT, '--setting-sources', 'project', '--model', 'claude-haiku-4-5', '--output-format', 'stream-json', '--verbose', '--max-budget-usd', '0.5', '--no-session-persistence', '--allowedTools', ...allowed],
+      ['-p', prompt, '--plugin-dir', ROOT, '--setting-sources', 'project', '--model', 'claude-haiku-4-5', '--output-format', 'stream-json', '--verbose', '--max-budget-usd', '0.5', '--no-session-persistence', ...args, '--allowedTools', ...allowed],
       { cwd: work, encoding: 'utf8', input: '', timeout: 300_000, env: { ...baseEnv, ...extra } },
     );
 
@@ -184,6 +184,17 @@ if (isMain) {
     const hooks6 = existsSync(pathsOf(home).hooks) ? readRecords(pathsOf(home).hooks).records : [];
     const waitBackgrounded = hooks6.some((r) => r.decision === 'wait-background' && r.estimateMs === 65_000) && a6.background && !/Command timed out after/.test(a6.toolText) && a6.result.includes('WAITED_DONE');
 
+    const r7 = claude(
+      'Run this exact Bash command once, as given: npm test > live.log 2>&1 &  -- Do not change the command and do not set run_in_background yourself. When it has finished, read live.log and reply with its line that starts with LIVE_JOB=.',
+      ['Bash(npm test:*)', 'Bash(cat:*)', 'Read', 'BashOutput', 'TaskOutput'],
+      {},
+      // > live.log はファイルへの書き込みなので承認を求められる(& を外す前の形でも同じ)。作業場所への書き込みだけ許す
+      ['--permission-mode', 'acceptEdits'],
+    );
+    const a7 = analyzeStream(r7.stdout ?? '');
+    const hooks7 = existsSync(pathsOf(home).hooks) ? readRecords(pathsOf(home).hooks).records : [];
+    const ampBackgrounded = hooks7.some((r) => r.decision === 'amp-background') && a7.background && /LIVE_JOB=j/.test(a7.result);
+
     const checks = {
       'shim が npm test を switchyard に通した(記録に default:batch の history)': managed,
       '空いているので前景のまま走った(tool_result に子の出力・背景に回っていない)': a1.foregroundOutput && !a1.background,
@@ -195,8 +206,9 @@ if (isMain) {
       'ポートが使用中で落ちたら、握っているプロセス(pid)が Claude に届いた': portTraced,
       '時間切れで切られたコマンドを覚え、次は時間切れを倍に延ばして走り切った': extended && lastFinished,
       '前景で待つループは背景へ回り、時間切れで切られずに最後まで走った': waitBackgrounded,
+      '最後の & で裏に回した npm test は、& を外して背景実行になり、switchyard を通って終わった': ampBackgrounded,
     };
-    console.log(JSON.stringify({ checks, costUsd: [a1.costUsd, a2.costUsd, a3.costUsd, a4.costUsd, a5.costUsd, a6.costUsd], result6: a6.result, result1: a1.result, result2: a2.result, result3: a3.result, result4: a4.result, result5: a5.result, work, home }, null, 2));
+    console.log(JSON.stringify({ checks, costUsd: [a1.costUsd, a2.costUsd, a3.costUsd, a4.costUsd, a5.costUsd, a6.costUsd, a7.costUsd], result7: a7.result, commands7: a7.commands, result6: a6.result, result1: a1.result, result2: a2.result, result3: a3.result, result4: a4.result, result5: a5.result, work, home }, null, 2));
     process.exitCode = Object.values(checks).every(Boolean) ? 0 : 1;
   } finally {
     stopDaemon(home);
