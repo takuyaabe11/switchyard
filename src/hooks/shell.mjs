@@ -21,11 +21,30 @@ export function simpleCommands(text) {
 }
 
 /**
+ * コマンドを背景へ回す `&` が、いちばん外側に 1 つだけあり、それがコマンドの最後(後ろは空白とコメントだけ)なら、その位置を返す。
+ * それ以外(`&` が無い・途中にある・2 つ以上ある)は -1。`&&`・`2>&1`・`&>`・引用符・heredoc の本文・( … ) の中の `&` は数えない。
+ * @param {string} text @returns {number}
+ */
+export function trailingAmpersand(text) {
+  /** @type {Array<{ op: string, at: number }>} */
+  const ops = [];
+  parse(text, 0, null, [], ops);
+  // 最初の & の後ろが空白とコメントだけなら、& はそれ 1 つだけで最後にある(2 つ目があれば後ろが空にならない)
+  const first = ops.find((o) => o.op === '&');
+  if (first === undefined) return -1;
+  const at = first.at;
+  const rest = text.slice(at + 1).replace(/#[^\n]*/g, '');
+  return rest.trim() === '' ? at : -1;
+}
+
+/**
  * start から end の文字(null なら文字列の終わり)までを読み、単純コマンドを out に足す。
+ * ops を渡すと、この階層の区切り(; & && || |)を位置と一緒に足す(入れ子の中の区切りは足さない)。
  * @param {string} src @param {number} start @param {')' | '`' | null} end @param {string[][]} out
+ * @param {Array<{ op: string, at: number }> | null} [ops]
  * @returns {number} 読み終えた位置(end の文字の次)
  */
-function parse(src, start, end, out) {
+function parse(src, start, end, out, ops = null) {
   let i = start;
   /** @type {string[]} */
   let words = [];
@@ -118,7 +137,10 @@ function parse(src, start, end, out) {
       dropNext = true;
     } else if (c === ';' || c === '|' || c === '&') {
       endCommand();
-      i += 1;
+      // && と || は 1 つの区切り(2 文字を一度に読む。単純コマンドの分け方は変わらない)
+      const op = (c === '&' || c === '|') && n === c ? c + c : c;
+      ops?.push({ op, at: i });
+      i += op.length;
     } else if (c === '<' && n === '<' && src[i + 2] !== '<') {
       endWord();
       const r = readHeredoc(src, i + 2);

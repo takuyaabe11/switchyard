@@ -127,7 +127,7 @@ describe('summarize(改善のための集計)', () => {
 
   it('hooks.jsonl の背景化と拒否を数える', () => {
     const s = summarize({ events: [], hooks: [hook('background', T0), hook('background', T0), hook('deny', T0)] });
-    assert.deepEqual(s.hook, { background: 2, deny: 1, wrap: 0, ask: 0, extend: 0, timeoutBackground: 0, timeout: 0, port: 0, portFound: 0, waitBackground: 0 });
+    assert.deepEqual(s.hook, { background: 2, deny: 1, wrap: 0, ask: 0, extend: 0, timeoutBackground: 0, timeout: 0, port: 0, portFound: 0, waitBackground: 0, ampBackground: 0 });
   });
 
   it('Bash の時間切れ(切られた・延ばした・背景へ回した)と、ポートが使用中で落ちた数(握っているプロセスを突き止めた数)を数え、文面に出す', () => {
@@ -140,7 +140,7 @@ describe('summarize(改善のための集計)', () => {
       { ...hook('port', T0), port: null, holders: 0 },
     ];
     const s = summarize({ events: [], hooks });
-    assert.deepEqual(s.hook, { background: 1, deny: 0, wrap: 0, ask: 0, extend: 1, timeoutBackground: 1, timeout: 1, port: 2, portFound: 1, waitBackground: 0 });
+    assert.deepEqual(s.hook, { background: 1, deny: 0, wrap: 0, ask: 0, extend: 1, timeoutBackground: 1, timeout: 1, port: 2, portFound: 1, waitBackground: 0, ampBackground: 0 });
     const text = formatReport(s, { repoPrefix: null, sinceDays: null });
     assert.match(text, /Bash の時間切れ: 切られた 1 件・切られないよう延ばした 1 件・上限を超えるので背景へ回した 1 件/);
     assert.match(text, /ポートが使用中で落ちた: 2 件\(握っているプロセスを突き止めた 1 件\)/);
@@ -157,7 +157,7 @@ describe('summarize(改善のための集計)', () => {
     assert.equal(s.jobs, 1);
     assert.equal(s.waitMs.max, MIN);
     assert.deepEqual(s.byProfile, []);
-    assert.deepEqual(s.hook, { background: 0, deny: 1, wrap: 0, ask: 0, extend: 0, timeoutBackground: 0, timeout: 0, port: 0, portFound: 0, waitBackground: 0 });
+    assert.deepEqual(s.hook, { background: 0, deny: 1, wrap: 0, ask: 0, extend: 0, timeoutBackground: 0, timeout: 0, port: 0, portFound: 0, waitBackground: 0, ampBackground: 0 });
   });
 });
 

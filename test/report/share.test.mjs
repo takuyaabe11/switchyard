@@ -63,7 +63,7 @@ describe('formatShare(switchyard report --share)', () => {
     assert.match(text, /default:batch 2 runs \(typical run 4m/);
     assert.match(text, /project profiles 1 runs in 1 profile\/repo pairs; wrapped without a profile 1 runs/);
     assert.match(text, /failed runs: 1 \(1 flagged as possibly not the code\)/);
-    assert.match(text, /PreToolUse: background 1, wrapped 0, refused 0, asked 1/);
+    assert.match(text, /PreToolUse: background 1, & turned into background runs 0, wrapped 0, refused 0, asked 1/);
     assert.doesNotMatch(text, /observe mode/);
   });
 
