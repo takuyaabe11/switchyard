@@ -97,7 +97,11 @@ export function decide(input, e, opts = {}) {
         break;
       }
       s = removeLease(s, e.jobId);
-      extra.push({ type: 'history', repo: l.job.repo, ...(l.job.family === undefined ? {} : { family: l.job.family }), profile: l.job.profile, class: l.job.class, cpus: l.cpus, durationMs: e.durationMs, code: e.code, cpuMs: e.cpuMs ?? null, peakMemMb: e.peakMemMb ?? null, ...(e.environmental !== undefined && e.environmental.length > 0 ? { environmental: e.environmental } : {}) });
+      extra.push({
+        type: 'history', jobId: l.job.id, repo: l.job.repo, ...(l.job.family === undefined ? {} : { family: l.job.family }), profile: l.job.profile, class: l.job.class, cpus: l.cpus, durationMs: e.durationMs, code: e.code, cpuMs: e.cpuMs ?? null, peakMemMb: e.peakMemMb ?? null,
+        ...(e.environmental !== undefined && e.environmental.length > 0 ? { environmental: e.environmental } : {}),
+        ...(e.otherLoad === undefined || e.overlap === undefined ? {} : { otherLoad: e.otherLoad, overlap: e.overlap }),
+      });
       if (e.killedByCaller) s = addUnacked(s, l, 'killed', e.code);
       else if (e.code !== 0) s = addUnacked(s, l, 'failed', e.code, e.environmental ?? []);
       else s = resolveBySuccess(s, l.job.session, l.job.repo, l.job.profile, l.job.cmd);

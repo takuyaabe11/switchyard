@@ -12,11 +12,12 @@ import { createDecoder, encode } from '../protocol/ndjson.mjs';
 import { groupHasLiveMembers, rssByGroup } from '../run/group.mjs';
 import { effectiveAvailableMb } from '../core/memory.mjs';
 import { environmentalReasons } from '../core/diagnose.mjs';
+import { isTolerant, otherLoadOf, overlapOf } from '../core/contention.mjs';
 import { VERSION } from '../version.mjs';
 import { ensurePrivateDir, pathsOf, SOCKET_PATH_LIMIT, tightenFiles } from './paths.mjs';
 import { IS_WINDOWS } from '../platform.mjs';
 import { rightSize } from '../core/usage.mjs';
-import { appendRecord, createStateWriter, loadEscapes, loadEstimates, loadMemory, loadUsage, parseState, readJournal, readJson, rotateRecords, takeUnmanaged } from './store.mjs';
+import { appendRecord, createStateWriter, loadEscapes, loadContention, loadEstimates, loadMemory, loadUsage, parseState, readJournal, readJson, rotateRecords, takeUnmanaged } from './store.mjs';
 import { t } from '../i18n.mjs';
 
 /** @typedef {import('../core/types.mjs').State} State */
@@ -211,6 +212,7 @@ export async function startDaemon(opts) {
   const estimates = loadEstimates(journal.records);
   const usage = loadUsage(journal.records);
   const memBook = loadMemory(journal.records);
+  const contention = loadContention(journal.records);
   const escapes = loadEscapes(journal.records);
   /** @param {string} repo @param {string} profile @returns {string[]} */
   const escapesOf = (repo, profile) => [...(escapes.get(JSON.stringify([repo, profile])) ?? [])].sort();
@@ -246,7 +248,12 @@ export async function startDaemon(opts) {
       estimates.record(learn, a.profile, a.durationMs, a.code);
       usage.record(learn, a.profile, { durationMs: a.durationMs, cpuMs: a.cpuMs ?? null, cpus: a.cpus, code: a.code });
       memBook.record(learn, a.profile, a.peakMemMb);
-      appendRecord(p.events, { at: wallNow(), kind: 'history', repo: a.repo, ...(a.family === undefined ? {} : { family: a.family }), profile: a.profile, class: a.class, cpus: a.cpus, durationMs: a.durationMs, code: a.code, cpuMs: a.cpuMs ?? null, peakMemMb: a.peakMemMb ?? null, ...(a.environmental === undefined ? {} : { environmental: a.environmental }) });
+      contention.record(learn, a.profile, { durationMs: a.durationMs, code: a.code, overlap: a.overlap ?? null });
+      appendRecord(p.events, {
+        at: wallNow(), kind: 'history', ...(a.jobId === undefined ? {} : { jobId: a.jobId }), repo: a.repo, ...(a.family === undefined ? {} : { family: a.family }), profile: a.profile, class: a.class, cpus: a.cpus, durationMs: a.durationMs, code: a.code, cpuMs: a.cpuMs ?? null, peakMemMb: a.peakMemMb ?? null,
+        ...(a.environmental === undefined ? {} : { environmental: a.environmental }),
+        ...(a.overlap === undefined ? {} : { otherLoad: a.otherLoad, overlap: a.overlap }),
+      });
       return;
     }
     // 決定(入場と、待たせた順番・理由)も記録に残す。包みが繋がっていなくても残すので、
@@ -293,7 +300,11 @@ export async function startDaemon(opts) {
           floorMb: memFloorMb,
         };
 
-  /** @type {Map<string, import('../core/diagnose.mjs').RunStats & { lastAt: number }>} jobId → 走行中に測った機械の様子(環境のせいの失敗の手がかり) */
+  /**
+   * jobId → 走行中に測った機械の様子(環境のせいの失敗の手がかり)。
+   * busyCoreMs・coveredMs は、機械の忙しさ(コア数)を時間で積んだ和と測れた時間(重なりによる遅れを学ぶ。src/core/contention.mjs)
+   * @type {Map<string, import('../core/diagnose.mjs').RunStats & { lastAt: number, since: number, busyCoreMs: number, coveredMs: number }>}
+   */
   const runStats = new Map();
   /**
    * 走行中のジョブごとに、重なった他の重い走行の数・機械の忙しさ・空きメモリの最小・止められていた時間を覚える。
@@ -307,12 +318,19 @@ export async function startDaemon(opts) {
     const busy = a !== undefined && b !== undefined && b.at > a.at ? Math.max(0, b.busy - a.busy) / (b.at - a.at) : null;
     const avail = memory ? readAvailableMb() : null;
     for (const l of running) {
-      const st = runStats.get(l.job.id) ?? { maxOthers: 0, maxBusyCores: null, maxOtherLoad: null, minAvailMb: null, heldMs: 0, lastAt: now };
+      const st = runStats.get(l.job.id) ?? { maxOthers: 0, maxBusyCores: null, maxOtherLoad: null, minAvailMb: null, heldMs: 0, lastAt: now, since: now, busyCoreMs: 0, coveredMs: 0 };
       st.maxOthers = Math.max(st.maxOthers, running.filter((o) => o !== l && o.held === undefined).length);
       if (busy !== null) {
         st.maxBusyCores = Math.max(st.maxBusyCores ?? 0, busy);
         // この走行が使いうるのは、道具に渡したスレッド数まで。それを超える分は他の処理
         st.maxOtherLoad = Math.max(st.maxOtherLoad ?? 0, busy - threadsOf(l, state.capacity, cores));
+        // 最後の標本の区間のうち、まだ積んでいない分(走り出す前の分は除く)だけを積む。tick でも呼ばれるので二重に積まない
+        const from = Math.max(/** @type {{ at: number }} */ (a).at, st.since);
+        if (b.at > from) {
+          st.busyCoreMs += busy * (b.at - from);
+          st.coveredMs += b.at - from;
+          st.since = b.at;
+        }
       }
       if (avail !== null) st.minAvailMb = Math.min(st.minAvailMb ?? Infinity, avail);
       if (l.held !== undefined) st.heldMs += now - st.lastAt;
@@ -358,6 +376,8 @@ export async function startDaemon(opts) {
         sizedFrom: l.job.sizedFrom ?? null,
         measuredCores: l.job.measuredCores ?? null,
         overcommit: l.overcommit === true,
+        // 重なっても遅くならないと学んだジョブか(PreToolUse が、重ねて入れられるかの見込みに使う)
+        tolerant: isTolerant(l.job),
       })),
       waiting: sortWaiting(state.waiting, now).map((w) => {
         const n = state.notes[w.job.id];
@@ -378,6 +398,8 @@ export async function startDaemon(opts) {
       sized: adaptive ? usage.sizedAll() : {},
       // 自分で終わった走行の最長の所要。PreToolUse が Bash の時間切れを延ばすかを決めるのに使う
       longest: estimates.longestAll(),
+      // 重なりによる遅れの倍率(学べた repo × profile)。PreToolUse が「待たされるか」の見込みに使う
+      slowdown: adaptive ? Object.fromEntries(Object.entries(contention.learnedAll()).map(([k, v]) => [k, v.slowdown])) : {},
       // 空きメモリの見積もりと下限(メモリを見ないなら null)
       memory: memoryView(),
       // 実測の空き(詰め込みに使う)。測れていなければ null
@@ -438,7 +460,9 @@ export async function startDaemon(opts) {
           send(conn, { t: 'accepted', jobId: id });
           const learn = req.family ?? req.repo;
           const memMb = memory ? memBook.expected(learn, req.profile) : null;
-          const job = rightSize({ ...req, id, expectedMs: estimates.expected(learn, req.profile), ...(memMb === null ? {} : { memMb }) }, adaptive ? usage.cores(learn, req.profile) : null);
+          // 重なりによる遅れの倍率を学べていれば載せる(小さければ、CPU の空きが足りなくても待たせない。schedule.mjs)
+          const slowdown = adaptive ? contention.slowdown(learn, req.profile) : null;
+          const job = rightSize({ ...req, id, expectedMs: estimates.expected(learn, req.profile), ...(memMb === null ? {} : { memMb }), ...(slowdown === null ? {} : { slowdown }) }, adaptive ? usage.cores(learn, req.profile) : null);
           apply({ type: 'request', now: monoNow(), job });
           return;
         }
@@ -487,9 +511,15 @@ export async function startDaemon(opts) {
           const code = numOrNull(m.code);
           const killedByCaller = m.killedByCaller === true;
           // 失敗が環境のせいかもしれないか(混雑・メモリ不足・計測のための一時停止・SIGKILL)。包みが Claude に伝え、確認待ちにも添える
-          const environmental = done === undefined ? [] : environmentalReasons({ code, killedByCaller, stats: runStats.get(id) ?? null, cores, memFloorMb: memory ? memFloorMb : null });
+          const stats = runStats.get(id) ?? null;
+          const environmental = done === undefined ? [] : environmentalReasons({ code, killedByCaller, stats, cores, memFloorMb: memory ? memFloorMb : null });
           runStats.delete(id);
-          apply({ type: 'exit', now: monoNow(), jobId: id, code, killedByCaller, durationMs: Number(m.durationMs), cpuMs: numOrNull(m.cpuMs), peakMemMb: peakMemMb === null ? null : Math.round(peakMemMb), ...(environmental.length > 0 ? { environmental } : {}) });
+          const durationMs = Number(m.durationMs);
+          const cpuMs = numOrNull(m.cpuMs);
+          // 走行の間に他の処理が使っていたコア数(止められていた走行は所要が伸びているので学ばない)
+          const otherLoad = stats === null || stats.heldMs > 0 ? null : otherLoadOf({ busyCoreMs: stats.busyCoreMs, coveredMs: stats.coveredMs, durationMs, cpuMs });
+          const overlap = otherLoad === null || cpuMs === null ? {} : { otherLoad, overlap: overlapOf(otherLoad, cpuMs / durationMs, cores) };
+          apply({ type: 'exit', now: monoNow(), jobId: id, code, killedByCaller, durationMs, cpuMs, peakMemMb: peakMemMb === null ? null : Math.round(peakMemMb), ...(environmental.length > 0 ? { environmental } : {}), ...overlap });
           send(conn, { t: 'ok', ...(environmental.length > 0 ? { environmental } : {}) });
           return;
         }

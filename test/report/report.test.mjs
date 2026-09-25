@@ -13,8 +13,8 @@ const req = (id, at, over = {}) => ({
   event: { type: 'request', now: at, job: { id, session: 's1', repo: '/repo', profile: 'unit', cmd: 'npm test', class: 'batch', cpus: { min: 2, max: 4 }, locks: [], preempt: 'throttle', why: null, expectedMs: null, ...over } },
 });
 
-/** grant の記録 @param {string} id @param {number} at @param {{ cpus?: number, lockChild?: boolean, overcommit?: boolean }} [over] */
-const grant = (id, at, over = {}) => ({ at, kind: 'decision', decision: { type: 'grant', jobId: id, cpus: over.cpus ?? 2, ...(over.lockChild === true ? { lockChild: true } : {}), ...(over.overcommit === true ? { overcommit: true } : {}) } });
+/** grant の記録 @param {string} id @param {number} at @param {{ cpus?: number, lockChild?: boolean, overcommit?: boolean, tolerant?: boolean }} [over] */
+const grant = (id, at, over = {}) => ({ at, kind: 'decision', decision: { type: 'grant', jobId: id, cpus: over.cpus ?? 2, ...(over.lockChild === true ? { lockChild: true } : {}), ...(over.overcommit === true ? { overcommit: true } : {}), ...(over.tolerant === true ? { tolerant: true } : {}) } });
 
 /** queued の記録 @param {string} id @param {number} at @param {string} reason */
 const queued = (id, at, reason) => ({ at, kind: 'decision', decision: { type: 'queued', jobId: id, position: 1, reason, etaAt: null } });
@@ -84,11 +84,45 @@ describe('summarize(改善のための集計)', () => {
     ];
     const s = summarize({ events, hooks: [] });
     assert.deepEqual(s.byProfile, [
-      { repo: '/repo', profile: 'unit', count: 3, medianMs: 20 * MIN },
-      { repo: '/repo', profile: 'e2e', count: 1, medianMs: 5 * MIN },
+      { repo: '/repo', profile: 'unit', count: 3, medianMs: 20 * MIN, slowdown: null },
+      { repo: '/repo', profile: 'e2e', count: 1, medianMs: 5 * MIN, slowdown: null },
     ]);
     assert.equal(s.failures, 1);
     assert.equal(s.unmanaged, 1);
+  });
+
+  it('重なりによる遅れ: profile ごとの倍率、待たせなかった入場、CPU を取り合って待たせた走行の避けた遅れの見込み', () => {
+    /** @param {string} id @param {number} durationMs @param {string} overlap @param {Record<string, unknown>} [over] */
+    const run = (id, durationMs, overlap, over = {}) => ({ ...history(T0, durationMs), jobId: id, overlap, ...over });
+    const events = [
+      // unit は静か 10 分・重なると 15 分(1.5 倍)。worktree の一族で学ぶ
+      ...['q1', 'q2', 'q3'].map((id) => run(id, 10 * MIN, 'alone', { repo: '/w/a', family: '/w/main' })),
+      ...['c1', 'c2', 'c3'].map((id) => run(id, 15 * MIN, 'contended', { repo: '/w/b', family: '/w/main' })),
+      // CPU を取り合って待たせた 2 本と、鍵で待たせた 1 本(鍵は遅れではなく衝突を避けたので数えない)
+      req('w1', T0, { repo: '/w/a' }), queued('w1', T0, 'CPU 不足(空き 1 / 必要 2)'), grant('w1', T0 + MIN),
+      run('w1', 20 * MIN, 'alone', { repo: '/w/a', family: '/w/main' }),
+      req('w2', T0, { repo: '/w/a' }), queued('w2', T0, '先頭 w1 の後ろ(後ろ詰めの見込みなし)'), grant('w2', T0 + MIN),
+      run('w2', 10 * MIN, 'partial', { repo: '/w/a', family: '/w/main' }),
+      req('w3', T0, { repo: '/w/a' }), queued('w3', T0, '鍵 port:3000 が使用中'), grant('w3', T0 + MIN),
+      run('w3', 10 * MIN, 'alone', { repo: '/w/a', family: '/w/main' }),
+      // lint は 1.1 倍(遅くならない)なので、待たせても遅れを避けたことにならない
+      ...['l1', 'l2', 'l3'].map((id) => run(id, 10 * MIN, 'alone', { profile: 'lint' })),
+      ...['l4', 'l5', 'l6'].map((id) => run(id, 11 * MIN, 'contended', { profile: 'lint' })),
+      req('w4', T0, { profile: 'lint' }), queued('w4', T0, 'CPU 不足(空き 1 / 必要 2)'), grant('w4', T0 + MIN, { tolerant: true }),
+      run('w4', 10 * MIN, 'contended', { profile: 'lint' }),
+    ];
+    const s = summarize({ events, hooks: [] });
+    assert.equal(s.tolerant, 1);
+    // w1: 0.5 × 20 分 + w2: 0.5 × 10 分(学んだ倍率は q と c と w の静か 5 本・重なった 3 本から。静かの中央値 10 分)
+    assert.deepEqual(s.delay, { runs: 2, avoidedMs: 15 * MIN });
+    const unit = s.byProfile.find((p) => p.repo === '/w/a' && p.profile === 'unit');
+    assert.deepEqual(unit?.slowdown, { slowdown: 1.5, alone: 5, contended: 3 });
+    assert.deepEqual(s.byProfile.find((p) => p.profile === 'lint')?.slowdown, { slowdown: 1.1, alone: 3, contended: 4 });
+    const text = formatReport(s, { repoPrefix: null, sinceDays: null });
+    assert.match(text, /重なっても遅くならないと学んだので待たせなかった入場: 1 件/);
+    assert.match(text, /避けた遅れの見込み: 15分\(CPU を取り合って待たせた 2 本の、学んだ遅れの倍率と所要からの見積もり。実測ではない\)/);
+    assert.match(text, /\/w\/a {2}unit {2}6 本 {2}中央 10分 {2}重なると 1\.5 倍\(静か 5 本・重なった 3 本から\)/);
+    assert.doesNotMatch(formatReport(summarize({ events: [], hooks: [] }), { repoPrefix: null, sinceDays: null }), /避けた遅れ/);
   });
 
   it('hooks.jsonl の背景化と拒否を数える', () => {

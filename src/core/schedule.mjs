@@ -1,6 +1,7 @@
 // @ts-check
 // 入場の判断(設計 §6.2〜§6.5 の第 1 段)。純関数で、入出力も時計も使わない。
 import { sortWaiting } from './score.mjs';
+import { isTolerant, TOLERANT_OVERCOMMIT } from './contention.mjs';
 import { t } from '../i18n.mjs';
 
 /** @typedef {import('./types.mjs').State} State */
@@ -190,14 +191,16 @@ export function schedule(input, now, { spare = null, memory = null } = {}) {
   /**
    * @param {Waiting} w @param {number} cpus @param {boolean} [lockChild] 親の子として入場する(設計 §6.3 の 4)
    * @param {boolean} [overcommit] 実測の空きに詰め込む(容量を超える)
+   * @param {boolean} [tolerant] 重なっても遅くならないと学んだので、CPU の空きが足りなくても入れる(容量を超える)
    */
-  const admit = (w, cpus, lockChild = false, overcommit = false) => {
+  const admit = (w, cpus, lockChild = false, overcommit = false, tolerant = false) => {
     s.waiting = s.waiting.filter((x) => x !== w);
     /** @type {Lease} */
     const lease = {
       job: w.job, cpus, grantedAt: now, phase: 'granted', pid: null, pgid: null, recovering: false,
       ...(lockChild ? { lockChild: true } : {}),
       ...(overcommit ? { overcommit: true } : {}),
+      ...(tolerant ? { tolerant: true } : {}),
     };
     s.leases = [...s.leases, lease];
     granted.push(lease);
@@ -327,6 +330,14 @@ export function schedule(input, now, { spare = null, memory = null } = {}) {
         spareLeft = null;
         continue;
       }
+      // 重なっても遅くならないと学んだジョブは、走っている相手もみな同じく遅くならないなら、CPU の空きを待たずに入れる
+      // (相手が遅くなる走行なら、重ねるとその走行を遅らせるので入れない)。容量の TOLERANT_OVERCOMMIT 倍までに抑える
+      const tolerable =
+        isTolerant(job) && locksFree(s, job.locks) && memOk(job) && cpuLeases(s).every((l) => isTolerant(l.job)) && usedCpus(s) + job.cpus.min <= s.capacity * TOLERANT_OVERCOMMIT;
+      if (tolerable) {
+        admit(w, job.cpus.min, false, false, true);
+        continue;
+      }
       head = { id: job.id, etaAt: estimateStart(s, job, now) };
       note(blockReason(s, job), head.etaAt);
       block(job);
@@ -368,7 +379,7 @@ export function schedule(input, now, { spare = null, memory = null } = {}) {
   const actions = [...holdActions];
   // 容量を超えて借りた親の子だけ印を載せる(記録から借りの回数を数えるため。項目は該当するときだけ足す)
   for (const l of granted) {
-    actions.push({ type: 'grant', jobId: l.job.id, cpus: l.cpus, ...(l.lockChild === true ? { lockChild: true } : {}), ...(l.overcommit === true ? { overcommit: true } : {}) });
+    actions.push({ type: 'grant', jobId: l.job.id, cpus: l.cpus, ...(l.lockChild === true ? { lockChild: true } : {}), ...(l.overcommit === true ? { overcommit: true } : {}), ...(l.tolerant === true ? { tolerant: true } : {}) });
   }
   for (const n of Object.values(s.notes)) {
     const prev = input.notes[n.jobId];

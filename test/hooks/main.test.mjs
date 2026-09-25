@@ -127,6 +127,22 @@ describe('背景へ回す方針(SWITCHYARD_BACKGROUND)', () => {
     assert.equal(waitExpected({ ...busy, spare: 3 }, [batch(1), batch(1)]), true, '詰め込みは 1 回に 1 本');
   });
 
+  it('waitExpected: 重なっても遅くならないと学んだ profile は、相手もみな同じなら容量の 2 倍まで待たない', () => {
+    const key = JSON.stringify(['/r', 'unit']);
+    const unit = { jobClass: /** @type {const} */ ('batch'), cpusMin: 2, locks: [], profile: 'unit' };
+    const busy = { ...empty, used: 4, leases: [leaseView({ cpus: 4, tolerant: true })], slowdown: { [key]: 1.1 } };
+    assert.equal(waitExpected(busy, [unit], '/r'), false, '入れる');
+    assert.equal(waitExpected({ ...busy, slowdown: { [key]: 1.2 } }, [unit], '/r'), true, '自分が遅くなる');
+    assert.equal(waitExpected({ ...busy, slowdown: {} }, [unit], '/r'), true, '学べていない');
+    assert.equal(waitExpected({ ...busy, leases: [leaseView({ cpus: 4 })] }, [unit], '/r'), true, '相手が遅くなる');
+    assert.equal(waitExpected({ ...busy, leases: [leaseView({ cpus: 4, tolerant: true }), leaseView({ cpus: 0, locks: ['x'] })] }, [unit], '/r'), false, '鍵だけの相手は数えない');
+    assert.equal(waitExpected({ ...busy, used: 7 }, [unit], '/r'), true, '容量の 2 倍を超える');
+    assert.equal(waitExpected({ ...busy, used: 6 }, [unit], '/r'), false, 'ちょうど 2 倍');
+    assert.equal(waitExpected(busy, [unit, unit], '/r'), true, '重い部分が 2 つ');
+    assert.equal(waitExpected(busy, [unit], '/other'), true, '別の repo');
+    assert.equal(waitExpected(busy, [unit]), true, 'repo が分からない');
+  });
+
   it('auto(既定): デーモンが居ない・空いているなら前景のまま、容量が埋まっていれば背景へ回す。never は回さない', async () => {
     const home = mkdtempSync(join(tmpdir(), 'chook-'));
     /** @type {string[]} */

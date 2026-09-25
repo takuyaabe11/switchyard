@@ -91,6 +91,14 @@ overlapped, it says so, and you can take it out with `switchyard uninstall`.
 - **It learns.** After two runs of the same command it knows how much CPU and memory that run really needs and sizes
   its share to that. Git worktrees of the same repository share what was learned, so a new worktree
   does not start from scratch.
+- **Runs that overlap without slowing down are not held back.** For each run, switchyard measures how many cores the
+  rest of the machine used meanwhile. Once a command has at least three quiet runs and three runs beside other work
+  that kept the machine full, it compares their median times. A command whose runs beside others took at
+  most 1.15 times as long starts without waiting for CPU, as long as everything running is the same kind, locks and
+  memory allow, and the total share stays within twice the capacity. `switchyard report` shows each learned ratio and
+  an estimate (not a measurement) of the delay avoided by holding back the commands that do slow down. Not learned on
+  Windows or with `SWITCHYARD_OVERCOMMIT=0`. It only makes a difference when the machine is really busy; otherwise
+  packing into measured spare CPU already lets such runs in ([measured](docs/verification/2026-09-25-contention.md)).
 
 ## What it does, measured
 
@@ -161,7 +169,8 @@ What is weaker, because Windows has no process groups and Git Bash does not repo
   SIGTERM first.
 - `preempt: pause` and `throttle` never apply: runs are not paused for a measurement.
 - Children that leave the run are not detected, and `switchyard probe` is not available.
-- Run sizes are not learned from CPU use (right-sizing), and memory admission has no per-run peaks to learn from.
+- Run sizes are not learned from CPU use (right-sizing), memory admission has no per-run peaks to learn from, and the
+  slowdown from overlapping is not learned.
 
 Once installed, every new Claude Code session gets four hooks:
 
@@ -501,6 +510,12 @@ node bin/switchyard.mjs replay --since 14d
   渡すので、単独の走行が遅くなることはない。`SWITCHYARD_THREAD_ENV=0` で止める。
 - **学ぶ。** 同じコマンドを 2 回走らせると、その走行が実際に使う CPU とメモリが分かり、取り分をそれに合わせる。同じ repo の
   git worktree は学んだことを分け合うので、新しい worktree が学び直すことはない。
+- **重なっても遅くならない走行は待たせない。** 走行ごとに、その間に機械の他の処理が使っていたコア数を測る。同じコマンドに
+  「静か」な走行と、機械が埋まる中で他と取り合った走行がそれぞれ 3 本以上たまると、所要の中央値を比べる。重なっても
+  1.15 倍以内で終わるコマンドは、CPU の空きを待たずに走らせる(走っている相手もみな同じ種類で、鍵とメモリが許し、割り振りの合計が
+  容量の 2 倍以内のとき)。`switchyard report` に、学んだ倍率と、遅くなるコマンドを待たせて避けた遅れの見込み(実測ではなく見積もり)を出す。
+  Windows と `SWITCHYARD_OVERCOMMIT=0` では学ばない。差が出るのは機械が実際に忙しいときだけで、そうでなければ実測の空きへの
+  詰め込みがもともと入れる([実測](docs/verification/2026-09-25-contention.md))。
 
 ## 実測で何をするか
 
@@ -566,6 +581,7 @@ shim が PATH に載らないので、重い走行は管理されない。Git �
 - `preempt: pause` と `throttle` は効かない。計測のために走行を止めない。
 - 走行から抜けた子を見つけない。`switchyard probe` は使えない。
 - CPU の使い方から割り振りを小さくする学習(right-sizing)をしない。メモリの受け入れも、走行ごとのピークを学ばない。
+  重なりによる遅れも学ばない。
 
 入れると、新しいセッションごとに 4 つの hook が付く。
 

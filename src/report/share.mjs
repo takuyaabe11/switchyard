@@ -84,6 +84,8 @@ export function formatShare({ summary: s, observed, meta }) {
   if (projectKinds > 0) profileText.push(`project profiles ${projectRuns} runs in ${projectKinds} profile/repo pairs`);
   if (unclassifiedRuns > 0) profileText.push(`wrapped without a profile ${unclassifiedRuns} runs`);
 
+  // 学べた遅れの倍率(数だけ。どの profile かは出さない)
+  const slowdowns = s.byProfile.flatMap((p) => (p.slowdown === null ? [] : [p.slowdown.slowdown])).sort((a, b) => a - b);
   const lines = [
     '### switchyard field report',
     '',
@@ -94,6 +96,7 @@ export function formatShare({ summary: s, observed, meta }) {
     `- waited: ${s.waited} (median ${duration(s.waitMs.median)}, max ${duration(s.waitMs.max)})${reasons.length > 0 ? `; why: ${reasons.join(', ')}` : ''}`,
     `- packed into measured spare CPU: ${s.packed}; borrowed beyond capacity: ${s.borrows}; sized down to learned use: ${s.sized}`,
     `- runs by profile: ${profileText.length > 0 ? profileText.join('; ') : 'none'}`,
+    `- slowdown when overlapped, learned for ${slowdowns.length} profile/repo pair(s)${slowdowns.length > 0 ? `: ${slowdowns.map((x) => `${x}x`).join(', ')}` : ''}; admitted without waiting as not slowed by overlap: ${s.tolerant}; slowdown avoided by holding back (estimate, not measured): ${duration(s.delay.avoidedMs)} over ${s.delay.runs} run(s)`,
     `- failed runs: ${s.failures} (${s.environmental} flagged as possibly not the code); unmanaged runs: ${s.unmanaged}; escaping children: ${s.escapes}`,
     `- PreToolUse: background ${s.hook.background}, wrapped ${s.hook.wrap}, refused ${s.hook.deny}, asked ${s.hook.ask}`,
     `- Bash time limit: cut off ${s.hook.timeout}, given more time ${s.hook.extend}, sent to background as too long ${s.hook.timeoutBackground}, waiting loops sent to background ${s.hook.waitBackground}; failed on a port in use ${s.hook.port} (holder found ${s.hook.portFound})`,
