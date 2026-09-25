@@ -123,7 +123,7 @@ switchyard が足すものは 2 つ。
     - 割り振りの合計が容量の 2 倍以内。
     - 鍵とメモリの下限を守る。計測の走行中ではない。先頭で待つジョブが居ない。
   - 学ばない走行: CPU 時間が分からない走行(Windows)、所要の半分も測れなかった走行、計測のために止められた走行。
-  - 測るのは詰め込み(`SWITCHYARD_OVERCOMMIT`)と同じ標本。`SWITCHYARD_OVERCOMMIT=0` だと学ばない。
+  - 測るのは詰め込み(`SWITCHYARD_OVERCOMMIT`)と同じ標本。`SWITCHYARD_OVERCOMMIT=0` だと学ばない。`SWITCHYARD_ADAPTIVE=0` だと測って記録するが、入場には使わない。
   - 実測([詳細](verification/2026-09-25-contention.md)。4 コア・容量 3): CPU を使い切る仕事は 1.93 倍、`sleep 6` は 1 倍と学んだ。外の負荷で機械が埋まる中、`sleep 6` を 4 本同時に投げた。4 本目は 0.19.0 では 5 秒待ち、0.20.0 では待たなかった。外の負荷が無ければ、0.19.0 でも実測の空きへの詰め込みで待たなかった。差が出るのは機械が実際に忙しいときだけ。
   - `switchyard report` に、profile ごとの倍率・待たせなかった入場の数・「避けた遅れの見込み」を出す。見込みは、CPU を取り合って待たせた走行のうち倍率が 1.15 を超える profile について、(倍率 − 1) × 所要 を足したもの。実測ではなく、学んだ倍率からの見積もり。
 - **メモリを見た受け入れ**: 学んだピークを足すと、空きメモリが全体の 10% を割る走行を待たせる。何も走っていなければ必ず入れる。
@@ -293,7 +293,7 @@ switchyard が足すものは 2 つ。
 | `SWITCHYARD_RUN_GUARD=0` | 求める | 中身が重い走行の形ではない `switchyard run` にも承認を求めない |
 | `SWITCHYARD_THREAD_ENV=0` | 渡す | 並列度の環境変数を渡さない |
 | `SWITCHYARD_OVERCOMMIT=0` | 有効 | 実測の空きへ詰め込まない |
-| `SWITCHYARD_ADAPTIVE=0` | 有効 | 学んだ CPU の使い方で要求を下げない |
+| `SWITCHYARD_ADAPTIVE=0` | 有効 | 学んだ CPU の使い方で要求を下げない。重なりによる遅れの倍率も使わない(測って記録はする) |
 | `SWITCHYARD_MEMORY=0` | 有効 | メモリを見た受け入れをしない |
 | `SWITCHYARD_MEM_FLOOR_MB` | 全体の 10% | 残しておく空きメモリ |
 | `SWITCHYARD_CAPACITY` | コア数 − 予約 | 容量を固定する |
