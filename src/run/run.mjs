@@ -8,6 +8,7 @@ import { sessionId } from '../client/session.mjs';
 import { heldLocks, repoFamily, repoRoot } from '../config/context.mjs';
 import { applyTemplate, classifiableCommand, classify, loadProfiles } from '../config/profiles.mjs';
 import { threadEnv } from '../config/threads.mjs';
+import { learnedName, profileNameOf } from '../config/variant.mjs';
 import { loggedCommand, maskSecrets } from '../redact.mjs';
 import { environmentalNote } from '../core/diagnose.mjs';
 import { pathsOf } from '../daemon/paths.mjs';
@@ -70,7 +71,8 @@ export function buildRequest({ argv, flags, env, cwd }) {
   const { profiles, error, notice } = loadProfiles(repo);
   // 記録と表示に使う文字列。秘密は隠す(SWITCHYARD_LOG_COMMANDS)。走らせるのは argv そのまま
   const cmd = loggedCommand(argv.join(' '), env);
-  const named = flags.profile !== undefined ? profiles.find((p) => p.name === flags.profile) ?? null : classify(classifiableCommand(argv), profiles);
+  // --profile には、学ぶ単位の名前(default:batch npm test)を渡してもよい。表は profile の名前で引く
+  const named = flags.profile !== undefined ? profiles.find((p) => p.name === profileNameOf(flags.profile ?? '')) ?? null : classify(classifiableCommand(argv), profiles);
   if (flags.profile !== undefined && named === null) throw new Error(t(`profile ${flags.profile} が見つからない`, `profile ${flags.profile} not found`));
   const base = named === null ? null : named.profile;
   const held = heldLocks(env);
@@ -95,7 +97,8 @@ export function buildRequest({ argv, flags, env, cwd }) {
       // 同じ git の本体を共有する worktree は、見込みを分け合う
       ...(family !== repo ? { family } : {}),
       // shim は本物のパスで起動するので、先頭の語は basename にする(パスごとに見込みが分かれないように。設計 §5.4)
-      profile: named === null ? `cmd:${maskSecrets([basename(argv[0]), ...argv.slice(1, 2)].join(' '))}` : named.name,
+      // 既定の表の profile は、道具とサブコマンドまでを学ぶ単位にする(npm test と npx tsc の所要を混ぜない。src/config/variant.mjs)
+      profile: named === null ? `cmd:${maskSecrets([basename(argv[0]), ...argv.slice(1, 2)].join(' '))}` : learnedName(named.name, classifiableCommand(argv)),
       cmd,
       class: flags.class ?? base?.class ?? 'batch',
       cpus: env.SWITCHYARD_IN_JOB === '1' ? { min: 0, max: 0 } : flags.cpus ?? base?.cpus ?? { min: 1, max: 1 },

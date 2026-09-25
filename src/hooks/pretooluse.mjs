@@ -12,6 +12,7 @@ import { classifiableCommand, classify, globMatch, loadProfiles } from '../confi
 import { GIT_LOCK_SUBCOMMANDS, gitSubcommand } from '../shim/decide.mjs';
 import { simpleCommands } from './shell.mjs';
 import { rightSize, usageKey } from '../core/usage.mjs';
+import { learnedName, profileNameOf } from '../config/variant.mjs';
 import { isTolerant, TOLERANT_OVERCOMMIT } from '../core/contention.mjs';
 import { t } from '../i18n.mjs';
 import { isOff } from './off.mjs';
@@ -190,13 +191,13 @@ function wrapperOf(args, profiles) {
   } catch {
     // 使い方の誤りで包みは走らないが、`--` の後ろで判定しておく
   }
-  const named = flags.profile !== undefined ? (profiles.find((p) => p.name === flags.profile) ?? null) : classify(classifiableCommand(argv), profiles);
+  const named = flags.profile !== undefined ? (profiles.find((p) => p.name === profileNameOf(flags.profile ?? '')) ?? null) : classify(classifiableCommand(argv), profiles);
   /** @type {Heavy} */
   const need = {
     jobClass: flags.class ?? named?.profile.class ?? 'batch',
     cpusMin: flags.cpus?.min ?? named?.profile.cpus?.min ?? 1,
     locks: [...new Set([...(named?.profile.locks ?? []), ...(flags.locks ?? [])])],
-    ...(named === null ? {} : { profile: named.name }),
+    ...(named === null ? {} : { profile: learnedName(named.name, classifiableCommand(argv)) }),
   };
   return { ...need, argv };
 }
@@ -309,7 +310,7 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
     if (run !== null) {
       const w = wrapperOf(run, profiles);
       if (!vettedInner(w.argv, profiles)) unvetted.push(text);
-      if (w.jobClass !== 'quick') heavy.push({ jobClass: w.jobClass, cpusMin: w.cpusMin, locks: w.locks });
+      if (w.jobClass !== 'quick') heavy.push({ jobClass: w.jobClass, cpusMin: w.cpusMin, locks: w.locks, ...(w.profile === undefined ? {} : { profile: w.profile }) });
       visit(w.argv, true);
       return;
     }
@@ -329,7 +330,8 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
       const hit = classify(classifiableCommand([base, ...rest]), profiles);
       if (hit === null) return;
       if (!pathHead || isProjectLocal(head)) {
-        if (hit.profile.class !== 'quick') heavy.push(needOf(hit.profile, hit.name));
+        // 学ぶ単位の名前(既定の表なら道具とサブコマンドまで)で、盤面の学んだ値を引く。switchyard run と同じ計算
+        if (hit.profile.class !== 'quick') heavy.push(needOf(hit.profile, learnedName(hit.name, classifiableCommand([base, ...rest]))));
         if (!wrapped && bypass.length > 0) overridden.push(bypassText);
         // 仮想環境の実行ファイル(パスで呼ぶ・有効にした後に名前で呼ぶ)は shim を通らない。包めば順番待ちに乗る
         else if (!wrapped && hit.profile.class !== 'quick' && (isVenvPath(head) || (activated && !pathHead))) invisible.push(text);
@@ -351,7 +353,7 @@ export function preToolUse(input, { env = process.env, profilesFor = (cwd) => lo
     const hit = classify(ownText, profiles) ?? (pathHead ? classify(classifiableCommand([base, ...rest]), profiles) : null);
     const launches = pathHead || profiles.some((np) => np.profile.match.some((g) => leadWord(g) === head && globMatch(g, ownText)));
     // switchyard run で包んだ中では、子に入れ子の印が立ち node の shim も包まないので、重さは包みの性格だけで決まる(ここでは数えない)
-    if (!wrapped && hit !== null && launches && hit.profile.class !== 'quick') heavy.push(needOf(hit.profile, hit.name));
+    if (!wrapped && hit !== null && launches && hit.profile.class !== 'quick') heavy.push(needOf(hit.profile, learnedName(hit.name, ownText)));
     // パスで呼ぶスクリプトの引数の中の shim の語・シェルから後ろ(scripts/probe-run.sh gates npm run bench など)は、中で PATH の shim が包みうる。
     // 背景への判定だけに使う(拒否にはかけない)
     if (pathHead) {

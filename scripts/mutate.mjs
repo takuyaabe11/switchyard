@@ -746,7 +746,7 @@ const SUITES = {
         // 改善 2: 直す前の形。shim の語でないものをパスで呼ぶ形(scripts/probe-run.sh)と shim の無い語も拒否する
         name: 'H10 shim の語でないものをパスで呼ぶ形・shim の無い語も拒否へ戻す',
         file: 'src/hooks/pretooluse.mjs',
-        from: "if (!wrapped && hit !== null && launches && hit.profile.class !== 'quick') heavy.push(needOf(hit.profile, hit.name));",
+        from: "if (!wrapped && hit !== null && launches && hit.profile.class !== 'quick') heavy.push(needOf(hit.profile, learnedName(hit.name, ownText)));",
         to: 'if (!wrapped && hit !== null && launches) unshimmed.push(text);',
       },
       {
@@ -800,7 +800,7 @@ const SUITES = {
         // I1: switchyard run の `--` の後ろを見ない(直す前は switchyard run を含むコマンドを丸ごと素通しした)
         name: 'H12 switchyard run の包みの性格と -- の後ろを見ない',
         file: 'src/hooks/pretooluse.mjs',
-        from: "if (w.jobClass !== 'quick') heavy.push({ jobClass: w.jobClass, cpusMin: w.cpusMin, locks: w.locks });\n      visit(w.argv, true);",
+        from: "if (w.jobClass !== 'quick') heavy.push({ jobClass: w.jobClass, cpusMin: w.cpusMin, locks: w.locks, ...(w.profile === undefined ? {} : { profile: w.profile }) });\n      visit(w.argv, true);",
         to: '',
       },
       {
@@ -1479,6 +1479,32 @@ const SUITES = {
       { name: 'M12 hook の入口が記録しない', file: 'src/hooks/main.mjs', from: "      if (amp.applied) recordHook(input, env, { decision: 'amp-background' });\n", to: '' },
       { name: 'M13 report が数えない', file: 'src/report/report.mjs', from: "    else if (r.decision === 'amp-background') hookCount.ampBackground += 1;\n", to: '' },
       { name: 'M14 replay が & の無い重い走行も数える', file: 'src/replay/replay.mjs', from: " && withoutTrailingAmpersand(c.command) !== null) report.hook.ampBackground", to: ') report.hook.ampBackground' },
+    ],
+  },
+  variant: {
+    // 既定の表の走行を、道具とサブコマンドの単位で学ぶ
+    tests: ['test/config/variant.test.mjs', 'test/shim/shims.test.mjs', 'test/report/share.test.mjs', 'test/replay/replay.test.mjs', 'test/replay/reruns.test.mjs'],
+    mutations: [
+      { name: 'V1 サブコマンドを数えない', file: 'src/config/variant.mjs', from: '!optionSeen && !partial && base.length < 3 && NAME.test(w)', to: 'false' },
+      { name: 'V2 3 語を超えても数える', file: 'src/config/variant.mjs', from: 'base.length < 3 && NAME.test(w)', to: 'NAME.test(w)' },
+      { name: 'V3 オプションの後ろの語もサブコマンドに数える', file: 'src/config/variant.mjs', from: '!optionSeen && !partial && base.length < 3', to: '!partial && base.length < 3' },
+      { name: 'V4 先頭の語のパスを外さない', file: 'src/config/variant.mjs', from: 'const base = [basename(words[0])];', to: 'const base = [words[0]];' },
+      { name: 'V5 python -m のモジュールを数えない', file: 'src/config/variant.mjs', from: "if (w === '-m' && base.length === 1 && /^python[\\d.]*$/.test(base[0])) {", to: 'if (false) {' },
+      { name: 'V6 絞り込みのオプションを見ない', file: 'src/config/variant.mjs', from: "      if (FILTER_OPTIONS.has(w.split('=')[0])) partial = true;\n", to: '' },
+      { name: 'V7 = 付きの絞り込みを見ない', file: 'src/config/variant.mjs', from: "FILTER_OPTIONS.has(w.split('=')[0])", to: 'FILTER_OPTIONS.has(w)' },
+      { name: 'V8 全体を指す ./... も絞り込みとみなす', file: 'src/config/variant.mjs', from: '!WHOLE.has(w) && ', to: '' },
+      { name: 'V9 テストの id(::)を絞り込みとみなさない', file: 'src/config/variant.mjs', from: " || w.includes('::')", to: '' },
+      { name: 'V10 switchyard.json の profile も分ける', file: 'src/config/variant.mjs', from: "if (!name.startsWith(DEFAULT_PREFIX) || name.includes(' ')) return name;", to: "if (name.includes(' ')) return name;" },
+      { name: 'V11 秘密を隠さずに単位を取る', file: 'src/config/variant.mjs', from: 'variantOf(maskSecrets(command))', to: 'variantOf(command)' },
+      { name: 'V12 run が単位の名前を付けない', file: 'src/run/run.mjs', from: 'learnedName(named.name, classifiableCommand(argv))', to: 'named.name' },
+      { name: 'V13 --profile の単位の名前を表で引けない', file: 'src/run/run.mjs', from: 'p.name === profileNameOf(flags.profile ?? \'\')', to: 'p.name === flags.profile' },
+      { name: 'V14 PreToolUse の shim の語が単位の名前を付けない', file: 'src/hooks/pretooluse.mjs', from: 'needOf(hit.profile, learnedName(hit.name, classifiableCommand([base, ...rest])))', to: 'needOf(hit.profile, hit.name)' },
+      { name: 'V15 PreToolUse の包みが profile を載せない', file: 'src/hooks/pretooluse.mjs', from: ', ...(w.profile === undefined ? {} : { profile: w.profile })', to: '' },
+      { name: 'V16 share が単位の名前をまとめない', file: 'src/report/share.mjs', from: "const name = p.profile.split(' ')[0];", to: 'const name = p.profile;' },
+      { name: 'V17 replay が shim の語でない部分も分類する', file: 'src/replay/variants.mjs', from: '    if (!SHIM_WORDS.includes(basename(head))) continue;\n', to: '' },
+      { name: 'V18 replay が重い部分 2 つの呼び出しも数える', file: 'src/replay/variants.mjs', from: 'us.length !== 1 || ', to: 'us.length === 0 || ' },
+      { name: 'V19 replay が 3 本未満の単位のずれも数える', file: 'src/replay/variants.mjs', from: '    if (list.length < LEARNABLE) continue;\n', to: '' },
+      { name: 'V20 replay が 1 秒未満の走行も数える', file: 'src/replay/variants.mjs', from: 'if (!(r.ms >= MIN_MS)) continue;', to: '' },
     ],
   },
   group: {

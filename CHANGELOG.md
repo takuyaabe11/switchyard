@@ -3,6 +3,27 @@
 All notable changes to switchyard. Versions follow `plugin.json`; Claude Code only offers an update when that
 version goes up.
 
+## 0.22.0
+
+### Changed
+- Commands matched by the built-in table are learned per tool and subcommand instead of per profile: the learned
+  duration, CPU use, memory peak and overlap slowdown of `npm test`, `npx tsc` and `python3 -m pytest` no longer share
+  one `default:batch` entry per repository. The unit is the first word (without its path) and up to three name words
+  before the first option (`python -m <module>` keeps the module); runs narrowed to a path, a file, a test id (`a::b`)
+  or a filter option (`-k`, `-t`, `-g`, `--grep`, `--filter`, `--tests`, …) are learned apart with a trailing ` …`
+  (`default:batch pytest …`). Profiles from `switchyard.json` are unchanged. The PreToolUse hook and `switchyard run`
+  compute the same name, so the hook reads the learned values under the same key. What was learned under
+  `default:batch` before is not carried over; each command learns again after two or three runs.
+  In this project's own logs, `npm test` (median 20.5 s) and `npx tsc` (median 2.9 s) had shared one entry.
+- `switchyard run --profile` accepts such a name (`default:batch npm test`) and looks up the profile by its first word.
+- `switchyard report --share` groups these names under their profile, so script names do not appear.
+
+### Added
+- `switchyard replay` compares the learning units on the user's logs: for foreground heavy runs matching the built-in
+  table (calls with a single heavy part, 1 s or longer), how far each run's time is from its unit's median, how many
+  are off by 2× or more, and how many runs sit in units with fewer than three runs, by profile name and by tool and
+  subcommand.
+
 ## 0.21.0
 
 ### Added

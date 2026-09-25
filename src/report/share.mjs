@@ -69,10 +69,12 @@ export function formatShare({ summary: s, observed, meta }) {
     if (p.profile.startsWith('cmd:')) {
       unclassifiedRuns += p.count;
     } else if (p.profile.startsWith('default:')) {
-      const got = byName.get(p.profile) ?? { count: 0, medians: [] };
+      // 学ぶ単位(default:batch npm run build:acme)は、コマンドの語が repo の中身を明かしうるので、profile の名前にまとめる
+      const name = p.profile.split(' ')[0];
+      const got = byName.get(name) ?? { count: 0, medians: [] };
       got.count += p.count;
       got.medians.push(p.medianMs);
-      byName.set(p.profile, got);
+      byName.set(name, got);
     } else {
       projectRuns += p.count;
       projectKinds += 1;
