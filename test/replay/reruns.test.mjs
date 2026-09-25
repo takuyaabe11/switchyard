@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_PROFILES } from '../../src/config/profiles.mjs';
 import { formatReport, replay } from '../../src/replay/replay.mjs';
-import { countMishaps, countSession, emptyMishaps, emptyReruns, intervalsOf, isReadOnly, stepsOf, timingOf } from '../../src/replay/reruns.mjs';
+import { countMishaps, countSession, emptyMishaps, emptyReruns, intervalsOf, isReadOnly, stepsOf, timeoutKind, timingOf } from '../../src/replay/reruns.mjs';
 
 const T0 = Date.parse('2026-09-10T00:00:00.000Z');
 const iso = (/** @type {number} */ ms) => new Date(T0 + ms).toISOString();
@@ -188,6 +188,57 @@ describe('countMishaps(1 本のセッションでも起きる事故: 時間切�
       resultWith('d', 6100, 'src/a.js: // EADDRINUSE', false),
     ]);
     assert.deepEqual([acc.portInUse.count, acc.portInUse.heavy, acc.timeouts.count], [3, 1, 0]);
+  });
+
+  it('時間切れの種類: 前景で待つ形(sleep を含む until / while・sleep だけ・tail -f・watch・gh run watch)を先に見て、次に重い走行、残りはその他', () => {
+    for (const c of [
+      'until grep -q "EXIT=" .probe/run.log; do sleep 25; done; grep passed .probe/run.log',
+      'n=0; while [ $n -lt 36 ]; do sleep 25; n=$((n+1)); done',
+      // 実際に切られた形(利用者の記録): 回数を決めた for のループ
+      'for i in $(seq 1 100); do sleep 5; done; git log --oneline -1',
+      'for i in $(seq 1 110); do n=$(git log --oneline -1 | cut -c1-8); if [ "$n" != "3c9c" ]; then break; fi; sleep 10; done',
+      'sleep 600',
+      'tail -f logs/app.log',
+      'tail -n 50 -F logs/app.log',
+      'watch -n 5 kubectl get pods',
+      'gh run watch 123',
+      // 待つループの中に重いコマンドがあっても、切られたのは待っていたから
+      'while ! npm test; do sleep 5; done',
+    ]) {
+      assert.equal(timeoutKind(c, false), 'wait', c);
+    }
+    // 重い走行と見られる呼び出しでも、待つループなら待つ形
+    assert.equal(timeoutKind('while ! npm test; do sleep 5; done', true), 'wait');
+    assert.equal(timeoutKind('npm test', true), 'heavy');
+    assert.equal(timeoutKind('curl -s https://example.com/big.tar | tar x', false), 'other');
+    assert.equal(timeoutKind('sleep 8; echo done', false), 'other');
+    assert.equal(timeoutKind('grep -rn "sleep" src | tail -5', false), 'other');
+    // ループでも待たない(sleep の無い)for は待つ形ではない
+    assert.equal(timeoutKind('for f in src/*.ts; do npx tsc --noEmit $f; done', false), 'other');
+  });
+
+  it('種類ごとの件数と時間を数え、上位のコマンドも種類ごとに出す', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'cmis-'));
+    mkdirSync(join(dir, 'p'));
+    const loop = 'until grep -q EXIT= a.log; do sleep 25; done';
+    writeFileSync(
+      join(dir, 'p', 's.jsonl'),
+      `${[
+        use('a', 'Bash', { command: loop, timeout: 600_000 }, 0),
+        resultWith('a', 600_000, 'Exit code 143\nCommand timed out after 10m 0s'),
+        bash('b', 'npm test', 700_000),
+        resultWith('b', 820_000, 'Exit code 143\nCommand timed out after 2m 0s'),
+        bash('c', 'curl -s https://example.com/big', 900_000),
+        resultWith('c', 1_020_000, 'Exit code 143\nCommand timed out after 2m 0s'),
+      ].join('\n')}\n`,
+    );
+    const r = await replay({ dir, cwdPrefix: null, since: null, profilesFor: () => DEFAULT_PROFILES, examples: 3 });
+    assert.deepEqual(r.mishaps.timeouts.kinds, { wait: { count: 1, ms: 600_000 }, heavy: { count: 1, ms: 120_000 }, other: { count: 1, ms: 120_000 } });
+    assert.deepEqual(r.mishaps.timeouts.top.map((x) => [x.kind, x.command]), [['wait', loop], ['heavy', 'npm test'], ['other', 'curl -s https://example.com/big']]);
+    const text = formatReport(r, { cwdPrefix: null, sinceDays: null, examples: 3 });
+    assert.match(text, /種類: 前景で待つループ\(sleep を含む until \/ while \/ for・tail -f など\)1 件・10分 \/ 重い走行 1 件・2分 \/ その他 1 件・2分/);
+    assert.match(text, /\[待つ\] 1 回・10分 {2}until grep/);
+    assert.match(text, /\[他\] 1 回・2分 {2}curl/);
   });
 
   it('replay が数えて文面に出す', async () => {

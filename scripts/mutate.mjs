@@ -376,6 +376,11 @@ const SUITES = {
         from: 'port is already (?:in use|allocated)',
         to: 'port is already in use',
       },
+      { name: 'R35 sleep を含む for のループを待つ形と見ない', file: 'src/replay/reruns.mjs', from: '(?:until|while|for)', to: '(?:until|while)' },
+      { name: 'R31 sleep を含む until / while / for のループを待つ形と見ない', file: 'src/replay/reruns.mjs', from: 'if (WAIT_LOOP.test(command) || WAIT_ALONE.test(command))', to: 'if (WAIT_ALONE.test(command))' },
+      { name: 'R32 待つ形より先に重い走行を見る', file: 'src/replay/reruns.mjs', from: "  if (WAIT_LOOP.test(command) || WAIT_ALONE.test(command)) return 'wait';\n  return heavy ? 'heavy' : 'other';", to: "  if (heavy) return 'heavy';\n  if (WAIT_LOOP.test(command) || WAIT_ALONE.test(command)) return 'wait';\n  return 'other';" },
+      { name: 'R33 時間切れの上位を種類ごとに出さない', file: 'src/replay/replay.mjs', from: 'key.startsWith(`${kind}\\u0001`)', to: 'true' },
+      { name: 'R34 tail -f を待つ形と見ない', file: 'src/replay/reruns.mjs', from: '|\\btail\\b[^;&|\\n]*\\s(?:-[a-zA-Z]*[fF][a-zA-Z]*|--follow)\\b', to: '' },
       {
         name: 'R20 再開したセッションが持ち越した行を 2 度数える',
         file: 'src/replay/replay.mjs',

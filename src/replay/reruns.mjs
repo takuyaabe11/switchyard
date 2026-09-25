@@ -265,16 +265,38 @@ export function timingOf(intervals, background) {
 
 /**
  * 1 本のセッションでも起きる事故: Bash の時間切れと、ポートが使用中で落ちた走行。
- * @typedef {{ command: string, count: number, ms: number }} MishapCommand
+ * @typedef {{ command: string, count: number, ms: number, kind?: TimeoutKind }} MishapCommand
  * @typedef {{
- *   timeouts: { count: number, heavy: number, atDefault: number, ms: number, rerun: number, rerunBackground: number, top: MishapCommand[] },
+ *   timeouts: { count: number, heavy: number, atDefault: number, ms: number, rerun: number, rerunBackground: number, top: MishapCommand[],
+ *     kinds: Record<TimeoutKind, { count: number, ms: number }> },
  *   portInUse: { count: number, heavy: number, top: MishapCommand[] },
  * }} Mishaps
  */
 
+/**
+ * 時間切れで切られた呼び出しの種類。
+ * - wait: 何かが終わるのを前景で待っていた(sleep を含む until / while / for のループ・sleep だけ・tail -f・watch・gh run watch)
+ * - heavy: 重い走行(テスト・ビルド)
+ * - other: それ以外
+ * 待つループの中に重いコマンドがあっても、待つ形を先に見る(切られたのは待っていたから)。
+ * @typedef {'wait' | 'heavy' | 'other'} TimeoutKind
+ */
+
+/** 前景で待つ形 */
+const WAIT_LOOP = /\b(?:until|while|for)\b[\s\S]*\bdo\b[\s\S]*\bsleep\b/;
+const WAIT_ALONE = /^\s*sleep\s+\d+(?:\.\d+)?\s*$|\btail\b[^;&|\n]*\s(?:-[a-zA-Z]*[fF][a-zA-Z]*|--follow)\b|(?:^|[;&|]\s*)watch\s|\bgh\s+run\s+watch\b/;
+
+/**
+ * @param {string} command @param {boolean} heavy @returns {TimeoutKind}
+ */
+export function timeoutKind(command, heavy) {
+  if (WAIT_LOOP.test(command) || WAIT_ALONE.test(command)) return 'wait';
+  return heavy ? 'heavy' : 'other';
+}
+
 /** 空の集計 @returns {Mishaps} */
 export const emptyMishaps = () => ({
-  timeouts: { count: 0, heavy: 0, atDefault: 0, ms: 0, rerun: 0, rerunBackground: 0, top: [] },
+  timeouts: { count: 0, heavy: 0, atDefault: 0, ms: 0, rerun: 0, rerunBackground: 0, top: [], kinds: { wait: { count: 0, ms: 0 }, heavy: { count: 0, ms: 0 }, other: { count: 0, ms: 0 } } },
   portInUse: { count: 0, heavy: 0, top: [] },
 });
 
@@ -320,8 +342,12 @@ export function countMishaps(steps, isHeavy, acc, byCommand) {
       acc.timeouts.ms += ms;
       if (heavy) acc.timeouts.heavy += 1;
       if (c.timeoutMs === null) acc.timeouts.atDefault += 1;
+      const k = timeoutKind(c.command, heavy);
+      acc.timeouts.kinds[k].count += 1;
+      acc.timeouts.kinds[k].ms += ms;
       timedOut.add(c.key);
-      bump(byCommand.timeouts, c.key, ms);
+      // 種類ごとに上位を出すので、種類を鍵の頭に付ける
+      bump(byCommand.timeouts, `${k}\u0001${c.key}`, ms);
     }
     if (s.portInUse) {
       acc.portInUse.count += 1;
