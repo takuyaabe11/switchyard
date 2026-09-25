@@ -67,6 +67,19 @@ describe('formatShare(switchyard report --share)', () => {
     assert.doesNotMatch(text, /observe mode/);
   });
 
+  it('重なりによる遅れは、倍率と本数と見込みだけを出す(どの profile かは出さない)', () => {
+    const none = formatShare({ summary: sample(), observed: null, meta: META });
+    assert.match(none, /slowdown when overlapped, learned for 0 profile\/repo pair\(s\); admitted without waiting as not slowed by overlap: 0; slowdown avoided by holding back \(estimate, not measured\): 0s over 0 run\(s\)/);
+    const runs = (/** @type {string} */ profile, /** @type {number} */ quiet, /** @type {number} */ busy) => [
+      ...[0, 1, 2].map(() => history(profile, quiet, { overlap: 'alone' })),
+      ...[0, 1, 2].map(() => history(profile, busy, { overlap: 'contended' })),
+    ];
+    const events = [...runs('acme-e2e', 10 * MIN, 13 * MIN), ...runs('default:batch', 10 * MIN, 10 * MIN), grant('x', T0, { tolerant: true })];
+    const text = formatShare({ summary: summarize({ events, hooks: [] }), observed: null, meta: META });
+    assert.match(text, /slowdown when overlapped, learned for 2 profile\/repo pair\(s\): 1x, 1\.3x; admitted without waiting/);
+    assert.equal(text.includes('acme'), false);
+  });
+
   it('観察だけのモードの記録があれば、重なりの数も出す', () => {
     const observed = { runs: 5, heavy: 4, overlapped: 3, overlapMs: 90_000, sessions: 2, measureDisturbed: 1, lockClashes: 2, hook: { background: 1, deny: 0, wrap: 0 } };
     const text = formatShare({ summary: sample(), observed, meta: { ...META, settings: {} } });

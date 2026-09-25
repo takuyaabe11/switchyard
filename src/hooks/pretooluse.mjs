@@ -12,6 +12,7 @@ import { classifiableCommand, classify, globMatch, loadProfiles } from '../confi
 import { GIT_LOCK_SUBCOMMANDS, gitSubcommand } from '../shim/decide.mjs';
 import { simpleCommands } from './shell.mjs';
 import { rightSize, usageKey } from '../core/usage.mjs';
+import { isTolerant, TOLERANT_OVERCOMMIT } from '../core/contention.mjs';
 import { t } from '../i18n.mjs';
 import { isOff } from './off.mjs';
 
@@ -249,7 +250,11 @@ export function waitExpected(snap, heavy, repo) {
     need += Math.min(Math.max(min, 1), snap.capacity);
   }
   if (need <= snap.capacity - snap.used) return false;
-  return !(heavy.length === 1 && typeof snap.spare === 'number' && need <= snap.spare);
+  if (heavy.length === 1 && typeof snap.spare === 'number' && need <= snap.spare) return false;
+  // 重なっても遅くならないと学んだ profile は、走っている相手もみな同じなら、容量の TOLERANT_OVERCOMMIT 倍まで待たずに入る(schedule.mjs)
+  const slowdown = repo === undefined || heavy.length !== 1 || heavy[0].profile === undefined ? undefined : snap.slowdown?.[usageKey(repo, heavy[0].profile)];
+  const tolerable = slowdown !== undefined && isTolerant({ slowdown }) && snap.leases.every((l) => l.cpus === 0 || l.tolerant === true) && snap.used + need <= snap.capacity * TOLERANT_OVERCOMMIT;
+  return !tolerable;
 }
 
 /**

@@ -18,7 +18,7 @@ import { t } from '../i18n.mjs';
  *   id: string, session: string, class: JobClass, cmd: string, why: string | null,
  *   cpus: number, locks: string[], phase: LeasePhase, recovering: boolean,
  *   sinceWall: number, expectedMs: number | null, escapes: string[],
- *   sizedFrom?: CpuRange | null, measuredCores?: number | null, overcommit?: boolean
+ *   sizedFrom?: CpuRange | null, measuredCores?: number | null, overcommit?: boolean, tolerant?: boolean
  * }} LeaseView
  */
 /**
@@ -34,6 +34,7 @@ import { t } from '../i18n.mjs';
  *   unacked: Record<string, Unacked[]>, badRecords: number, version: string,
  *   sized?: Record<string, number>,
  *   longest?: Record<string, number>,
+ *   slowdown?: Record<string, number>,
  *   spare?: number | null,
  *   memory?: { availableMb: number, floorMb: number } | null
  * }} Snapshot

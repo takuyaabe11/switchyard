@@ -5,6 +5,7 @@ import { basename, dirname, join } from 'node:path';
 import { EstimateBook } from '../core/estimate.mjs';
 import { UsageBook } from '../core/usage.mjs';
 import { MemoryBook } from '../core/memory.mjs';
+import { ContentionBook } from '../core/contention.mjs';
 import { ensurePrivateDir, PRIVATE_FILE_MODE } from './paths.mjs';
 
 /** @typedef {import('../core/types.mjs').State} State */
@@ -193,6 +194,17 @@ export function loadUsage(records) {
     if (r.kind !== 'history' || typeof r.repo !== 'string' || typeof r.profile !== 'string') continue;
     if (typeof r.durationMs !== 'number' || typeof r.cpus !== 'number') continue;
     book.record(typeof r.family === 'string' ? r.family : r.repo, r.profile, { durationMs: r.durationMs, cpuMs: typeof r.cpuMs === 'number' ? r.cpuMs : null, cpus: r.cpus, code: typeof r.code === 'number' ? r.code : null });
+  }
+  return book;
+}
+
+/** 記録の history 行から、repo × profile ごとの重なりによる遅れの帳簿を作る(overlap を持たない行は数えない) @param {Record<string, unknown>[]} records @returns {ContentionBook} */
+export function loadContention(records) {
+  const book = new ContentionBook();
+  for (const r of records) {
+    if (r.kind !== 'history' || typeof r.repo !== 'string' || typeof r.profile !== 'string' || typeof r.durationMs !== 'number') continue;
+    const overlap = r.overlap === 'alone' || r.overlap === 'contended' || r.overlap === 'partial' ? r.overlap : null;
+    book.record(typeof r.family === 'string' ? r.family : r.repo, r.profile, { durationMs: r.durationMs, code: typeof r.code === 'number' ? r.code : null, overlap });
   }
   return book;
 }

@@ -3,6 +3,28 @@
 All notable changes to switchyard. Versions follow `plugin.json`; Claude Code only offers an update when that
 version goes up.
 
+## 0.20.0
+
+### Added
+- switchyard learns, per command, whether overlapping with other work slows it down. For each run the daemon measures
+  how many cores the rest of the machine used meanwhile (whole-machine CPU use minus the run's own CPU time over its
+  duration) and records it with the run. From the last 20 successful runs of at least 5 s, once there are three
+  quiet ones (others under a tenth of the cores) and three overlapped ones (others at a quarter of the cores or more,
+  with the machine at least 90% busy), it takes the ratio of their median times. A command whose ratio is 1.15 or less is admitted without waiting for CPU,
+  when every run already going has a ratio that low too, locks and the memory floor allow it, no job is waiting at the
+  head of the queue, and the total share stays within twice the capacity. The PreToolUse hook takes this into account
+  when deciding whether a run will wait. Runs without CPU time (Windows), runs measured for less than half their
+  duration and runs paused for a measurement are not learned from; with `SWITCHYARD_OVERCOMMIT=0` nothing is measured.
+- `switchyard report` shows each learned ratio by profile, the admissions made without waiting this way, and an
+  estimate of the delay avoided: for runs held back for CPU whose command slows down when overlapped,
+  (ratio − 1) × duration. It is an estimate from the learned ratio, not a measurement. `--share` shows the ratios and
+  counts without naming the profiles.
+- History records now carry the job id, so a run's wait and its duration can be joined.
+- Measured on a 4-core machine ([details](docs/verification/2026-09-25-contention.md)): a CPU-bound job learned 1.93×
+  and `sleep 6` learned 1×. With the machine kept busy by other work, the fourth of four concurrent `sleep 6` runs
+  (capacity 3) waited 5 s on 0.19.0 and did not wait on 0.20.0. Without the other work, 0.19.0 did not make it wait
+  either (packing into measured spare CPU let it in), so the difference shows only when the machine is really busy.
+
 ## 0.19.0
 
 ### Added

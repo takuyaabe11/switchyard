@@ -23,7 +23,8 @@
  *   parent?: string | null,
  *   sizedFrom?: CpuRange,
  *   measuredCores?: number,
- *   memMb?: number | null
+ *   memMb?: number | null,
+ *   slowdown?: number
  * }} JobSpec
  */
 
@@ -42,6 +43,7 @@
  *   recovering: boolean,
  *   lockChild?: boolean,
  *   overcommit?: boolean,
+ *   tolerant?: boolean,
  *   held?: 'pause' | 'throttle'
  * }} Lease
  */
@@ -70,7 +72,7 @@
  * @typedef {(
  *   { type: 'request', now: number, job: JobSpec } |
  *   { type: 'started', now: number, jobId: string, pid: number, pgid: number | null } |
- *   { type: 'exit', now: number, jobId: string, code: number | null, killedByCaller: boolean, durationMs: number, cpuMs?: number | null, peakMemMb?: number | null, environmental?: string[] } |
+ *   { type: 'exit', now: number, jobId: string, code: number | null, killedByCaller: boolean, durationMs: number, cpuMs?: number | null, peakMemMb?: number | null, environmental?: string[], otherLoad?: number, overlap?: import('./contention.mjs').Overlap } |
  *   { type: 'cancel', now: number, jobId: string } |
  *   { type: 'heartbeatLost', now: number, jobId: string, alive: boolean } |
  *   { type: 'orphanGone', now: number, jobId: string } |
@@ -83,9 +85,9 @@
 
 /**
  * @typedef {(
- *   { type: 'grant', jobId: string, cpus: number, lockChild?: boolean, overcommit?: boolean } |
+ *   { type: 'grant', jobId: string, cpus: number, lockChild?: boolean, overcommit?: boolean, tolerant?: boolean } |
  *   { type: 'queued', jobId: string, position: number, reason: string, etaAt: number | null } |
- *   { type: 'history', repo: string, family?: string, profile: string, class: JobClass, cpus: number, durationMs: number, code: number | null, cpuMs?: number | null, peakMemMb?: number | null, environmental?: string[] } |
+ *   { type: 'history', jobId?: string, repo: string, family?: string, profile: string, class: JobClass, cpus: number, durationMs: number, code: number | null, cpuMs?: number | null, peakMemMb?: number | null, environmental?: string[], otherLoad?: number, overlap?: import('./contention.mjs').Overlap } |
  *   { type: 'hold', jobId: string, mode: 'pause' | 'throttle' } |
  *   { type: 'unhold', jobId: string }
  * )} Action
