@@ -96,12 +96,12 @@ describe('intervalsOf・timingOf(重い走行の時間とセッションをま�
 
   it('前景で結果を待った重い走行だけを区間にし、背景の走行は数だけ', () => {
     const { intervals, background } = intervalsOf([bash('a', 'npm test', 0), result('a', 5000), bash('b', 'ls', 6000), result('b', 6100), bash('c', 'npm test', 7000, true), result('c', 7100)].flatMap(stepsOf), heavy, 3);
-    assert.deepEqual(intervals, [{ start: T0, end: T0 + 5000, session: 3 }]);
+    assert.deepEqual(intervals, [{ start: T0, end: T0 + 5000, session: 3, command: 'npm test', cwd: '/w/app' }]);
     assert.equal(background, 1);
   });
 
   it('所要の分布と、2 本以上が同時に走っていた時間・重なった走行・最大同時を出す(つながっているだけなら重ならない)', () => {
-    const iv = (/** @type {number} */ s, /** @type {number} */ e, /** @type {number} */ session) => ({ start: s * 1000, end: e * 1000, session });
+    const iv = (/** @type {number} */ s, /** @type {number} */ e, /** @type {number} */ session) => ({ start: s * 1000, end: e * 1000, session, command: 'npm test', cwd: '/w' });
     // 2 本以上が同時なのは 5〜12 秒(7 秒。8〜10 秒は 3 本同時)。20-30 は 5-20 につながるだけ。100-200 は単独
     const tm = timingOf([iv(0, 10, 0), iv(5, 20, 1), iv(8, 12, 2), iv(20, 30, 0), iv(100, 200, 1)], 4);
     assert.equal(tm.runs, 5);

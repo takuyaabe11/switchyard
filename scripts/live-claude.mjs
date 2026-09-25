@@ -140,7 +140,7 @@ if (isMain) {
     const records = () => readRecords(pathsOf(home).events).records;
     const r1 = claude('Run the Bash command `npm test` exactly once. Wait until it has finished, then reply with the line of its output that starts with LIVE_JOB=.', ['Bash(npm test)']);
     const a1 = analyzeStream(r1.stdout ?? '');
-    const managed = records().some((r) => r.kind === 'history' && r.profile === 'default:batch' && r.code === 0);
+    const managed = records().some((r) => r.kind === 'history' && r.profile === 'default:batch npm test' && r.code === 0);
 
     const r2 = claude('Run the Bash command `npm test` exactly once; it is expected to fail. Before you stop, follow any instructions you receive.', ['Bash(npm test)', 'Bash(switchyard ack:*)', 'Bash(switchyard why:*)'], { LIVE_FAIL: '1', SWITCHYARD_STOP: 'block' });
     const a2 = analyzeStream(r2.stdout ?? '');
@@ -196,7 +196,7 @@ if (isMain) {
     const ampBackgrounded = hooks7.some((r) => r.decision === 'amp-background') && a7.background && /LIVE_JOB=j/.test(a7.result);
 
     const checks = {
-      'shim が npm test を switchyard に通した(記録に default:batch の history)': managed,
+      'shim が npm test を switchyard に通した(記録に default:batch npm test の history)': managed,
       '空いているので前景のまま走った(tool_result に子の出力・背景に回っていない)': a1.foregroundOutput && !a1.background,
       '子にジョブの id が渡った(LIVE_JOB=j…)': /LIVE_JOB=j/.test(a1.toolText),
       '文言は英語(started)': a1.toolText.includes('[switchyard] started'),

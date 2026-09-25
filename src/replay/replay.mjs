@@ -14,6 +14,7 @@ import { t } from '../i18n.mjs';
 import { duration } from '../cli/render.mjs';
 import { waitLoopOf } from '../hooks/waitloop.mjs';
 import { withoutTrailingAmpersand } from '../hooks/ampersand.mjs';
+import { compareUnits } from './variants.mjs';
 import { countMishaps, countSession, emptyMishaps, emptyReruns, intervalsOf, stepsOf, timingOf } from './reruns.mjs';
 
 /** @typedef {import('../config/profiles.mjs').NamedProfile} NamedProfile */
@@ -33,6 +34,7 @@ import { countMishaps, countSession, emptyMishaps, emptyReruns, intervalsOf, ste
  *   examples: { deny: Example[], wrap: Example[], background: Example[] },
  *   reruns: import('./reruns.mjs').Reruns,
  *   timing: import('./reruns.mjs').Timing,
+ *   units: { byProfile: import('./variants.mjs').Spread, byVariant: import('./variants.mjs').Spread },
  *   mishaps: import('./reruns.mjs').Mishaps
  * }} Report
  */
@@ -146,6 +148,7 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
     examples: { deny: [], wrap: [], background: [] },
     reruns: emptyReruns(),
     timing: timingOf([], 0),
+    units: compareUnits([], () => []),
     mishaps: emptyMishaps(),
   };
   const mishapByCommand = { timeouts: new Map(), portInUse: new Map() };
@@ -259,6 +262,11 @@ export async function replay({ dir, cwdPrefix, since, profilesFor, examples, git
     backgroundRuns += got.background;
   }
   report.timing = timingOf(intervals, backgroundRuns);
+  // 既定の表の走行を学ぶ単位ごとの所要のばらつき(profile の名前だけ / 道具とサブコマンドまで)
+  report.units = compareUnits(
+    intervals.map((iv) => ({ command: iv.command, cwd: iv.cwd, ms: iv.end - iv.start })),
+    profilesFor,
+  );
   report.reruns.top = [...rerunByCommand]
     .map(([key, v]) => ({ command: key.slice(key.indexOf('\u0000') + 1), count: v.count, ms: v.ms }))
     .sort((a, b) => b.count - a.count || b.ms - a.ms)
@@ -357,6 +365,17 @@ export function formatReport(r, { cwdPrefix, sinceDays, examples }) {
       lines.push(t(`  1 本の所要: 中央 ${duration(tm.medianMs)}・90% は ${duration(tm.p90Ms)} 以下・10 秒未満 ${tp(tm.under10s)}%・1 分未満 ${tp(tm.under60s)}%`, `  per run: median ${duration(tm.medianMs)}, 90% within ${duration(tm.p90Ms)}, under 10 s ${tp(tm.under10s)}%, under 1 min ${tp(tm.under60s)}%`));
       lines.push(t(`  Claude が結果を待った時間の合計: ${duration(tm.totalMs)}`, `  total time Claude waited for results: ${duration(tm.totalMs)}`));
       lines.push(t(`  セッションをまたいだ重なり: 他と重なった走行 ${tm.overlappedRuns} 本(${tp(tm.overlappedRuns)}%)・2 本以上が同時に走っていた時間 ${duration(tm.overlapMs)}(待った時間の合計の ${mp(tm.overlapMs)}%)・最大同時 ${tm.maxConcurrent} 本`, `  overlap across sessions: ${tm.overlappedRuns} runs overlapped another (${tp(tm.overlappedRuns)}%); 2 or more ran at once for ${duration(tm.overlapMs)} (${mp(tm.overlapMs)}% of the total wait); at most ${tm.maxConcurrent} at once`));
+    }
+    const un = r.units;
+    if (un.byProfile.runs > 0) {
+      const row = (/** @type {import('./variants.mjs').Spread} */ x) =>
+        t(
+          `単位 ${x.units} 個・3 本以上たまった単位の走行 ${x.learnableRuns} 本(${((x.learnableRuns / x.runs) * 100).toFixed(1)}%)・その所要は単位の中央値から典型で ×${x.typicalFactor} ずれる・2 倍以上ずれた走行 ${x.over2x} 本`,
+          `${x.units} units; ${x.learnableRuns} runs in units with 3 or more (${((x.learnableRuns / x.runs) * 100).toFixed(1)}%); their time typically ×${x.typicalFactor} off the unit's median; ${x.over2x} runs off by 2x or more`,
+        );
+      lines.push(t(`学ぶ単位(既定の表に当たる前景の重い走行 ${un.byProfile.runs} 本。重い部分が 1 つだけの呼び出しに限り、1 秒未満は除く)`, `Learning units (${un.byProfile.runs} foreground heavy runs matching the built-in table; calls with a single heavy part only, under 1 s left out)`));
+      lines.push(t(`  profile の名前だけ(今): ${row(un.byProfile)}`, `  by profile name only (now): ${row(un.byProfile)}`));
+      lines.push(t(`  道具とサブコマンドまで: ${row(un.byVariant)}`, `  by tool and subcommand: ${row(un.byVariant)}`));
     }
     const mt = r.mishaps.timeouts;
     lines.push(

@@ -184,12 +184,13 @@ export function countSession(steps, isHeavy, acc, byCommand) {
 
 /**
  * 前景で結果を待った重い走行の時間の区間(始まり = Bash の呼び出し、終わり = その結果)。背景の走行は結果がすぐ返り終わりが分からないので数だけ。
- * @typedef {{ start: number, end: number, session: number }} Interval
+ * command・cwd は、学ぶ単位ごとの所要のばらつきを数えるのに使う(src/replay/variants.mjs)
+ * @typedef {{ start: number, end: number, session: number, command: string, cwd: string }} Interval
  * @param {Step[]} steps @param {(call: { command: string, cwd: string }) => boolean} isHeavy @param {number} session 記録の番号
  * @returns {{ intervals: Interval[], background: number }}
  */
 export function intervalsOf(steps, isHeavy, session) {
-  /** @type {Map<string, number>} */
+  /** @type {Map<string, { at: number, command: string, cwd: string }>} */
   const open = new Map();
   /** @type {Interval[]} */
   const intervals = [];
@@ -198,12 +199,12 @@ export function intervalsOf(steps, isHeavy, session) {
     if (s.kind === 'bash') {
       if (!isHeavy({ command: s.command, cwd: s.cwd })) continue;
       if (s.background) background += 1;
-      else if (Number.isFinite(s.at)) open.set(s.id, s.at);
+      else if (Number.isFinite(s.at)) open.set(s.id, { at: s.at, command: s.command, cwd: s.cwd });
     } else if (s.kind === 'result') {
-      const start = open.get(s.id);
-      if (start === undefined) continue;
+      const o = open.get(s.id);
+      if (o === undefined) continue;
       open.delete(s.id);
-      if (Number.isFinite(s.at) && s.at >= start) intervals.push({ start, end: s.at, session });
+      if (Number.isFinite(s.at) && s.at >= o.at) intervals.push({ start: o.at, end: s.at, session, command: o.command, cwd: o.cwd });
     }
   }
   return { intervals, background };

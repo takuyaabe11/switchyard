@@ -94,7 +94,9 @@ overlapped, it says so, and you can take it out with `switchyard uninstall`.
   `SWITCHYARD_THREAD_ENV=0` turns this off.
 - **It learns.** After two runs of the same command it knows how much CPU and memory that run really needs and sizes
   its share to that. Git worktrees of the same repository share what was learned, so a new worktree
-  does not start from scratch.
+  does not start from scratch. Commands from the built-in table are learned per tool and subcommand (`npm test`,
+  `npx tsc`, `python3 -m pytest`), with runs narrowed to a file or a test name (`pytest tests/a.py`, `-k login`)
+  kept apart, so a two-second type check and a twenty-second test suite do not share one estimate.
 - **Runs that overlap without slowing down are not held back.** For each run, switchyard measures how many cores the
   rest of the machine used meanwhile. Once a command has at least three quiet runs and three runs beside other work
   that kept the machine full, it compares their median times. A command whose runs beside others took at
@@ -517,7 +519,9 @@ node bin/switchyard.mjs replay --since 14d
   Vitest の `VITEST_MAX_THREADS`/`FORKS`/`WORKERS`)。自分で決めた値がいつも勝つ。機械を独り占めしている走行には全コアを
   渡すので、単独の走行が遅くなることはない。`SWITCHYARD_THREAD_ENV=0` で止める。
 - **学ぶ。** 同じコマンドを 2 回走らせると、その走行が実際に使う CPU とメモリが分かり、取り分をそれに合わせる。同じ repo の
-  git worktree は学んだことを分け合うので、新しい worktree が学び直すことはない。
+  git worktree は学んだことを分け合うので、新しい worktree が学び直すことはない。既定の表のコマンドは、道具とサブコマンドごと
+  (`npm test`・`npx tsc`・`python3 -m pytest`)に学び、ファイルやテストの名前で絞った走行(`pytest tests/a.py`・`-k login`)は
+  別に学ぶ。2 秒の型検査と 20 秒のテストが、同じ見込みを分け合わない。
 - **重なっても遅くならない走行は待たせない。** 走行ごとに、その間に機械の他の処理が使っていたコア数を測る。同じコマンドに
   「静か」な走行と、機械が埋まる中で他と取り合った走行がそれぞれ 3 本以上たまると、所要の中央値を比べる。重なっても
   1.15 倍以内で終わるコマンドは、CPU の空きを待たずに走らせる(走っている相手もみな同じ種類で、鍵とメモリが許し、割り振りの合計が

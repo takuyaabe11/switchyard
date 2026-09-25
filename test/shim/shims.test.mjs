@@ -154,7 +154,7 @@ describe('shims(設計 §9.1)', { skip: POSIX_ONLY }, () => {
     const r = await sh('./node_modules/.bin/vitest run', { cwd, home });
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, /^fake-vitest run job=j\S+$/m);
-    assert.deepEqual(history(home).map((h) => h.profile), ['default:batch']);
+    assert.deepEqual(history(home).map((h) => h.profile), ['default:batch npx vitest run']);
   });
 
   it('python は -m pytest のときだけ分類器にかけ、それ以外は node を起動せずに本物へ直行する', async () => {
@@ -171,7 +171,7 @@ describe('shims(設計 §9.1)', { skip: POSIX_ONLY }, () => {
     const r = await sh('python3 -m pytest -q', { cwd, home, path: `${SHIMS}:${fake}:${BASE_PATH}` });
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, /^fake-python3 -m pytest -q job=j\S+$/m);
-    assert.deepEqual(history(home).map((h) => h.profile), ['default:batch']);
+    assert.deepEqual(history(home).map((h) => h.profile), ['default:batch python3 -m pytest']);
   });
 
   it('php は artisan test と vendor/bin の実行ファイルのときだけ分類器にかけ、shebang で起動した phpunit も包む', async () => {
@@ -199,7 +199,7 @@ describe('shims(設計 §9.1)', { skip: POSIX_ONLY }, () => {
     const unit = await sh('./vendor/bin/phpunit --filter Foo', { cwd, home, path: `${SHIMS}:${fake}:${BASE_PATH}` });
     assert.equal(unit.code, 0, unit.stderr);
     assert.match(unit.stdout, /^fake-php \.\/vendor\/bin\/phpunit --filter Foo job=j\S+$/m);
-    assert.deepEqual(history(home).map((h) => h.profile), ['default:batch', 'default:batch']);
+    assert.deepEqual(history(home).map((h) => h.profile), ['default:batch php artisan test', 'default:batch phpunit …']);
   });
 
   it('switchyard.json が無い repo では、既定表に無い語は node を起動せずに本物へ直行する', async () => {
@@ -235,7 +235,7 @@ describe('shims(設計 §9.1)', { skip: POSIX_ONLY }, () => {
     const r = await sh('npm test', { cwd: plainDir(), home });
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, /^fake-npm test job=j\S+ in=1 held=none$/m);
-    assert.deepEqual(history(home).map((h) => [h.profile, h.code]), [['default:batch', 0]]);
+    assert.deepEqual(history(home).map((h) => [h.profile, h.code]), [['default:batch npm test', 0]]);
   });
 
   it('管理対象でなければ、本物をそのまま実行する', async () => {
