@@ -113,7 +113,8 @@ On a 4-core, 16 GB machine ([0.6–0.8](docs/verification/2026-09-24-effect.md),
 ## What it does not do
 
 - It does not make the machine faster or use less CPU in total. It decides the order, so runs stop fighting.
-- It does not help a single session running one thing at a time.
+- For a single session running one thing at a time there is no queue to sort; what remains is the help with the Bash
+  time limit, waiting loops and ports in use (above) and the clue on failed runs.
 - The first one or two runs of a new command are handled conservatively: in the test above, 24.4 s instead of 19.4 s
   before switchyard had learned the suite.
 - It only queues commands it recognizes. For others (`npm run e2e`, a custom script), add them to a
@@ -162,12 +163,13 @@ What is weaker, because Windows has no process groups and Git Bash does not repo
 - Children that leave the run are not detected, and `switchyard probe` is not available.
 - Run sizes are not learned from CPU use (right-sizing), and memory admission has no per-run peaks to learn from.
 
-Once installed, every new Claude Code session gets three hooks:
+Once installed, every new Claude Code session gets four hooks:
 
 | Hook | What it does |
 |---|---|
 | `SessionStart` | Puts `shims/` at the front of `PATH` for the session |
-| `PreToolUse` (Bash) | Sends a CPU-holding run to the background when it would have to wait (a queue, a measurement, a held lock, not enough free CPU); wraps a heavy command the shims cannot see (`./gradlew test`) in `switchyard run --`; rejects bypasses that call the real binary by path. `SWITCHYARD_BACKGROUND=always` sends every heavy run to the background, `never` sends none. A small `sh`/`awk` sieve answers commands that name no heavy tool (`ls`, `git status`, `node -e`) in about 4 ms without starting Node |
+| `PreToolUse` (Bash) | Sends a CPU-holding run to the background when it would have to wait (a queue, a measurement, a held lock, not enough free CPU); wraps a heavy command the shims cannot see (`./gradlew test`) in `switchyard run --`; rejects bypasses that call the real binary by path; gives more time to a command cut off by the time limit before, or to a heavy run whose learned time exceeds it; sends a loop waiting in the foreground to the background. `SWITCHYARD_BACKGROUND=always` sends every heavy run to the background, `never` sends none. A small `sh`/`awk` sieve answers commands that name no heavy tool (`ls`, `git status`, `node -e`) in about 4 ms without starting Node |
+| `PostToolUseFailure` (Bash) | When a Bash call failed on the time limit, remembers the command and tells Claude it was the limit; when it failed on a port in use, tells Claude which process holds the port. A `sh` sieve starts Node only when the failure mentions one of these |
 | `Stop` | Tells you when one of the session's runs ended in a way nobody has looked at (`SWITCHYARD_STOP=block` holds the session back instead) |
 
 ## Commands
@@ -301,7 +303,7 @@ changed in each release is in [CHANGELOG.md](CHANGELOG.md).
 
 ## Turning it off, and taking it out
 
-switchyard installs three hooks, and one of them can stop you: `PreToolUse` refuses a command that calls a shimmed
+switchyard installs four hooks, and one of them can stop you: `PreToolUse` refuses a command that calls a shimmed
 binary by path or overrides the environment to get past the shim, and rewrites a lone `./gradlew test`-style command
 to `switchyard run -- …` (Claude Code then asks for permission on the rewritten command) (`Stop` only tells you something, unless you set
 `SWITCHYARD_STOP=block`). The ways out:
@@ -381,7 +383,7 @@ nothing else.
 - **How much should a shared machine give it?** switchyard orders only the runs that go through it; other people's
   jobs are only counted as load. On a shared server, cap it: `SWITCHYARD_CAPACITY=8`, or `"reserve": 24` in
   `~/.switchyard/config.json` on a 32-core machine, then `switchyard restart`.
-- **What does installing change in my settings?** Nothing in `settings.json`. The three hooks come from the plugin's
+- **What does installing change in my settings?** Nothing in `settings.json`. The four hooks come from the plugin's
   own `hooks/hooks.json` and stop when the plugin is uninstalled. The only thing written outside `~/.switchyard` is one
   `PATH` line in the session environment file Claude Code provides (`CLAUDE_ENV_FILE`), which `switchyard uninstall`
   removes.
@@ -519,7 +521,7 @@ node bin/switchyard.mjs replay --since 14d
 ## しないこと
 
 - 機械を速くしたり、CPU の総量を減らしたりはしない。順番を決めて、走行同士が取り合わないようにするだけ。
-- 1 本のセッションで 1 つずつ走らせる使い方には効かない。
+- 1 本のセッションで 1 つずつ走らせる使い方では、並べ替える待ち列が無い。残るのは、Bash の時間切れ・待つループ・使用中のポートへの助け(上を参照)と、失敗に添える手がかり。
 - 新しいコマンドの最初の 1〜2 回は控えめに扱う。上の実験では、学ぶ前は 19.4 秒のところが 24.4 秒だった。
 - 順番待ちに乗せるのは見分けられるコマンドだけ。それ以外(`npm run e2e`・自作のスクリプト)は `switchyard.json`
   に書く。`switchyard init` が自分の履歴から候補を出す。
@@ -565,12 +567,13 @@ shim が PATH に載らないので、重い走行は管理されない。Git �
 - 走行から抜けた子を見つけない。`switchyard probe` は使えない。
 - CPU の使い方から割り振りを小さくする学習(right-sizing)をしない。メモリの受け入れも、走行ごとのピークを学ばない。
 
-入れると、新しいセッションごとに 3 つの hook が付く。
+入れると、新しいセッションごとに 4 つの hook が付く。
 
 | Hook | すること |
 |---|---|
 | `SessionStart` | そのセッションの `PATH` の先頭に `shims/` を足す |
-| `PreToolUse` (Bash) | CPU を持つ走行が待たされる見込み(待ち列・計測・使われている鍵・CPU の空き不足)のときだけ背景実行に回す。shim から見えない重いコマンド(`./gradlew test`)を `switchyard run --` で包む。本物の実行ファイルをパスで直に呼ぶ抜け道を拒否する。`SWITCHYARD_BACKGROUND=always` で重い走行を必ず背景へ、`never` で回さない。重い道具の名前を含まないコマンド(`ls`・`git status`・`node -e`)は、`sh`/`awk` のふるいが Node を起動せずに約 4ms で通す |
+| `PreToolUse` (Bash) | CPU を持つ走行が待たされる見込み(待ち列・計測・使われている鍵・CPU の空き不足)のときだけ背景実行に回す。shim から見えない重いコマンド(`./gradlew test`)を `switchyard run --` で包む。本物の実行ファイルをパスで直に呼ぶ抜け道を拒否する。前に時間切れで切られたコマンドと、学んだ所要が時間切れを超える重い走行の時間切れを延ばす。前景で待つループを背景へ回す。`SWITCHYARD_BACKGROUND=always` で重い走行を必ず背景へ、`never` で回さない。重い道具の名前を含まないコマンド(`ls`・`git status`・`node -e`)は、`sh`/`awk` のふるいが Node を起動せずに約 4ms で通す |
+| `PostToolUseFailure` (Bash) | Bash の呼び出しが時間切れで切られたら、コマンドを覚え、時間切れだったと Claude に伝える。使用中のポートで落ちたら、握っているプロセスを伝える。`sh` のふるいが、失敗の文面にこれらが無ければ Node を起動しない |
 | `Stop` | そのセッションの走行に、まだ誰も確かめていない終わり方があれば知らせる(`SWITCHYARD_STOP=block` なら止まるのを差し戻す) |
 
 ## コマンド
@@ -671,7 +674,7 @@ VS Code の拡張でも同じで、`/plugins` で Manage plugins の画面が開
 
 ## 切る・外す
 
-switchyard は hook を 3 つ入れる。作業を止めうるのは `PreToolUse` だけで、shim の語の実行ファイルをパスで直に呼ぶコマンドと、環境変数で shim を素通りさせるコマンドを拒否し、1 行だけの `./gradlew test` のような形を `switchyard run -- …` に書き換える(Claude Code は書き換えた後のコマンドで承認を求める)(`Stop` は知らせるだけ。`SWITCHYARD_STOP=block` のときだけ差し戻す)。逃げ道:
+switchyard は hook を 4 つ入れる。作業を止めうるのは `PreToolUse` だけで、shim の語の実行ファイルをパスで直に呼ぶコマンドと、環境変数で shim を素通りさせるコマンドを拒否し、1 行だけの `./gradlew test` のような形を `switchyard run -- …` に書き換える(Claude Code は書き換えた後のコマンドで承認を求める)(`Stop` は知らせるだけ。`SWITCHYARD_STOP=block` のときだけ差し戻す)。逃げ道:
 
 | したいこと | すること |
 |---|---|
@@ -742,7 +745,7 @@ switchyard は hook を 3 つ入れる。作業を止めうるのは `PreToolUse
 - **共有の機械では、どれだけ渡せばよいか。** switchyard が並べるのは自分を通った走行だけで、他の人のジョブは負荷として数えるだけ。
   共有のサーバでは上限を決める: 32 コアの機械なら `SWITCHYARD_CAPACITY=8`、または `~/.switchyard/config.json` に `"reserve": 24`。
   その後 `switchyard restart`。
-- **入れると設定の何が変わるか。** `settings.json` には何も書かない。3 つの hook は plugin 自身の `hooks/hooks.json` から来て、
+- **入れると設定の何が変わるか。** `settings.json` には何も書かない。4 つの hook は plugin 自身の `hooks/hooks.json` から来て、
   plugin を外せば止まる。`~/.switchyard` の外に書くのは、Claude Code が渡すセッションの環境ファイル(`CLAUDE_ENV_FILE`)の
   `PATH` の 1 行だけで、`switchyard uninstall` が取り除く。
 - **GPU は。** 測りも並べもしない。鍵の名前で、同じカードを 2 つの走行が使わないようにはできる(profile に `"locks": ["gpu:0"]`)。
