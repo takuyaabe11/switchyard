@@ -3,9 +3,18 @@
 All notable changes to switchyard. Versions follow `plugin.json`; Claude Code only offers an update when that
 version goes up.
 
-## Unreleased
+## 0.19.0
 
 ### Added
+- A loop that waits in the foreground for something else to finish — `until`, `while` or `for` with a `sleep` inside,
+  `sleep` alone over a minute, or `gh run watch` — is sent to the background by the PreToolUse hook. There it has no
+  time limit, and Claude Code tells Claude when it ends, so it is no longer cut off after 10 minutes. On one heavy
+  user's month such loops were the largest share of the 25 hours spent in Bash calls cut off by the time limit.
+  A loop is left alone when its estimate (rounds times sleep) is a minute or less, when it repeats a condition every
+  few seconds (a sleep under 5 s), or when it can never end by itself (`while true` without `break`, `tail -f`,
+  `watch`), since in the background nobody would stop it. `SWITCHYARD_WAIT_LOOPS=0` turns it off.
+- `switchyard replay` counts the calls that would be sent to the background this way, and `switchyard report` (and
+  `--share`) counts the ones that were.
 - `switchyard replay` sorts Bash calls cut off by the time limit into three kinds, each with its count and time:
   loops waiting in the foreground for something else to finish (`until`/`while`/`for` with `sleep`, `sleep` alone,
   `tail -f`, `watch`, `gh run watch`), heavy runs, and the rest. It shows the most frequent commands of each kind, so

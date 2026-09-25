@@ -9,6 +9,7 @@ import { repoFamily, repoRoot } from '../config/context.mjs';
 import { preToolUse, waitExpected } from './pretooluse.mjs';
 import { postToolUseFailure } from './failure.mjs';
 import { guardTimeout, neededTime, normalized, readTimedOut } from './timeouts.mjs';
+import { backgroundWaitLoop } from './waitloop.mjs';
 import { usageKey } from '../core/usage.mjs';
 import { sessionStart, stop } from './session.mjs';
 import { t } from '../i18n.mjs';
@@ -168,6 +169,11 @@ export async function runHook(event, raw, { write = (s) => process.stdout.write(
       }
       recordPreToolUse(input, out, env);
       out = withTimeoutGuard(input, out, env, { heavy, snap, learn });
+      // 前景で待つループ(sleep を含む until / while / for)は背景へ回す。時間切れで切られず、終われば Claude に知らせが届く
+      const ti = /** @type {Record<string, unknown>} */ (typeof input.tool_input === 'object' && input.tool_input !== null ? input.tool_input : {});
+      const w = backgroundWaitLoop(ti, out, env);
+      if (w.applied) recordHook(input, env, { decision: 'wait-background', estimateMs: w.estimateMs });
+      out = w.out;
       if (out !== null) write(JSON.stringify(out));
       return;
     }
