@@ -64,6 +64,12 @@ overlapped, it says so, and you can take it out with `switchyard uninstall`.
   heavy run switchyard has seen finish gets 1.5 times its longest time; one that needs more than the ceiling runs in the
   background instead. A command that has never ended by itself (watch mode, a dev server) is never sent to the
   background this way. `SWITCHYARD_TIMEOUT_GUARD=0` turns this off. This helps with a single session too.
+- **A loop waiting in the foreground runs in the background instead.** Claude often waits for something it started
+  with a loop such as `until grep -q DONE run.log; do sleep 25; done`. In the foreground that loop is cut off at the
+  10-minute limit and blocks the session meanwhile. switchyard sends it to the background, where there is no limit and
+  Claude is told when it ends. Short loops (a minute or less by rounds times sleep, or a check every few seconds) stay
+  in the foreground, and a loop that can never end by itself (`while true` without `break`, `tail -f`, `watch`) is
+  never sent there. `SWITCHYARD_WAIT_LOOPS=0` turns this off.
 - **A port already in use is traced to its holder.** When a Bash call fails with `EADDRINUSE`, `address already in use`
   or Docker's `port is already allocated`, Claude is told which process holds the port — its pid, command line, working
   directory and how long it has run (or that a Docker container publishes it) — and that the failure is not the code's,
@@ -470,6 +476,11 @@ node bin/switchyard.mjs replay --since 14d
   走るときは、時間切れを倍にする(上限の 10 分まで)。自分で終わるのを見たことのある重い走行は、最長の所要の 1.5 倍にし、
   上限でも足りなければ背景で走らせる。自分では終わったことの無いコマンド(watch モード・dev サーバー)は、こうして背景へ
   回すことはしない。`SWITCHYARD_TIMEOUT_GUARD=0` で止める。セッションが 1 本でも効く。
+- **前景で待つループは、背景で走らせる。** Claude は、自分が起動したものの終わりを `until grep -q DONE run.log; do sleep 25; done`
+  のようなループで待つことが多い。前景ではこのループが 10 分の上限で切られ、その間セッションも止まる。switchyard はこれを背景へ回す。
+  背景には時間切れが無く、終われば Claude に知らせが届く。短いループ(回数 × sleep の見積もりが 1 分以下・数秒おきに確かめる形)は
+  前景のままにし、自分では終われないループ(`break` の無い `while true`・`tail -f`・`watch`)は背景へ回さない。
+  `SWITCHYARD_WAIT_LOOPS=0` で止める。
 - **使用中のポートは、握っているプロセスを突き止める。** Bash の呼び出しが `EADDRINUSE`・`address already in use`・
   Docker の `port is already allocated` で落ちたら、そのポートを握っているプロセス(pid・コマンドライン・作業場所・
   走っている時間。Docker のコンテナが公開していればそう)と、コードのせいではないことを Claude に伝える。テストを直しに

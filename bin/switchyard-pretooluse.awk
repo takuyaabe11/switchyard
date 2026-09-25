@@ -53,6 +53,12 @@ END {
   if (cmd ~ /(^|[^A-Za-z0-9_-])(npm|npx|cargo|pytest|go|make|yarn|pnpm|bun|python|python3|uv|poetry|mvn|gradle|dotnet|bundle|rspec|deno|xcodebuild|bazel|bazelisk|nx|turbo|php|composer|phpunit|pest|paratest|switchyard|gradlew|mvnw|node_modules)([^A-Za-z0-9_-]|$)/) exit 1
   # git は index を書き換えるサブコマンド(src/shim/decide.mjs の GIT_LOCK_SUBCOMMANDS)の語があるときだけ見る(git status・git diff は素通し)
   if (ENVIRON["SWITCHYARD_GIT"] == "1" && cmd ~ /(^|[^A-Za-z0-9_-])git([^A-Za-z0-9_-]|$)/ && cmd ~ /(^|[^A-Za-z0-9_-])(commit|merge|rebase|cherry-pick|stash|am|add|rm|mv|reset|restore|checkout|switch|pull|revert)([^A-Za-z0-9_-]|$)/) exit 1
+  # 前景で待つ形(sleep を含む until / while / for のループ・sleep だけ・gh run watch)は、判定が背景へ回すので node へ渡す
+  # (src/hooks/waitloop.mjs。ループの形と回数は node の側で確かめる)
+  if (ENVIRON["SWITCHYARD_WAIT_LOOPS"] != "0") {
+    if (cmd ~ /(^|[^A-Za-z0-9_-])(until|while|for)([^A-Za-z0-9_-]|$)/ && cmd ~ /(^|[^A-Za-z0-9_-])do([^A-Za-z0-9_-]|$)/ && cmd ~ /(^|[^A-Za-z0-9_-])sleep([^A-Za-z0-9_-]|$)/) exit 1
+    if (cmd ~ /^[ \t]*sleep[ \t]+[0-9]/ || cmd ~ /(^|[^A-Za-z0-9_-])gh[ \t]+run[ \t]+watch([^A-Za-z0-9_-]|$)/) exit 1
+  }
   cwd = field(s, "cwd")
   if (cwd ~ /^[A-Za-z]:(\\\\|\/)/) {
     gsub(/\\\\/, "/", cwd)

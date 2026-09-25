@@ -9,6 +9,7 @@
 //   4. Bash(switchyard run:*) と広く許していても、中身が重い走行の形でない switchyard run は承認を求められ、-p では走らない
 //   5. 1 本のセッションでも起きる事故: ポートが使用中で落ちたら握っているプロセスを Claude に伝え(PostToolUseFailure)、
 //      Bash の時間切れで切られたコマンドは覚えて、次に同じコマンドが走るとき時間切れを延ばす(PreToolUse)
+//   6. 前景で待つループ(sleep を含む for)は背景へ回り、Bash の時間切れ(30 秒)で切られずに最後まで走る
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -174,6 +175,15 @@ if (isMain) {
     const extended = hooks.some((r) => r.decision === 'timeout') && hooks.some((r) => r.decision === 'extend' && r.timeoutMs === 6000);
     const lastFinished = (a5.toolText.match(/Command timed out after/g) ?? []).length === 1;
 
+    const r6 = claude(
+      'Run this exact Bash command once in the foreground (do not set run_in_background yourself), with the Bash tool timeout parameter set to 30000: for i in $(seq 1 13); do sleep 5; done; echo WAITED_DONE  -- Do not change the command. If it ends up running in the background, use the tool that reads a background task\'s output and block until the task has finished (do not end your turn before that). Then reply with its last output line.',
+      // Claude Code は複合コマンドを単純コマンドごとに許可を確かめるので、中の seq・sleep・echo を許す
+      ['Bash(seq:*)', 'Bash(sleep:*)', 'Bash(echo:*)', 'BashOutput', 'TaskOutput'],
+    );
+    const a6 = analyzeStream(r6.stdout ?? '');
+    const hooks6 = existsSync(pathsOf(home).hooks) ? readRecords(pathsOf(home).hooks).records : [];
+    const waitBackgrounded = hooks6.some((r) => r.decision === 'wait-background' && r.estimateMs === 65_000) && a6.background && !/Command timed out after/.test(a6.toolText) && a6.result.includes('WAITED_DONE');
+
     const checks = {
       'shim が npm test を switchyard に通した(記録に default:batch の history)': managed,
       '空いているので前景のまま走った(tool_result に子の出力・背景に回っていない)': a1.foregroundOutput && !a1.background,
@@ -184,8 +194,9 @@ if (isMain) {
       'switchyard run:* を許していても、中身が重い走行でない包みは走らなかった(Claude は実際に試した)': a4.commands.some((c) => c.includes('switchyard run -- touch unvetted.txt')) && !unvettedRan,
       'ポートが使用中で落ちたら、握っているプロセス(pid)が Claude に届いた': portTraced,
       '時間切れで切られたコマンドを覚え、次は時間切れを倍に延ばして走り切った': extended && lastFinished,
+      '前景で待つループは背景へ回り、時間切れで切られずに最後まで走った': waitBackgrounded,
     };
-    console.log(JSON.stringify({ checks, costUsd: [a1.costUsd, a2.costUsd, a3.costUsd, a4.costUsd, a5.costUsd], result1: a1.result, result2: a2.result, result3: a3.result, result4: a4.result, result5: a5.result, work, home }, null, 2));
+    console.log(JSON.stringify({ checks, costUsd: [a1.costUsd, a2.costUsd, a3.costUsd, a4.costUsd, a5.costUsd, a6.costUsd], result6: a6.result, result1: a1.result, result2: a2.result, result3: a3.result, result4: a4.result, result5: a5.result, work, home }, null, 2));
     process.exitCode = Object.values(checks).every(Boolean) ? 0 : 1;
   } finally {
     stopDaemon(home);

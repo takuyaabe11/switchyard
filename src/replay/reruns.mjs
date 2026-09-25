@@ -10,6 +10,7 @@
 import { basename } from 'node:path';
 import { simpleCommands } from '../hooks/shell.mjs';
 import { PORT_IN_USE } from '../hooks/ports.mjs';
+import { WAIT_LOOP } from '../hooks/waitloop.mjs';
 
 /** ファイルを書き換えるツール */
 export const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -283,7 +284,6 @@ export function timingOf(intervals, background) {
  */
 
 /** 前景で待つ形 */
-const WAIT_LOOP = /\b(?:until|while|for)\b[\s\S]*\bdo\b[\s\S]*\bsleep\b/;
 const WAIT_ALONE = /^\s*sleep\s+\d+(?:\.\d+)?\s*$|\btail\b[^;&|\n]*\s(?:-[a-zA-Z]*[fF][a-zA-Z]*|--follow)\b|(?:^|[;&|]\s*)watch\s|\bgh\s+run\s+watch\b/;
 
 /**
